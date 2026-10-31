@@ -1,0 +1,27 @@
+# dependencies and builds
+node_modules/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# env and secrets (encrypted *.enc.env files are committed; plaintext never)
+.env
+*.env
+!*.example.env
+!*.enc.env
+infra/env/tenants/*.env
+!infra/env/tenants/*.enc.env
+
+# rendered tenant files
+infra/compose/tenants/*.yml
+infra/librechat/rendered/
+
+# private brand material (never public)
+brand-private/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
