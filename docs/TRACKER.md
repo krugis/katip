@@ -11,16 +11,16 @@ How to use this tracker:
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P0-01 | Monorepo skeleton: pnpm workspaces, Turborepo, TS strict, ESLint, Prettier, Vitest | 01 | P0 | review | – | `pnpm lint && pnpm typecheck && pnpm test` pass on empty apps | Monorepo, TS strict, ESLint, Prettier, Vitest |
-| P0-02 | CI `ci.yml`: install, lint, typecheck, tests, licence check, gitleaks | 01 | P0 | review | P0-01 | PR shows all checks; a test secret fails the build | CI: build, lint, typecheck, test, SPDX, licences; secret scan via secretlint (MIT) instead of gitleaks |
+| P0-01 | Monorepo skeleton: pnpm workspaces, Turborepo, TS strict, ESLint, Prettier, Vitest | 01 | P0 | review | – | `pnpm lint && pnpm typecheck && pnpm test` pass on empty apps | Monorepo, TS strict, ESLint, Prettier, Vitest (#1) |
+| P0-02 | CI `ci.yml`: install, lint, typecheck, tests, licence check, gitleaks | 01 | P0 | review | P0-01 | PR shows all checks; a test secret fails the build | CI: build, lint, typecheck, test, SPDX, licences; secret scan via secretlint (MIT) instead of gitleaks (#1) |
 | P0-03 | Dev compose `platform.yml` + `dev.yml`: traefik, postgres+pgvector, mongo, meili, valkey, keycloak, mailpit | 01 | P0 | todo | P0-01 | `pnpm dev:up` healthy in under 10 min; only Traefik publishes ports | |
 | P0-04 | Pin LibreChat version; `tenant.tmpl.yml`, `librechat.tmpl.yaml`; script renders `demo` tenant | 01, 07 | P0 | todo | P0-03 | `https://demo.localhost` loads LibreChat | |
-| P0-05 | LiteLLM self-built image (pinned tag + checksum) + `config.yaml` with 2 standard + 1 premium + 1 embedding model | 03 | P0 | doing | P0-03 | `curl litellm:4000/v1/chat/completions` works internally | config.yaml + pinned, checksum-verified Dockerfile; model ids to verify; compose pending |
-| P0-06 | SOPS + age; `*.example.env`; Zod env validation in `packages/shared` | 01, 10 | P0 | doing | P0-01 | App fails fast on missing env; encrypted env decrypts in dev | Zod env validation done; SOPS/age setup pending |
-| P0-07 | `packages/shared`: pino logger (PII-safe), OTel setup, problem+json errors | 01 | P0 | doing | P0-01 | Used by a hello-world Fastify app with a trace in console exporter | PII-safe pino logger + problem+json/OpenAI errors done; OTel pending |
-| P0-08 | Mock OpenAI-compatible provider (streaming, configurable errors and latency) for tests | 03 | P0 | review | P0-01 | Can simulate 500/timeout; used in integration tests | apps/mock-llm: echo, SSE streaming, failure injection |
+| P0-05 | LiteLLM self-built image (pinned tag + checksum) + `config.yaml` with 2 standard + 1 premium + 1 embedding model | 03 | P0 | doing | P0-03 | `curl litellm:4000/v1/chat/completions` works internally | config.yaml + pinned, checksum-verified Dockerfile; model ids to verify; compose pending (#1) |
+| P0-06 | SOPS + age; `*.example.env`; Zod env validation in `packages/shared` | 01, 10 | P0 | doing | P0-01 | App fails fast on missing env; encrypted env decrypts in dev | Zod env validation done; SOPS/age setup pending (#1) |
+| P0-07 | `packages/shared`: pino logger (PII-safe), OTel setup, problem+json errors | 01 | P0 | doing | P0-01 | Used by a hello-world Fastify app with a trace in console exporter | PII-safe pino logger + problem+json/OpenAI errors done; OTel pending (#1) |
+| P0-08 | Mock OpenAI-compatible provider (streaming, configurable errors and latency) for tests | 03 | P0 | review | P0-01 | Can simulate 500/timeout; used in integration tests | apps/mock-llm: echo, SSE streaming, failure injection (#1) |
 | P0-09 | Dev/test host (Hetzner AX42): Ansible base hardening, Tailscale, Docker | 10 | P1 | todo | – | SSH only via Tailscale; external scan shows 443 only | |
-| P0-10 | Licence setup: `LICENSE` (AGPL-3.0), `COMMERCIAL-LICENSE.md` (how to obtain), SPDX headers + CI check, `docs/adr/` with ADR-001…011 | DESIGN | P0 | review | P0-01 | Files merged; SPDX check fails a file without header | LICENSE, COMMERCIAL-LICENSE, SPDX check, ADR-001…011 |
+| P0-10 | Licence setup: `LICENSE` (AGPL-3.0), `COMMERCIAL-LICENSE.md` (how to obtain), SPDX headers + CI check, `docs/adr/` with ADR-001…011 | DESIGN | P0 | review | P0-01 | Files merged; SPDX check fails a file without header | LICENSE, COMMERCIAL-LICENSE, SPDX check, ADR-001…011 (#1) |
 | P0-11 | CLA: text (lawyer review), CLA Assistant bot on the GitHub org, `CONTRIBUTING.md` | DESIGN | P1 | todo | P0-10 | First external PR is asked to sign; unsigned PR can't merge | Owner: product owner + counsel |
 
 ## Phase 1 — Sellable core
@@ -29,18 +29,18 @@ How to use this tracker:
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1-01 | `policy-gateway` skeleton; `/v1/chat/completions` stream passthrough to LiteLLM | 03 | P0 | review | P0-05, P0-07 | Stream works from curl and LibreChat | apps/policy-gateway: stream + non-stream passthrough |
-| P1-02 | Gateway auth: `gateway_keys` (argon2id), tenant resolution, Valkey cache | 03, 05 | P0 | doing | P1-01, P1-17* | Wrong key 401; correct key resolves tenant | In-memory store with SHA-256 key hashes; Postgres + argon2id with P1-17 |
-| P1-03 | User identification from `X-User-Email`; status checks | 03 | P0 | review | P1-02 | Unknown or disabled user 403 with code | X-User-Email → user, status checks, cross-tenant test |
-| P1-04 | `model_catalog` + aliases; `GET /v1/models` filtered by tenant | 03, 05 | P0 | doing | P1-02 | Tenant without KVKK add-on doesn't see `tr-local` | Aliases + filtered /v1/models; catalog in code until P1-17 |
+| P1-01 | `policy-gateway` skeleton; `/v1/chat/completions` stream passthrough to LiteLLM | 03 | P0 | review | P0-05, P0-07 | Stream works from curl and LibreChat | apps/policy-gateway: stream + non-stream passthrough (#1) |
+| P1-02 | Gateway auth: `gateway_keys` (argon2id), tenant resolution, Valkey cache | 03, 05 | P0 | doing | P1-01, P1-17* | Wrong key 401; correct key resolves tenant | In-memory store with SHA-256 key hashes; Postgres + argon2id with P1-17 (#1) |
+| P1-03 | User identification from `X-User-Email`; status checks | 03 | P0 | review | P1-02 | Unknown or disabled user 403 with code | X-User-Email → user, status checks, cross-tenant test (#1) |
+| P1-04 | `model_catalog` + aliases; `GET /v1/models` filtered by tenant | 03, 05 | P0 | doing | P1-02 | Tenant without KVKK add-on doesn't see `tr-local` | Aliases + filtered /v1/models; catalog in code until P1-17 (#1) |
 | P1-05 | LibreChat custom endpoint "SME AI" with user and conversation headers; e2e check | 03 | P0 | todo | P0-04, P1-03 | E2E asserts headers arrive at the gateway | Verify placeholders on pinned version |
-| P1-06 | `packages/policy-engine`: router rules v1 | 03 | P0 | review | P1-04 | Unit tests for every rule priority | packages/policy-engine router rules v1 + tests |
-| P1-07 | Fallback across candidates with retry budget | 03 | P0 | review | P1-06, P0-08 | Forced 500 → fallback model answers; audit `fallback=true` | Fallback across candidates on 5xx/429/network errors |
+| P1-06 | `packages/policy-engine`: router rules v1 | 03 | P0 | review | P1-04 | Unit tests for every rule priority | packages/policy-engine router rules v1 + tests (#1) |
+| P1-07 | Fallback across candidates with retry budget | 03 | P0 | review | P1-06, P0-08 | Forced 500 → fallback model answers; audit `fallback=true` | Fallback across candidates on 5xx/429/network errors (#1) |
 | P1-08 | `/v1/embeddings` via gateway; LibreChat RAG API points to gateway | 03, 08 | P1 | todo | P1-01 | File upload + question works; embedding usage metered | |
-| P1-09 | Quota reserve/settle Lua scripts; block / downgrade / overage behaviours | 03, 06 | P0 | doing | P1-06 | Tests for all three modes; LibreChat shows 429 message | Reserve/settle + block/downgrade/overage in memory; Valkey Lua pending |
+| P1-09 | Quota reserve/settle Lua scripts; block / downgrade / overage behaviours | 03, 06 | P0 | doing | P1-06 | Tests for all three modes; LibreChat shows 429 message | Reserve/settle + block/downgrade/overage in memory; Valkey Lua pending (#1) |
 | P1-10 | Effective policy load + cache + `policy.changed` invalidation | 03, 04 | P0 | todo | P1-02 | Policy change applies within 30 s | |
-| P1-11 | Presidio analyzer deploy + TR recognizers (TCKN, IBAN, phone, VKN) | 03 | P0 | doing | P0-03 | Recognizer unit tests incl. checksums | TR recognizers (TCKN, VKN, IBAN, phone, card, email) in packages/pii; Presidio NER for PERSON pending |
-| P1-12 | `packages/pii`: masking + streaming un-masker | 03 | P0 | review | P1-11 | Provider sees placeholders; user sees originals | Masking with stable placeholders + streaming un-masker |
+| P1-11 | Presidio analyzer deploy + TR recognizers (TCKN, IBAN, phone, VKN) | 03 | P0 | doing | P0-03 | Recognizer unit tests incl. checksums | TR recognizers (TCKN, VKN, IBAN, phone, card, email) in packages/pii; Presidio NER for PERSON pending (#1) |
+| P1-12 | `packages/pii`: masking + streaming un-masker | 03 | P0 | review | P1-11 | Provider sees placeholders; user sees originals | Masking with stable placeholders + streaming un-masker (#1) |
 | P1-13 | PII fixture set (≥ 200 TR sentences) + recall test in CI | 03 | P0 | todo | P1-12 | Recall ≥ 0.95 structured, ≥ 0.80 PERSON | |
 | P1-14 | `usage_events` writer + Valkey outbox replay | 03, 05 | P0 | todo | P1-09, P1-17 | Postgres down → events replayed later, none lost | |
 | P1-15 | Gateway metrics (Prometheus) + OTel traces (no prompt text) | 03 | P1 | todo | P1-01 | Dashboard shows requests, tokens, latency by tenant | |
