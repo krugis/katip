@@ -1,0 +1,35 @@
+{
+  "name": "katip",
+  "private": true,
+  "description": "Kâtip – open-source AI workspace for SMEs with a governed LLM router",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "spdx:check": "node scripts/check-spdx.mjs",
+    "secrets:check": "secretlint \"**/*\"",
+    "licenses:check": "node scripts/check-licenses.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@secretlint/secretlint-rule-preset-recommend": "9.3.4",
+    "@types/node": "22.20.5",
+    "eslint": "9.39.5",
+    "globals": "17.13.0",
+    "prettier": "3.9.10",
+    "secretlint": "9.3.4",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "3.2.7"
+  }
+}

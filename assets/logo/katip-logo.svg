@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="160" viewBox="0 0 520 160" role="img" aria-label="Kâtip">
+  <title>Kâtip</title>
+  <g transform="translate(0,0) scale(0.8)">
+    <path d="M44 30 H156 Q178 30 178 52 V118 Q178 140 156 140 H84 L52 170 L58 140 H44 Q22 140 22 118 V52 Q22 30 44 30 Z" fill="none" stroke="#1B2A4A" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M134 52 L150 68 L88 124 L68 132 L76 112 Z" fill="#148F94"/>
+    <path d="M76 112 L96 104" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <text x="172" y="108" font-family="Fraunces, Georgia, 'Times New Roman', serif" font-size="92" font-weight="600" fill="#1B2A4A">kâtip</text>
+</svg>

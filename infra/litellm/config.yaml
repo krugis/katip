@@ -1,0 +1,44 @@
+# LiteLLM proxy configuration (LLD-03 §3). Internal only: only the Kâtip policy gateway calls it.
+# Model ids marked (verify) must be checked against the provider and the pinned LiteLLM version.
+model_list:
+  - model_name: std-deepseek-v4-flash
+    litellm_params:
+      model: deepinfra/deepseek-ai/DeepSeek-V4-Flash # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
+  - model_name: std-glm-5.3-flash
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash # OpenRouter account must deny training providers
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: std-gemma-4-26b
+    litellm_params:
+      model: deepinfra/google/gemma-4-26b-a4b-it # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
+  - model_name: prem-claude-sonnet-5.5
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: prem-gemini-4-argon
+    litellm_params:
+      model: vertex_ai/gemini-4-argon # (verify)
+      vertex_project: os.environ/GCP_PROJECT
+      vertex_location: europe-west3
+  - model_name: emb-bge-m3
+    litellm_params:
+      model: deepinfra/BAAI/bge-m3 # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
+  # KVKK region only (phase 3):
+  # - model_name: tr-gpt-oss-120b
+  #   litellm_params: { model: openai/gpt-oss-120b, api_base: http://vllm-tr:8000/v1, api_key: os.environ/VLLM_TR_KEY }
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 1
+  timeout: 120
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
+  store_prompts_in_spend_logs: false

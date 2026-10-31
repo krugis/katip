@@ -1,0 +1,26 @@
+{
+  "name": "@katip/policy-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/app.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/server.js",
+    "dev": "node --env-file=.env --watch --import tsx src/server.ts"
+  },
+  "dependencies": {
+    "@katip/pii": "workspace:*",
+    "@katip/policy-engine": "workspace:*",
+    "@katip/shared": "workspace:*",
+    "fastify": "5.12.7",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@katip/mock-llm": "workspace:*",
+    "tsx": "4.23.15"
+  }
+}

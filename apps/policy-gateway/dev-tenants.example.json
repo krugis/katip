@@ -1,0 +1,21 @@
+{
+  "tenants": [
+    {
+      "id": "00000000-0000-7000-8000-000000000001",
+      "slug": "demo",
+      "status": "active",
+      "apiKeySha256": ["36384ce20bc829b5123695728a2f9f4a457f6f63ecfced8766cf309f4797a316"],
+      "kvkkAddon": false,
+      "limits": { "standard": 68000000, "premium": 2000000 },
+      "policy": { "atQuotaLimit": "downgrade" },
+      "pii": { "mode": "mask" },
+      "users": [
+        {
+          "id": "00000000-0000-7000-8000-000000000101",
+          "email": "demo@example.com",
+          "status": "active"
+        }
+      ]
+    }
+  ]
+}
