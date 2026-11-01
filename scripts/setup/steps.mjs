@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tryRun, STATE_DIR, Interrupted, isInterrupted } from './util.mjs';
+import { tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const COMPOSE_PROJECT = 'sme-platform';
 export const TENANT_PROJECT = 'sme-demo';
@@ -235,38 +235,9 @@ function renderTenantFiles(ctx) {
   writeFileSync(join(tDir, `${slug}.yml`), comp);
 }
 
-function renderGatewayTenants(ctx) {
-  const t = ctx.config.tenant;
-  const gw = {
-    tenants: [
-      {
-        id: '00000000-0000-7000-8000-000000000001',
-        slug: t.slug,
-        status: 'active',
-        apiKeySha256: [sha256hex(ctx.env.KATIP_DEMO_GATEWAY_KEY)],
-        kvkkAddon: t.kvkk_addon,
-        limits: t.limits,
-        policy: { atQuotaLimit: 'downgrade' },
-        pii: { mode: t.pii.mode },
-        users: [
-          {
-            id: '00000000-0000-7000-8000-000000000101',
-            email: 'demo@example.com',
-            status: 'active',
-          },
-        ],
-      },
-    ],
-  };
-  const dir = join(STATE_DIR, 'gateway');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'dev-tenants.json'), JSON.stringify(gw, null, 2));
-}
-
 function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
   renderTenantFiles(ctx);
-  renderGatewayTenants(ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +305,6 @@ export const steps = [
       rmSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'librechat', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'compose', 'tenants'), { recursive: true, force: true });
-      rmSync(join(STATE_DIR, 'gateway'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'env', 'tenants', 'demo.env'), { force: true });
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
     },
@@ -434,6 +404,44 @@ export const steps = [
       await platformCompose(['down', '-v', '--remove-orphans'], ctx.env, ctx.config).catch(
         () => {},
       );
+    },
+  },
+  {
+    id: 'governance-db',
+    title: 'Governance DB (migrate, seed, demo gateway key)',
+    async run(ctx) {
+      // Runs the repo's migrate + seed + demo-key upsert inside the gateway
+      // image (node + our built packages) on the backend network.
+      const env = {
+        DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
+        KATIP_DEMO_GATEWAY_KEY: ctx.env.KATIP_DEMO_GATEWAY_KEY,
+        KATIP_TENANT_STD_LIMITS: String(ctx.config.tenant.limits.standard),
+        KATIP_TENANT_PREM_LIMITS: String(ctx.config.tenant.limits.premium),
+      };
+      await dockerRun(
+        [
+          '--network',
+          `${COMPOSE_PROJECT}_backend`,
+          '-e',
+          'DATABASE_URL',
+          '-e',
+          'KATIP_DEMO_GATEWAY_KEY',
+          '-e',
+          'KATIP_TENANT_STD_LIMITS',
+          '-e',
+          'KATIP_TENANT_PREM_LIMITS',
+          '--entrypoint',
+          'node',
+          '-w',
+          '/app/policy-gateway',
+          '-v',
+          `${join(ROOT, 'scripts', 'setup', 'db-seed.mjs')}:/app/policy-gateway/db-seed.mjs:ro`,
+          'ghcr.io/krugis/policy-gateway:dev',
+          'db-seed.mjs',
+        ],
+        env,
+      );
+      ctx.log('migrations + seed applied; demo gateway key stored (argon2id)');
     },
   },
   {

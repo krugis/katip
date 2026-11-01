@@ -2,3 +2,11 @@
 export { loadEnv, envBool, envPort, EnvValidationError } from './env.js';
 export { createLogger, REDACT_PATHS, type Logger } from './logger.js';
 export { AppError, Errors, type ProblemDetails } from './errors.js';
+export {
+  generateGatewayKey,
+  hashGatewayKey,
+  keyPrefix,
+  verifyKey,
+  safeEqual,
+  type GeneratedKey,
+} from './gateway-key.js';

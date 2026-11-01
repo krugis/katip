@@ -115,13 +115,16 @@ services:
       PORT: '8080'
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
-      DEV_TENANTS_FILE: /config/dev-tenants.json
+      DATABASE_URL: postgres://katip:${POSTGRES_PASSWORD:?from katip.env}@postgres:5432/governance
+      VALKEY_URL: redis://valkey:6379
       LOG_LEVEL: info
-    volumes:
-      - ../../.katip/gateway/dev-tenants.json:/config/dev-tenants.json:ro
     networks:
       - backend
     depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
       litellm:
         condition: service_healthy
     healthcheck:

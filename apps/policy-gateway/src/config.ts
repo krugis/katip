@@ -10,9 +10,13 @@ export const ConfigSchema = z.object({
   /** LiteLLM key used by the gateway. Phase 1: one key; per-tenant virtual keys come with the provisioner. */
   LITELLM_API_KEY: z.string().min(1),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  /** Postgres governance DB (P1-02). When set, tenants/users/keys come from Postgres. */
+  DATABASE_URL: z.string().url().optional(),
+  /** Valkey for the 60 s auth cache (optional; no cache when unset). */
+  VALKEY_URL: z.string().url().optional(),
   /**
-   * DEV ONLY until tracker P1-17 (Postgres): JSON file with tenants, keys and users.
-   * See apps/policy-gateway/dev-tenants.example.json.
+   * DEV ONLY: JSON file with tenants, keys and users. Takes precedence over
+   * DATABASE_URL for local runs without Postgres. See dev-tenants.example.json.
    */
   DEV_TENANTS_FILE: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
