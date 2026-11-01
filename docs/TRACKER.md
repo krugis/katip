@@ -13,15 +13,27 @@ How to use this tracker:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0-01 | Monorepo skeleton: pnpm workspaces, Turborepo, TS strict, ESLint, Prettier, Vitest | 01 | P0 | review | – | `pnpm lint && pnpm typecheck && pnpm test` pass on empty apps | Monorepo, TS strict, ESLint, Prettier, Vitest (#1) |
 | P0-02 | CI `ci.yml`: install, lint, typecheck, tests, licence check, gitleaks | 01 | P0 | review | P0-01 | PR shows all checks; a test secret fails the build | CI: build, lint, typecheck, test, SPDX, licences; secret scan via secretlint (MIT) instead of gitleaks (#1) |
-| P0-03 | Dev compose `platform.yml` + `dev.yml`: traefik, postgres+pgvector, mongo, meili, valkey, keycloak, mailpit | 01 | P0 | todo | P0-01 | `pnpm dev:up` healthy in under 10 min; only Traefik publishes ports | |
-| P0-04 | Pin LibreChat version; `tenant.tmpl.yml`, `librechat.tmpl.yaml`; script renders `demo` tenant | 01, 07 | P0 | todo | P0-03 | `https://demo.localhost` loads LibreChat | |
-| P0-05 | LiteLLM self-built image (pinned tag + checksum) + `config.yaml` with 2 standard + 1 premium + 1 embedding model | 03 | P0 | doing | P0-03 | `curl litellm:4000/v1/chat/completions` works internally | config.yaml + pinned, checksum-verified Dockerfile; model ids to verify; compose pending (#1) |
-| P0-06 | SOPS + age; `*.example.env`; Zod env validation in `packages/shared` | 01, 10 | P0 | doing | P0-01 | App fails fast on missing env; encrypted env decrypts in dev | Zod env validation done; SOPS/age setup pending (#1) |
+| P0-03 | Dev compose `platform.yml` + `dev.yml`: traefik, postgres+pgvector, mongo, meili, valkey, keycloak, mailpit | 01 | P0 | done | P0-01 | `pnpm dev:up` healthy in under 10 min; only Traefik publishes ports | Via one-stop bootstrap (P0-12…16); 11 containers healthy; only traefik publishes (80/443/127.0.0.1:9090) |
+| P0-04 | Pin LibreChat version; `tenant.tmpl.yml`, `librechat.tmpl.yaml`; script renders `demo` tenant | 01, 07 | P0 | done | P0-03 | `https://demo.localhost` loads LibreChat | LibreChat v0.7.8; rendered by bootstrap; SME AI custom endpoint active (Keycloak OIDC flow itself is P1-19) |
+| P0-05 | LiteLLM self-built image (pinned tag + checksum) + `config.yaml` with 2 standard + 1 premium + 1 embedding model | 03 | P0 | done | P0-03 | `curl litellm:4000/v1/chat/completions` works internally | 1.79.3 pinned, wheel sha256 verified at build; 6 models configured (3 std + 2 prem + emb), mock-routed in dev; gateway smoke passes through it |
+| P0-06 | SOPS + age; `*.example.env`; Zod env validation in `packages/shared` | 01, 10 | P0 | doing | P0-01 | App fails fast on missing env; encrypted env decrypts in dev | Zod env validation done; katip.example.env + generated katip.env done; SOPS/age setup still pending |
 | P0-07 | `packages/shared`: pino logger (PII-safe), OTel setup, problem+json errors | 01 | P0 | doing | P0-01 | Used by a hello-world Fastify app with a trace in console exporter | PII-safe pino logger + problem+json/OpenAI errors done; OTel pending (#1) |
 | P0-08 | Mock OpenAI-compatible provider (streaming, configurable errors and latency) for tests | 03 | P0 | review | P0-01 | Can simulate 500/timeout; used in integration tests | apps/mock-llm: echo, SSE streaming, failure injection (#1) |
 | P0-09 | Dev/test host (Hetzner AX42): Ansible base hardening, Tailscale, Docker | 10 | P1 | todo | – | SSH only via Tailscale; external scan shows 443 only | |
 | P0-10 | Licence setup: `LICENSE` (AGPL-3.0), `COMMERCIAL-LICENSE.md` (how to obtain), SPDX headers + CI check, `docs/adr/` with ADR-001…011 | DESIGN | P0 | review | P0-01 | Files merged; SPDX check fails a file without header | LICENSE, COMMERCIAL-LICENSE, SPDX check, ADR-001…011 (#1) |
 | P0-11 | CLA: text (lawyer review), CLA Assistant bot on the GitHub org, `CONTRIBUTING.md` | DESIGN | P1 | todo | P0-10 | First external PR is asked to sign; unsigned PR can't merge | Owner: product owner + counsel |
+
+### Phase 0.5 — One-stop bootstrap (S1b)
+
+Single-command dev bootstrap: one master config file, one secrets file, rich TUI with progress, interrupt → keep-or-rollback, idempotent resume. An interrupted install must leave a usable partial stack (secrets always complete, each finished layer independently functional).
+
+| ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| P0-12 | Master config `katip.config.yaml` + `infra/env/katip.example.env`; all compose/template inputs render from these two files; secrets auto-generated once, never overwritten | 01 | P0 | done | P0-01 | Every rendered artifact derives from config + env | katip.config.yaml + katip.example.env; secrets fill-once into gitignored katip.env |
+| P0-13 | Infra pieces: traefik static+dynamic config, dev TLS certs, postgres init (keycloak/litellm DBs), app Dockerfiles, dev LiteLLM config render, tenant + librechat templates | 01, 03, 07 | P0 | done | P0-12 | `docker compose config` validates platform+dev+tenant | traefik.yml/dev.yml, dynamic middlewares + demo ipallow, initdb script, pnpm-deploy Dockerfiles, tenant.tmpl.yml + librechat.tmpl.yaml; subsumes compose part of P0-05 |
+| P0-14 | `scripts/setup/` (`pnpm dev:up`): TUI (progress bar, step states, logs), SIGINT → keep/rollback prompt, state in `.katip/setup-state.json`, idempotent resume; `dev:down`/`dev:status`/`dev:rollback` | 01 | P0 | done | P0-13 | Interrupt at any step; keep → usable partial stack; re-run resumes; rollback cleans | Verified: mid-run SIGINT marks step partial, resume completes, rollback removes all |
+| P0-15 | Demo tenant render + LibreChat pin via bootstrap (custom endpoint → gateway) | 03, 07 | P0 | done | P0-13 | `https://demo.localhost` loads; chat routes through gateway | LibreChat v0.7.8 pinned; SME AI endpoint loaded; gateway smoke passes end-to-end |
+| P0-16 | E2E verify from clean state + smoke tests (gateway chat/models, tenant URL) | 01, 03 | P0 | done | P0-14, P0-15 | Clean run green; smoke tests pass | Full cold run green (11 containers healthy); chat via gateway returns Echo; lint/typecheck/tests/spdx/secrets/licences all pass |
 
 ## Phase 1 — Sellable core
 

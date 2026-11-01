@@ -1,0 +1,20 @@
+# LibreChat config for tenant "<slug>" (LLD-03 §1.2), rendered by the bootstrap
+# or provisioner to infra/librechat/rendered/<slug>.librechat.yaml.
+# Custom endpoint only: all model traffic goes through the Kâtip policy gateway.
+version: 1.2.0
+endpoints:
+  custom:
+    - name: SME AI
+      apiKey: '${KATIP_DEMO_GATEWAY_KEY}'
+      baseURL: http://policy-gateway:8080/v1
+      models:
+        default: [auto, fast, best]
+        fetch: true
+      titleConvo: true
+      titleModel: fast
+      summarize: false
+      modelDisplayLabel: SME AI
+      headers:
+        X-User-Id: '{{LIBRECHAT_USER_ID}}'
+        X-User-Email: '{{LIBRECHAT_USER_EMAIL}}'
+        X-Conversation-Id: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
