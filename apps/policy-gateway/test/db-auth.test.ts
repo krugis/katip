@@ -11,7 +11,7 @@ import postgres from 'postgres';
 import { buildMockApp } from '@katip/mock-llm';
 import { createLogger, hashGatewayKey } from '@katip/shared';
 import * as schema from '@katip/db';
-import { migrateWithClient } from '@katip/db';
+import { migrateWithClient, seed } from '@katip/db';
 import { buildGateway } from '../src/app.js';
 import { DbTenantStore } from '../src/db-stores.js';
 import { MemoryQuotaStore, MemoryUsageSink } from '../src/stores.js';
@@ -40,6 +40,7 @@ beforeAll(async () => {
   pg = postgres(pgUri, { max: 1 });
   await migrateWithClient(pg);
   db = drizzle(pg, { schema });
+  await seed(db); // model_catalog + router_rules (P1-04)
 
   const vc = await new ValkeyContainer('valkey/valkey:8.0.12').start();
   valkeyContainer = vc;
@@ -167,5 +168,66 @@ describe('P1-02 gateway auth against Postgres + Valkey', () => {
       headers: { authorization: `Bearer ${samePrefix}` },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('P1-04 model catalog and rules from Postgres', () => {
+  it('serves /v1/models and routing from model_catalog + router_rules', async () => {
+    // restore the key row deleted by the prefix-collision test
+    const tid = (await pg`select id from tenants where slug = 'acme'`)[0]!.id as string;
+    const nKeys = await pg`select count(*)::int as n from gateway_keys where tenant_id = ${tid}`;
+    if (nKeys[0]!.n === 0) {
+      await pg`insert into gateway_keys (tenant_id, key_hash, prefix, type)
+               values (${tid}, ${hashGatewayKey(KEY)}, ${KEY.split('-')[3]!.slice(0, 8)}, 'tenant')`;
+    }
+    await redis.flushall();
+
+    const { DbCatalogStore } = await import('../src/db-stores.js');
+    const catalogStore = new DbCatalogStore(pgUri);
+    gw = buildGateway({
+      litellmBaseUrl: mockUrl,
+      litellmApiKey: 'test',
+      tenants: store,
+      quota: new MemoryQuotaStore(),
+      usage: new MemoryUsageSink(),
+      catalogStore,
+      logger: createLogger('test', { level: 'silent' }),
+    });
+
+    const res = await gw.inject({
+      method: 'GET',
+      url: '/v1/models',
+      headers: { authorization: `Bearer ${KEY}`, 'x-user-email': 'ayse@acme.com.tr' },
+    });
+    const ids = res.json().data.map((m: { id: string }) => m.id);
+    expect(ids).toContain('auto');
+    expect(ids).toContain('best');
+    // No KVKK add-on → tr-local must not appear even though the alias is on.
+    expect(ids).not.toContain('tr-local');
+
+    // Routing uses the DB catalog: chat on fast → a standard model.
+    const chat = await gw.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      headers: { authorization: `Bearer ${KEY}`, 'x-user-email': 'ayse@acme.com.tr' },
+      payload: { model: 'fast', messages: [{ role: 'user', content: 'selam' }] },
+    });
+    expect(chat.statusCode).toBe(200);
+    expect(chat.headers['x-katip-model']).toBe('std-deepseek-v4-flash');
+    await catalogStore.close();
+  });
+
+  it('picks up catalog edits without a restart (TTL refresh)', async () => {
+    const { DbCatalogStore } = await import('../src/db-stores.js');
+    const catalogStore = new DbCatalogStore(pgUri, 50);
+    const before = await catalogStore.getCatalog();
+    expect(before.some((m) => m.id === 'std-gemma-4-26b')).toBe(true);
+
+    // Disable gemma in the DB, force refresh, verify it disappears.
+    await pg`update model_catalog set enabled = false where id = 'std-gemma-4-26b'`;
+    await catalogStore.refresh(true);
+    const after = await catalogStore.getCatalog();
+    expect(after.some((m) => m.id === 'std-gemma-4-26b' && m.enabled)).toBe(false);
+    await catalogStore.close();
   });
 });

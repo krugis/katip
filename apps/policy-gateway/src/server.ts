@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 import { createLogger } from '@katip/shared';
 import { buildGateway } from './app.js';
 import { loadConfig } from './config.js';
-import { DbTenantStore } from './db-stores.js';
+import { DbCatalogStore, DbTenantStore } from './db-stores.js';
 import { MemoryQuotaStore, MemoryTenantStore, MemoryUsageSink, loadDevTenants } from './stores.js';
 
 const config = loadConfig();
@@ -33,6 +33,9 @@ const app = buildGateway({
   tenants,
   quota: new MemoryQuotaStore(),
   usage: new MemoryUsageSink(),
+  ...(config.DATABASE_URL && !config.DEV_TENANTS_FILE
+    ? { catalogStore: new DbCatalogStore(config.DATABASE_URL) }
+    : {}),
   logger: log,
 });
 

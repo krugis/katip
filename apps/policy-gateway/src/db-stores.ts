@@ -8,7 +8,12 @@ import { eq, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import postgres from 'postgres';
 import { keyPrefix, verifyKey } from '@katip/shared';
-import { DEFAULT_POLICY, type TenantPolicy } from '@katip/policy-engine';
+import {
+  DEFAULT_POLICY,
+  type ModelEntry,
+  type RouterRule,
+  type TenantPolicy,
+} from '@katip/policy-engine';
 import type { PiiPolicy } from '@katip/pii';
 import * as schema from '@katip/db';
 import {
@@ -187,3 +192,64 @@ function piiOf(policy: unknown): PiiPolicy {
 }
 
 export { MemoryQuotaStore, MemoryUsageSink };
+
+/**
+ * Model catalog + router rules from the governance DB (P1-04), with a TTL
+ * cache so the gateway picks up catalog edits without a restart.
+ */
+export class DbCatalogStore {
+  private readonly db;
+  private readonly ttlMs: number;
+  private loadedAt = 0;
+  private catalog: ModelEntry[] = [];
+  private rules: RouterRule[] = [];
+
+  constructor(databaseUrl: string, ttlMs = 30_000) {
+    this.db = drizzle(postgres(databaseUrl, { max: 1, prepare: false }), { schema });
+    this.ttlMs = ttlMs;
+  }
+
+  async close(): Promise<void> {
+    await this.db.$client.end();
+  }
+
+  async refresh(force = false): Promise<void> {
+    if (!force && Date.now() - this.loadedAt < this.ttlMs && this.loadedAt > 0) return;
+    const models = await this.db.select().from(schema.modelCatalog);
+    this.catalog = models.map((m) => ({
+      id: m.id,
+      litellmName: m.litellmName,
+      displayName: m.displayName,
+      class: m.class as ModelEntry['class'],
+      region: m.region as ModelEntry['region'],
+      dataPolicy: m.dataPolicy as ModelEntry['dataPolicy'],
+      priceInMicroPerM: Number(m.priceInUsdMicroPerM),
+      priceOutMicroPerM: Number(m.priceOutUsdMicroPerM),
+      enabled: m.enabled,
+    }));
+    const rules = await this.db
+      .select()
+      .from(schema.routerRules)
+      .where(eq(schema.routerRules.enabled, true));
+    this.rules = rules
+      .map((r) => ({
+        id: r.id,
+        priority: r.priority,
+        when: r.condition as RouterRule['when'],
+        models: (r.route as { models: string[] }).models,
+        strict: (r.route as { strict?: boolean }).strict ?? false,
+      }))
+      .sort((a, b) => a.priority - b.priority);
+    this.loadedAt = Date.now();
+  }
+
+  async getCatalog(): Promise<ModelEntry[]> {
+    await this.refresh();
+    return this.catalog;
+  }
+
+  async getRules(): Promise<RouterRule[]> {
+    await this.refresh();
+    return this.rules;
+  }
+}
