@@ -52,8 +52,12 @@ packages/
   pii/              Turkish PII recognizers (TCKN, VKN, IBAN, phone), masking + streaming un-masking
   policy-engine/    router rules and quota math (pure functions)
 infra/
-  compose/          Docker Compose for local dev
-  litellm/          LiteLLM configuration
+  compose/          Docker Compose: platform, dev overrides, tenant template
+  traefik/          static + dynamic Traefik config, dev TLS certs (generated)
+  litellm/          self-built LiteLLM (pinned + checksum), dev config template
+  env/              katip.example.env (template) — real env is generated, gitignored
+scripts/setup/      the one-stop bootstrap behind pnpm dev:up
+katip.config.yaml   master configuration (image pins, models, demo tenant)
 docs/               design, low-level designs, ADRs, tracker
 ```
 
@@ -70,7 +74,23 @@ pnpm test          # unit + integration tests (no Docker needed)
 pnpm lint && pnpm typecheck
 ```
 
-Run the gateway against the mock provider:
+### One-command dev stack
+
+`pnpm dev:up` brings up the whole platform — Traefik, Postgres (+pgvector), Keycloak, MongoDB, Meilisearch, Valkey, Mailpit, self-built LiteLLM (pinned + checksum-verified), the Kâtip policy gateway, the mock provider and a `demo` LibreChat tenant — with a progress TUI:
+
+```bash
+pnpm dev:up        # install or resume the bootstrap (Ctrl+C: keep or rollback)
+pnpm dev:status    # step state + service health
+pnpm dev:down      # stop everything (data kept)
+pnpm dev:rollback  # remove everything the bootstrap created
+```
+
+- All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, models, tenant).
+- All keys live in **infra/env/katip.env** — generated once from `katip.example.env` on first run; secrets are random and never overwritten. Real provider API keys (DeepInfra, OpenRouter, Anthropic) are optional: without them, everything routes to the mock provider.
+- An interrupted run keeps finished layers working; re-running resumes from where it stopped.
+- After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.
+
+The gateway alone against the mock provider (no Docker):
 
 ```bash
 pnpm --filter @katip/mock-llm start &            # http://localhost:4010/v1
@@ -81,8 +101,6 @@ curl -s localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"Merhaba, TCKN 10000000146"}]}'
 ```
-
-The Docker Compose stack for the platform services is described in [docs/lld/01-repo-and-deployment.md](docs/lld/01-repo-and-deployment.md) and lands with tracker task P0-03.
 
 ## Contributing
 

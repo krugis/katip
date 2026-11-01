@@ -1,0 +1,21 @@
+# LiteLLM proxy config — DEV, rendered by scripts/setup.mjs from
+# katip.config.yaml models list. For each model: if its provider API key
+# exists in infra/env/katip.env, the real provider is used; otherwise the
+# model routes to mock-llm (OpenAI-compatible echo with failure injection).
+# Internal only: the Kâtip policy gateway is the only caller.
+model_list:
+%%MODELS%%
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 1
+  timeout: 120
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # database_url intentionally omitted in dev: usage metering is ours (Postgres
+  # usage_events, tracker P1-14), LiteLLM spend logs are not needed here.
+  store_prompts_in_spend_logs: false

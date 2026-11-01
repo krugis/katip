@@ -1,0 +1,23 @@
+# Dynamic middlewares referenced by routers (LLD-01 §2.2, LLD-02 §6).
+# Per-tenant ipallow middlewares are written here by the provisioner; dev
+# default is pass-through 0.0.0.0/0 until access rules land (P1-28).
+
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+    ratelimit-user:
+      rateLimit:
+        average: 120
+        burst: 240
+
+    dashboard-auth:
+      basicAuth:
+        users: []
