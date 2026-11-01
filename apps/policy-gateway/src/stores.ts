@@ -47,6 +47,8 @@ export interface Reservation {
   cls: QuotaClass;
   amount: number;
   overage: boolean;
+  /** Counter month (yyyymm UTC) the reservation was made against; settle must use it. */
+  month?: string;
 }
 
 export interface QuotaStore {
@@ -114,9 +116,9 @@ export class MemoryQuotaStore implements QuotaStore {
   private readonly used = new Map<string, number>();
   constructor(private readonly now: () => Date = () => new Date()) {}
 
-  private key(tenantId: string, cls: QuotaClass): string {
+  private key(tenantId: string, cls: QuotaClass, month?: string): string {
     const d = this.now();
-    return `${tenantId}:${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}:${cls}`;
+    return `${tenantId}:${month ?? `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`}:${cls}`;
   }
 
   usedOf(tenantId: string, cls: QuotaClass): number {
@@ -128,8 +130,8 @@ export class MemoryQuotaStore implements QuotaStore {
   }
 
   async reserve(tenant: Tenant, cls: QuotaClass, estimate: number) {
-    const k = this.key(tenant.id, cls);
-    const used = this.used.get(k) ?? 0;
+    const monthKey = this.key(tenant.id, cls);
+    const used = this.used.get(monthKey) ?? 0;
     const decision = decideQuota(
       used,
       tenant.limits[cls],
@@ -138,7 +140,7 @@ export class MemoryQuotaStore implements QuotaStore {
       cls === 'premium',
     );
     if (decision === 'allow' || decision === 'overage') {
-      this.used.set(k, used + estimate);
+      this.used.set(monthKey, used + estimate);
       return {
         decision,
         reservation: {
@@ -146,6 +148,7 @@ export class MemoryQuotaStore implements QuotaStore {
           cls,
           amount: estimate,
           overage: decision === 'overage',
+          month: monthKey.split(':')[1],
         },
       };
     }
@@ -153,7 +156,7 @@ export class MemoryQuotaStore implements QuotaStore {
   }
 
   async settle(r: Reservation, actual: number): Promise<void> {
-    const k = this.key(r.tenantId, r.cls);
+    const k = this.key(r.tenantId, r.cls, r.month);
     this.used.set(k, Math.max(0, (this.used.get(k) ?? 0) - r.amount + actual));
   }
 }

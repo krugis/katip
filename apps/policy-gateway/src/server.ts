@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 import { createLogger } from '@katip/shared';
 import { buildGateway } from './app.js';
 import { loadConfig } from './config.js';
-import { DbCatalogStore, DbTenantStore } from './db-stores.js';
+import { DbCatalogStore, DbTenantStore, DbUsageSink, ValkeyQuotaStore } from './db-stores.js';
 import { MemoryQuotaStore, MemoryTenantStore, MemoryUsageSink, loadDevTenants } from './stores.js';
 
 const config = loadConfig();
@@ -26,16 +26,22 @@ if (config.DEV_TENANTS_FILE) {
   tenants = new MemoryTenantStore();
 }
 
+// Quota counters: Valkey Lua when available, in-memory otherwise (dev only).
+// Usage: Postgres writer with a Valkey outbox when the DB URL is set.
+const useDb = Boolean(config.DATABASE_URL) && !config.DEV_TENANTS_FILE;
+const quota = redis && useDb ? new ValkeyQuotaStore(redis) : new MemoryQuotaStore();
+const usage = useDb
+  ? new DbUsageSink(config.DATABASE_URL!, { redis, logger: log })
+  : new MemoryUsageSink();
+
 const app = buildGateway({
   litellmBaseUrl: config.LITELLM_BASE_URL,
   litellmApiKey: config.LITELLM_API_KEY,
   upstreamTimeoutMs: config.UPSTREAM_TIMEOUT_MS,
   tenants,
-  quota: new MemoryQuotaStore(),
-  usage: new MemoryUsageSink(),
-  ...(config.DATABASE_URL && !config.DEV_TENANTS_FILE
-    ? { catalogStore: new DbCatalogStore(config.DATABASE_URL) }
-    : {}),
+  quota,
+  usage,
+  ...(useDb ? { catalogStore: new DbCatalogStore(config.DATABASE_URL!) } : {}),
   logger: log,
 });
 
@@ -43,6 +49,7 @@ const shutdown = async (signal: string) => {
   log.info({ signal }, 'shutting down');
   await app.close();
   if (tenants instanceof DbTenantStore) await tenants.close();
+  if (usage instanceof DbUsageSink) await usage.close();
   redis?.quit();
   process.exit(0);
 };

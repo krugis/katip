@@ -49,12 +49,12 @@ Single-command dev bootstrap: one master config file, one secrets file, rich TUI
 | P1-06 | `packages/policy-engine`: router rules v1 | 03 | P0 | review | P1-04 | Unit tests for every rule priority | packages/policy-engine router rules v1 + tests (#1) |
 | P1-07 | Fallback across candidates with retry budget | 03 | P0 | review | P1-06, P0-08 | Forced 500 → fallback model answers; audit `fallback=true` | Fallback across candidates on 5xx/429/network errors (#1) |
 | P1-08 | `/v1/embeddings` via gateway; LibreChat RAG API points to gateway | 03, 08 | P1 | todo | P1-01 | File upload + question works; embedding usage metered | |
-| P1-09 | Quota reserve/settle Lua scripts; block / downgrade / overage behaviours | 03, 06 | P0 | doing | P1-06 | Tests for all three modes; LibreChat shows 429 message | Reserve/settle + block/downgrade/overage in memory; Valkey Lua pending (#1) |
+| P1-09 | Quota reserve/settle Lua scripts; block / downgrade / overage behaviours | 03, 06 | P0 | review | P1-06 | Tests for all three modes; LibreChat shows 429 message | Valkey Lua reserve/settle (atomic, month bucketed, 26 h TTL) wired in server.ts; 6 store tests + e2e |
 | P1-10 | Effective policy load + cache + `policy.changed` invalidation | 03, 04 | P0 | todo | P1-02 | Policy change applies within 30 s | |
 | P1-11 | Presidio analyzer deploy + TR recognizers (TCKN, IBAN, phone, VKN) | 03 | P0 | doing | P0-03 | Recognizer unit tests incl. checksums | TR recognizers (TCKN, VKN, IBAN, phone, card, email) in packages/pii; Presidio NER for PERSON pending (#1) |
 | P1-12 | `packages/pii`: masking + streaming un-masker | 03 | P0 | review | P1-11 | Provider sees placeholders; user sees originals | Masking with stable placeholders + streaming un-masker (#1) |
 | P1-13 | PII fixture set (≥ 200 TR sentences) + recall test in CI | 03 | P0 | todo | P1-12 | Recall ≥ 0.95 structured, ≥ 0.80 PERSON | |
-| P1-14 | `usage_events` writer + Valkey outbox replay | 03, 05 | P0 | todo | P1-09, P1-17 | Postgres down → events replayed later, none lost | |
+| P1-14 | `usage_events` writer + Valkey outbox replay | 03, 05 | P0 | review | P1-09, P1-17 | Postgres down → events replayed later, none lost | DbUsageSink: direct insert, Valkey outbox on connection failure, background drain (5 s), idempotent uuid replay, dead-letter list; 4 store tests + e2e |
 | P1-15 | Gateway metrics (Prometheus) + OTel traces (no prompt text) | 03 | P1 | todo | P1-01 | Dashboard shows requests, tokens, latency by tenant | |
 | P1-16 | M1 demo + load baseline (50 concurrent streams, mock provider) | 03 | P0 | todo | P1-01…15 | p95 overhead under 120 ms; CPU under 1 vCPU | |
 
