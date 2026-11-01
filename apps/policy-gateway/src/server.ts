@@ -3,7 +3,13 @@ import { Redis } from 'ioredis';
 import { createLogger } from '@katip/shared';
 import { buildGateway } from './app.js';
 import { loadConfig } from './config.js';
-import { DbCatalogStore, DbTenantStore, DbUsageSink, ValkeyQuotaStore } from './db-stores.js';
+import {
+  DbCatalogStore,
+  DbPolicySource,
+  DbTenantStore,
+  DbUsageSink,
+  ValkeyQuotaStore,
+} from './db-stores.js';
 import { MemoryQuotaStore, MemoryTenantStore, MemoryUsageSink, loadDevTenants } from './stores.js';
 
 const config = loadConfig();
@@ -33,6 +39,11 @@ const quota = redis && useDb ? new ValkeyQuotaStore(redis) : new MemoryQuotaStor
 const usage = useDb
   ? new DbUsageSink(config.DATABASE_URL!, { redis, logger: log })
   : new MemoryUsageSink();
+// Effective policy (tenant + department override) with policy.changed invalidation.
+const policySource = useDb
+  ? new DbPolicySource(config.DATABASE_URL!, redis, { logger: log })
+  : null;
+if (policySource) await policySource.start();
 
 const app = buildGateway({
   litellmBaseUrl: config.LITELLM_BASE_URL,
@@ -41,6 +52,7 @@ const app = buildGateway({
   tenants,
   quota,
   usage,
+  ...(policySource ? { policySource } : {}),
   ...(useDb ? { catalogStore: new DbCatalogStore(config.DATABASE_URL!) } : {}),
   logger: log,
 });
@@ -50,6 +62,7 @@ const shutdown = async (signal: string) => {
   await app.close();
   if (tenants instanceof DbTenantStore) await tenants.close();
   if (usage instanceof DbUsageSink) await usage.close();
+  if (policySource) await policySource.close();
   redis?.quit();
   process.exit(0);
 };

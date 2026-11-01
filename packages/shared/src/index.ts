@@ -10,3 +10,8 @@ export {
   safeEqual,
   type GeneratedKey,
 } from './gateway-key.js';
+export {
+  POLICY_CHANGED_CHANNEL,
+  publishPolicyChanged,
+  type PolicyPublisher,
+} from './policy-events.js';

@@ -8,7 +8,7 @@ import { eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import postgres from 'postgres';
-import { keyPrefix, verifyKey, type Logger } from '@katip/shared';
+import { keyPrefix, verifyKey, POLICY_CHANGED_CHANNEL, type Logger } from '@katip/shared';
 import {
   DEFAULT_POLICY,
   type ModelEntry,
@@ -516,5 +516,135 @@ export class DbUsageSink implements UsageSink {
         requestId: null,
       })
       .onConflictDoNothing();
+  }
+}
+
+// ---- effective policy: tenant + department override (P1-10) ----
+// LLD-03 §2 step 3: merge the tenant policy with the user's department
+// override, cache the result for 30 s, and invalidate on `policy.changed`
+// pub/sub so console edits apply immediately (30 s worst case).
+
+export interface EffectivePolicy {
+  policy: TenantPolicy;
+  pii: PiiPolicy;
+}
+
+const POLICY_TTL_SECONDS = 30;
+
+export class DbPolicySource {
+  private readonly db;
+  private readonly redis: Redis | null;
+  private readonly log?: Logger;
+  /** Subscriber connection; null when Valkey is absent (cache disabled). */
+  private subscriber: Redis | null = null;
+  /** Bumped by pub/sub; compared against the stamp inside cached entries. */
+  private generation = new Map<string, number>();
+  /** Bumped by '*' notifications so entries of unseen tenants also invalidate. */
+  private allGeneration = 0;
+
+  constructor(databaseUrl: string, redis: Redis | null, opts: { logger?: Logger } = {}) {
+    this.db = drizzle(postgres(databaseUrl, { max: 2, prepare: false }), { schema });
+    this.redis = redis;
+    this.log = opts.logger;
+  }
+
+  /** Starts listening for policy.changed notifications. Idempotent. */
+  async start(): Promise<void> {
+    if (!this.redis || this.subscriber) return;
+    // A dedicated connection: once SUBSCRIBEd, a connection can only run
+    // subscribe/ping. duplicate() starts connecting on its own (ioredis
+    // inherits lazyConnect: false), so we only wait for readiness.
+    const sub = this.redis.duplicate();
+    if (sub.status !== 'ready' && sub.status !== 'connecting' && sub.status !== 'connect') {
+      await sub.connect();
+    } else {
+      await new Promise<void>((resolve) => {
+        if (sub.status === 'ready') return resolve();
+        const onReady = (): void => {
+          sub.removeListener('ready', onReady);
+          resolve();
+        };
+        sub.on('ready', onReady);
+      });
+    }
+    await sub.subscribe(POLICY_CHANGED_CHANNEL);
+    sub.on('message', (_channel: string, message: string) => {
+      // message = tenant id, or '*' for all tenants. Bump (never reset to 0)
+      // so cached entries with the old stamp stop matching.
+      if (message === '*') {
+        for (const t of this.generation.keys()) this.generation.set(t, this.generation.get(t)! + 1);
+        this.allGeneration++;
+      } else {
+        this.generation.set(message, (this.generation.get(message) ?? 0) + 1);
+      }
+      this.log?.info({ tenant: message }, 'policy.changed: effective-policy cache invalidated');
+    });
+    this.subscriber = sub;
+  }
+
+  async close(): Promise<void> {
+    if (this.subscriber) {
+      await this.subscriber.quit().catch(() => undefined);
+      this.subscriber = null;
+    }
+    await this.db.$client.end();
+  }
+
+  private key(tenantId: string, userId: string): string {
+    return `gw:policy:${tenantId}:${userId}`;
+  }
+
+  /** Current generation stamp for a tenant (bumped by invalidation). */
+  private stamp(tenantId: string): number {
+    return (this.generation.get(tenantId) ?? 0) + this.allGeneration;
+  }
+
+  async effectivePolicy(tenant: Tenant, user: User): Promise<EffectivePolicy> {
+    const k = this.key(tenant.id, user.id);
+    const stamp = this.stamp(tenant.id);
+    if (this.redis) {
+      const raw = await this.redis.get(k);
+      if (raw !== null) {
+        const cached = JSON.parse(raw) as EffectivePolicy & { stamp?: number };
+        if (cached.stamp === stamp) {
+          return { policy: cached.policy, pii: cached.pii };
+        }
+      }
+    }
+    const loaded = await this.load(tenant, user);
+    if (this.redis) {
+      await this.redis.set(k, JSON.stringify({ ...loaded, stamp }), 'EX', POLICY_TTL_SECONDS);
+    }
+    return loaded;
+  }
+
+  private async load(tenant: Tenant, user: User): Promise<EffectivePolicy> {
+    const rows = await this.db
+      .select({
+        policy: schema.tenantPolicies.policy,
+        override: schema.departments.policyOverride,
+      })
+      .from(schema.tenantPolicies)
+      .leftJoin(
+        schema.departments,
+        user.departmentId
+          ? sql`${schema.departments.id} = ${user.departmentId} and ${schema.departments.tenantId} = ${tenant.id}`
+          : sql`false`,
+      )
+      .where(eq(schema.tenantPolicies.tenantId, tenant.id));
+    const row = rows[0];
+    const base = { ...DEFAULT_POLICY, ...((row?.policy as Partial<TenantPolicy>) ?? {}) };
+    const rawOverride = (row?.override ?? {}) as Partial<TenantPolicy> & {
+      pii?: { mode?: PiiPolicy['mode']; entities?: PiiPolicy['entities'] };
+    };
+    // PII: departments may only tighten (mask→block), never loosen.
+    const { pii: overridePii, ...override } = rawOverride;
+    const policy = { ...base, ...override };
+    const basePii = piiOf(row?.policy);
+    const pii: PiiPolicy =
+      overridePii?.mode === 'block' || (overridePii?.mode === 'mask' && basePii.mode === 'off')
+        ? { mode: overridePii.mode, entities: overridePii.entities }
+        : basePii;
+    return { policy, pii };
   }
 }

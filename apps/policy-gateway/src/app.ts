@@ -9,6 +9,7 @@ import {
   maskMessages,
   unmaskText,
   type ChatMessage,
+  type PiiPolicy,
 } from '@katip/pii';
 import {
   DEFAULT_CATALOG,
@@ -22,6 +23,7 @@ import {
   type ModelEntry,
   type RouteDecision,
   type RouterRule,
+  type TenantPolicy,
 } from '@katip/policy-engine';
 import {
   quotaClassOf,
@@ -43,6 +45,14 @@ export interface GatewayDeps {
   rules?: RouterRule[];
   /** Dynamic catalog/rules source (DB); takes precedence over static arrays. */
   catalogStore?: { getCatalog(): Promise<ModelEntry[]>; getRules(): Promise<RouterRule[]> };
+  /**
+   * Effective policy source (tenant + department override) with 30 s cache
+   * and `policy.changed` invalidation (P1-10). When set, the resolved policy
+   * overlays the tenant's base policy for every request.
+   */
+  policySource?: {
+    effectivePolicy(tenant: Tenant, user: User): Promise<{ policy: TenantPolicy; pii: PiiPolicy }>;
+  };
   upstreamTimeoutMs?: number;
   logger?: Logger;
   fetchImpl?: typeof fetch;
@@ -134,6 +144,13 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     const user = await deps.tenants.findUser(tenant.id, email);
     if (!user) throw Errors.userNotProvisioned();
     if (user.status !== 'active') throw Errors.userDisabled();
+    // Effective policy = tenant policy + department override (P1-10), cached
+    // 30 s and invalidated by `policy.changed` pub/sub.
+    if (deps.policySource) {
+      const eff = await deps.policySource.effectivePolicy(tenant, user);
+      tenant.policy = eff.policy;
+      tenant.pii = eff.pii;
+    }
     return { tenant, user };
   }
 
