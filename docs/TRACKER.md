@@ -42,7 +42,7 @@ Single-command dev bootstrap: one master config file, one secrets file, rich TUI
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P1-01 | `policy-gateway` skeleton; `/v1/chat/completions` stream passthrough to LiteLLM | 03 | P0 | review | P0-05, P0-07 | Stream works from curl and LibreChat | apps/policy-gateway: stream + non-stream passthrough (#1) |
-| P1-02 | Gateway auth: `gateway_keys` (argon2id), tenant resolution, Valkey cache | 03, 05 | P0 | doing | P1-01, P1-17* | Wrong key 401; correct key resolves tenant | In-memory store with SHA-256 key hashes; Postgres + argon2id with P1-17 (#1) |
+| P1-02 | Gateway auth: `gateway_keys` (argon2id), tenant resolution, Valkey cache | 03, 05 | P0 | doing | P1-01, P1-17* | Wrong key 401; correct key resolves tenant | In-memory store with SHA-256 key hashes; Postgres + argon2id with P1-17 (#1); P1-17 landed → Postgres store now unblocked |
 | P1-03 | User identification from `X-User-Email`; status checks | 03 | P0 | review | P1-02 | Unknown or disabled user 403 with code | X-User-Email → user, status checks, cross-tenant test (#1) |
 | P1-04 | `model_catalog` + aliases; `GET /v1/models` filtered by tenant | 03, 05 | P0 | doing | P1-02 | Tenant without KVKK add-on doesn't see `tr-local` | Aliases + filtered /v1/models; catalog in code until P1-17 (#1) |
 | P1-05 | LibreChat custom endpoint "SME AI" with user and conversation headers; e2e check | 03 | P0 | todo | P0-04, P1-03 | E2E asserts headers arrive at the gateway | Verify placeholders on pinned version |
