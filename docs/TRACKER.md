@@ -62,8 +62,8 @@ Single-command dev bootstrap: one master config file, one secrets file, rich TUI
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1-17 | `packages/db` schema v1, migrations, seeds (plans, catalog, rules, demo) | 05 | P0 | todo | P0-03 | Migrate from empty in CI | |
-| P1-18 | RLS policies + RLS test suite | 05 | P0 | todo | P1-17 | Cross-tenant read/write impossible in tests | |
+| P1-17 | `packages/db` schema v1, migrations, seeds (plans, catalog, rules, demo) | 05 | P0 | review | P0-03 | Migrate from empty in CI | Drizzle schema (23 tables, citext emails, bigint micro-USD), single migration 0000_schema_v1 + RLS + katip_provider role, seed (5 plans incl. kvkk_addon, 7 models, 7 rules, demo tenant + 3 users); Testcontainers CI test: migrate-from-empty + idempotency + RLS isolation; applied to dev governance DB |
+| P1-18 | RLS policies + RLS test suite | 05 | P0 | review | P1-17 | Cross-tenant read/write impossible in tests | tenant_isolation policy (USING + WITH CHECK) on all 19 tenant-owned tables, FORCE RLS; audit_log append-only (UPDATE/DELETE revoked); tests: cross-tenant insert rejected, cross-tenant update affects 0 rows, policy presence on every table, audit_log tamper rejected |
 | P1-19 | Keycloak realm export: roles, organizations, `sme-browser` flow (passkeys + MFA), TR/EN theme | 02 | P0 | todo | P0-03 | Local user forced to enrol MFA | |
 | P1-20 | `console-api` skeleton: OIDC, RBAC middleware, problem+json, OpenAPI | 04 | P0 | todo | P1-17, P1-19 | RBAC matrix test scaffold | |
 | P1-21 | Provisioner `tenant:create` steps 1–6 (DB, Keycloak, Mongo, Meili, LiteLLM, gateway key) | 07 | P0 | todo | P1-17, P1-19 | Idempotent re-run | |
