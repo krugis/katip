@@ -75,6 +75,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-59 | Tenant stores and secrets: tenant list in config, own Mongo login, own Meilisearch, own secrets | 01, 07 | P0 | review | P1-19 | Two tenants install from one config; each Mongo login is limited to its own database | LibreChat has no index prefix setting and its sync deletes documents missing from its own database, so one shared Meilisearch would lose other tenants' search data |
 | P1-60 | Per-tenant networks and a Valkey password | 01, 10 | P0 | review | P1-59 | A tenant's LibreChat reaches only Traefik, the gateway, Mongo and its own search | Subnets derived from the slug under `project.tenant_network_prefix`; internet stays open because users can add MCP tools |
 | P1-61 | Gateway runs as a limited role, so row-level security applies | 03, 05 | P0 | review | P1-18 | A query with no tenant filter can't cross tenants on the gateway's own connection | Was connecting as a superuser, which bypasses RLS; tests now connect as `katip_gateway` |
+| P1-62 | Cross-tenant checks on every install; design docs updated | 01, 05, 07, 10 | P0 | review | P1-59…61 | Breaking a boundary fails `dev:up` | Network, Mongo, search, gateway, Postgres, Valkey and login across tenants; confirmed by deliberately breaking the network boundary |
 
 ### M2 Governance console and portal (S4–S5)
 

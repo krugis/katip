@@ -110,6 +110,7 @@ Details: [lld/03](lld/03-policy-gateway-and-router.md).
 | ADR-006 | **AGPL-3.0 + commercial licence** (dual licensing) for our modules; contributors sign a CLA | Accepted (31 Oct 2026) | Open source and free for everyone, including commercial use. Anyone who modifies the code and hosts it for others must publish their changes, which protects our hosting and services revenue. Companies that won't publish changes (OEMs, integrators) can buy a commercial licence. The CLA gives us the right to relicense contributions. Lawyer to review the licence notice and CLA text |
 | ADR-007 | Secrets in **SOPS + age** encrypted env files; OpenBao later for per-tenant keys | Accepted | Simplest secure option on plain VMs |
 | ADR-008 | **Traefik** behind **Cloudflare** as gateway and ingress | Accepted | Docker labels, automatic TLS, IP allowlist and rate-limit middlewares |
+| ADR-012 | The **policy gateway is the one control point** for LLM calls; users stay free to add MCP tools | Accepted | User-added tools and generated flows can't be controlled in advance, but every model call still passes through the gateway |
 | ADR-009 | Expose company knowledge, deep research and Studio flows to LibreChat as **MCP servers** | Accepted (phase 2) | No LibreChat changes; per-user identity via `{{LIBRECHAT_USER_*}}` headers |
 | ADR-010 | Usage metering in **our own Postgres ledger** (+ Valkey counters); **Lago** only for invoicing | Accepted | OpenMeter needs Kafka and ClickHouse, which is too heavy for phase 1 |
 | ADR-011 | Default model **DeepSeek V4 Flash via zero-retention providers** (DeepInfra); the DeepSeek first-party endpoint is blocked | Accepted | About $0.27–0.32 per typical user per month; OpenRouter lists DeepSeek's own endpoint as "may train" |
@@ -118,7 +119,9 @@ Details: [lld/03](lld/03-policy-gateway-and-router.md).
 
 - **Tenant** = one customer company. It has:
   - a slug (`acme`) and a subdomain (`acme.<our-domain>`), with an optional custom domain;
-  - one LibreChat instance and one Mongo database (`lc_acme`);
+  - one LibreChat instance, one Meilisearch and one Docker network;
+  - one Mongo database (`lc_acme`) with a login limited to it;
+  - its own secrets (`CREDS`, `JWT`, OIDC client, gateway key);
   - one Keycloak organization and OIDC client;
   - one LiteLLM team;
   - one Lago customer;
@@ -196,6 +199,21 @@ How quotas work:
 - Encryption in transit and at rest.
 - An append-only audit log.
 
+**Tenant isolation**
+
+Isolation has separate layers, and `pnpm dev:up` tests each of them across two real tenants on every install (lld/10).
+
+- **Network:** a tenant's LibreChat reaches only Traefik, the gateway, Mongo and its own search.
+- **Stores:** its own Mongo login and Meilisearch.
+- **Governance data:** the gateway's Postgres role is bound by row-level security, so a query with no tenant filter can't cross tenants.
+- **Identity:** a member of one tenant is refused by another's LibreChat.
+
+**LLM calls**
+
+- The policy gateway is the one control point for what reaches a model, including calls made for user-added MCP tools and generated flows (ADR-012).
+- Requests pass an allow list, and every text field is scanned. Tool arguments stay masked, and placeholders hold for a whole conversation with nothing stored.
+- Users may add any MCP tool. Images and files pass unscanned for now, and are logged (P3-11).
+
 **Supply chain**
 
 - Pinned images, Renovate, Trivy in CI, and our own LiteLLM image build.
@@ -206,7 +224,7 @@ How quotas work:
 | --- | --- | --- |
 | dev (local) | developer laptop | 32 GB RAM recommended; 16 GB without Presidio and Keycloak |
 | dev/test shared | Hetzner AX42 (8 cores, 64 GB) | about 28 GB for dev + test stacks |
-| pilot (≤200 users) | 1 × 8 vCPU / 32 GB / 250 GB SSD + Storage Box backups | + about 0.5 GB per tenant instance |
+| pilot (≤200 users) | 1 × 8 vCPU / 32 GB / 250 GB SSD + Storage Box backups | + about 0.5–0.7 GB per tenant (LibreChat 470–610 MB and Meilisearch about 45 MB, measured idle in dev with almost no data) |
 | production (≤1,000 users) | 3 VMs: app + gateway, databases, workers | see lld/01 |
 | KVKK region | Same topology in a Turkish data centre + GPU server for vLLM | – |
 
@@ -217,3 +235,27 @@ How quotas work:
 - [ ] Card payment provider for subscriptions (iyzico / PayTR adapter for Lago).
 - [ ] Domestic LLM partner and Turkish GPU hosting quote (KVKK add-on cost assumption: $4 per user).
 - [ ] Measure LibreChat instance RAM per tenant in the pilot (ADR-002 cost).
+
+## 10. What changed, by building block
+
+Changes from the unified setup and tenant isolation work (November 2026). PR numbers are in `krugis/katip`; details are in the linked LLDs.
+
+| Building block | What changed | Tracker | PR | LLD |
+| --- | --- | --- | --- | --- |
+| **Setup script** (`pnpm dev:up`) | One script installs everything, including from a fresh `git clone`. Re-running applies config changes. Time limits on throwaway containers | P0-14…21 | #2, #6, #7 | 01 |
+| **Config and env files** | `katip.config.yaml` and `katip.env` drive all images, names, models and tenants. Unknown settings are rejected. A list of tenants, with two in dev | P0-12, P0-17, P0-19, P1-59 | #2, #6, #11 | 01 |
+| **Policy gateway** | Tenants, keys, catalog and policy from Postgres. Quotas, usage metering. Request allow list; every text field scanned; tool arguments stay masked. `/readyz` | P1-02, P1-04, P1-09, P1-10, P1-14, P0-21, P1-57 | #4, #5, #6, #9 | 03 |
+| **PII masking** (`packages/pii`) | Presidio name detection, with a per-tenant rule for when it fails. Placeholders hold for a whole conversation, with nothing stored | P1-11, P1-58 | #5, #10 | 03 |
+| **Presidio** | Built by the script, with its language model pinned and checksum-verified | P1-11, P0-18 | #5, #6 | 03 |
+| **Governance DB** (Postgres) | Schema, migrations, seeds. **The gateway runs as `katip_gateway`, so row-level security now applies**; it previously connected as a superuser, which bypasses it | P1-17, P1-18, P1-61 | #3, #13 | 05 |
+| **Keycloak** | Realm, roles, organizations and login flow applied from config, with forced MFA and a Turkish theme | P1-19 | #7 | 02 |
+| **LibreChat** | Keycloak login only. Upgraded from v0.7.8 to v0.8.7 so chat knows the user. Waits for Keycloak at startup. Login rate limit raised, as a shared office IP would be locked out | P1-19, P1-05 | #7, #8 | 02, 03 |
+| **MongoDB** | Each tenant has a login limited to its own database, replacing `root` | P1-59 | #11 | 01, 07 |
+| **Meilisearch** | **One per tenant instead of one shared.** LibreChat has no index prefix setting, and its sync deletes documents missing from its own database | P1-59 | #11 | 01, 07 |
+| **Valkey** | Password required. The health check now reads the reply | P1-60 | #12 | 01 |
+| **Docker networks** | One per tenant. LibreChat left the shared `edge` and `backend` networks | P1-60 | #12 | 01 |
+| **Traefik** | Reaches each tenant over that tenant's network. Dev aliases let containers use public hostnames | P1-19, P1-60 | #7, #12 | 01 |
+| **LiteLLM** | Built by the script. Models and provider keys come from config and env; the static config is gone. No longer reachable from LibreChat | P0-05, P0-19, P1-60 | #2, #6, #12 | 03 |
+| **Isolation checks** | `dev:up` fails if any boundary between tenants can be crossed | P1-62 | #14 | 10 |
+
+**Not changed yet:** the `dev` and `prod` profiles and SOPS (P0-22), tool-call logging and rules, and filtering uploaded documents (P3-11).
