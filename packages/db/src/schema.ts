@@ -282,6 +282,11 @@ export const usageEvents = pgTable(
     fallback: boolean('fallback').notNull().default(false),
     overage: boolean('overage').notNull().default(false),
     requestId: text('request_id'),
+    /** Tools the model asked to call: names only, one entry per call, never arguments. */
+    toolCalls: text('tool_calls')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
   },
   (t) => [
     index('usage_events_tenant_ts_idx').on(t.tenantId, t.ts),

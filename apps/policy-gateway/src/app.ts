@@ -3,6 +3,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError, Errors, createLogger, type Logger } from '@katip/shared';
+import { ToolCallLog } from './tool-calls.js';
 import {
   PlaceholderMap,
   conversationTokens,
@@ -285,8 +286,23 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     if (fallback) reply.header('x-katip-fallback', 'true');
     if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
 
+    const toolCalls = new ToolCallLog();
     const finish = async (inputTokens: number, outputTokens: number) => {
       await deps.quota.settle(reservation, inputTokens + outputTokens);
+      const tools = toolCalls.list();
+      if (tools.length > 0) {
+        // Names only. Users can add any MCP tool, and this shows which ones models call.
+        req.log.info(
+          {
+            event: 'tool_calls_requested',
+            tenant_id: ctx.tenant.id,
+            user_id: ctx.user.id,
+            conversation_id: conversationId,
+            tools,
+          },
+          'model asked to call tools',
+        );
+      }
       await deps.usage.record({
         tenantId: ctx.tenant.id,
         userId: ctx.user.id,
@@ -304,6 +320,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
         piiEntities: map.counts() as Record<string, number>,
         conversationId,
         source: 'chat',
+        toolCalls: tools,
       });
       req.log.info(
         {
@@ -322,7 +339,10 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
 
     if (!body.stream) {
       const json = (await response.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
+        choices?: Array<{
+          index?: number;
+          message?: { content?: unknown; tool_calls?: unknown; function_call?: unknown };
+        }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number };
         model?: string;
       };
@@ -331,13 +351,14 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
           // Text for the user only. tool_calls stay masked: real values must not
           // reach tools, which may be any MCP server a user added (LLD-03 §5).
           c.message.content = unmaskText(c.message.content, map);
+        if (c.message) toolCalls.add(c.index ?? 0, c.message);
       }
       json.model = model.id;
       await finish(json.usage?.prompt_tokens ?? 0, json.usage?.completion_tokens ?? 0);
       return json;
     }
 
-    await streamThrough(reply, response, map, model.id, finish, reservation);
+    await streamThrough(reply, response, map, model.id, finish, reservation, toolCalls);
     return reply;
   });
 
@@ -435,6 +456,7 @@ async function streamThrough(
   modelId: string,
   finish: (inTok: number, outTok: number) => Promise<void>,
   reservation: Reservation,
+  toolCalls: ToolCallLog,
 ): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
@@ -490,7 +512,10 @@ async function streamThrough(
             break;
           }
           let chunk: {
-            choices?: Array<{ index?: number; delta?: { content?: unknown } }>;
+            choices?: Array<{
+              index?: number;
+              delta?: { content?: unknown; tool_calls?: unknown; function_call?: unknown };
+            }>;
             usage?: { prompt_tokens?: number; completion_tokens?: number };
             model?: string;
           };
@@ -510,6 +535,7 @@ async function streamThrough(
             if (c.delta && typeof c.delta.content === 'string') {
               c.delta.content = unmaskerFor(c.index ?? 0).push(c.delta.content);
             }
+            if (c.delta) toolCalls.add(c.index ?? 0, c.delta);
           }
           chunk.model = modelId;
           lastChunk = { ...chunk, choices: [], usage: undefined };

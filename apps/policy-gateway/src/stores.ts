@@ -80,6 +80,8 @@ export interface UsageEvent {
   piiEntities: Record<string, number>;
   conversationId?: string | undefined;
   source: 'chat' | 'embedding';
+  /** Tools the model asked to call: names only (LLD-03 §5). */
+  toolCalls?: string[] | undefined;
 }
 
 export interface UsageSink {

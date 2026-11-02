@@ -570,6 +570,80 @@ describe('placeholders across a conversation', () => {
   });
 });
 
+describe('which tools a model asked to call', () => {
+  const user = { role: 'user', content: 'ara lütfen [[use-tool]]' };
+  const tools = [
+    { type: 'function', function: { name: 'hava_durumu', parameters: { type: 'object' } } },
+  ];
+
+  it.each([
+    ['non-streaming', false],
+    ['streaming', true],
+  ])('records and logs the name, never the arguments: %s', async (_label, stream) => {
+    const logged: unknown[] = [];
+    const logger = createLogger('test', {
+      level: 'info',
+      hooks: {
+        logMethod(args, method) {
+          logged.push(args[0]);
+          method.apply(this, args);
+        },
+      },
+    });
+    build(tenant(), { logger });
+    const res = await chat(
+      {
+        model: 'auto',
+        stream,
+        messages: [{ ...user, content: `${user.content} 10000000146` }],
+        tools,
+      },
+      { 'x-conversation-id': 'c-9' },
+    );
+    expect(res.statusCode).toBe(200);
+    expect(usage.events.at(-1)?.toolCalls).toEqual(['hava_durumu']);
+    const event = logged.find((l) => (l as { event?: string }).event === 'tool_calls_requested');
+    expect(event).toEqual({
+      event: 'tool_calls_requested',
+      tenant_id: 't-acme',
+      user_id: 'u-1',
+      conversation_id: 'c-9',
+      tools: ['hava_durumu'],
+    });
+    expect(JSON.stringify(event)).not.toContain('10000000146');
+    // The arguments reach the tool masked, on the path a real reply takes.
+    // Streamed arguments arrive in pieces, so they have to be joined to be searched.
+    const toolArgs: string = stream
+      ? res.body
+          .split('\n')
+          .filter((l) => l.startsWith('data: {'))
+          .flatMap((l) => JSON.parse(l.slice(6)).choices ?? [])
+          .map((c) => c.delta?.tool_calls?.[0]?.function?.arguments ?? '')
+          .join('')
+      : res.json().choices[0].message.tool_calls[0].function.arguments;
+    expect(res.body).toContain('hava_durumu');
+    expect(toolArgs).toContain('TR_TCKN_');
+    expect(toolArgs).not.toContain('10000000146');
+  });
+
+  it('records nothing for a reply with no tool calls', async () => {
+    const logged: unknown[] = [];
+    const logger = createLogger('test', {
+      level: 'info',
+      hooks: {
+        logMethod(args, method) {
+          logged.push(args[0]);
+          method.apply(this, args);
+        },
+      },
+    });
+    build(tenant(), { logger });
+    await chat({ model: 'auto', messages: [{ role: 'user', content: 'merhaba' }] });
+    expect(usage.events.at(-1)?.toolCalls).toEqual([]);
+    expect(JSON.stringify(logged)).not.toContain('tool_calls_requested');
+  });
+});
+
 describe('what the model sends to tools stays masked', () => {
   const PERSON = '⟦PERSON_1⟧';
   const args = JSON.stringify({ q: PERSON });
@@ -607,6 +681,7 @@ describe('what the model sends to tools stays masked', () => {
     const m = res.json().choices[0].message;
     expect(m.content).toBe('Ahmet Yilmaz aranıyor');
     expect(m.tool_calls[0].function.arguments).toBe(args);
+    expect(usage.events.at(-1)?.toolCalls).toEqual(['ara']);
   });
 
   it('streaming: reply text is unmasked, tool arguments are not', async () => {
@@ -631,6 +706,7 @@ describe('what the model sends to tools stays masked', () => {
     const toolLine = res.body.split('\n').find((l) => l.includes('tool_calls'));
     expect(toolLine).toContain('PERSON_1');
     expect(toolLine).not.toContain('Ahmet');
+    expect(usage.events.at(-1)?.toolCalls).toEqual(['ara']);
   });
 });
 

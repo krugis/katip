@@ -1,0 +1,1 @@
+ALTER TABLE "usage_events" ADD COLUMN "tool_calls" text[] DEFAULT '{}'::text[] NOT NULL;

@@ -41,7 +41,7 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
 | `model_catalog` | id, litellm_name, display_name, class (`standard/premium/tr/embedding`), provider, region, data_policy (`zero_retention/30d/unknown`), price_in_usd_micro_per_m, price_out_usd_micro_per_m, enabled | Global |
 | `tenant_model_allow` | tenant_id, model_id | |
 | `router_rules` | id, scope (`global/tenant`), tenant_id null, priority, condition jsonb, route jsonb, enabled | |
-| `usage_events` | id, tenant_id, user_id, department_id, ts, alias, model_id, class, input_tokens, cached_tokens, output_tokens, cost_usd_micro (provider cost), price_usd_micro (our list price for overage), conversation_id, source (`chat/embedding/research/flow`), flow_run_id, fallback bool, overage bool, request_id | **Partitioned by month** (`ts`); retained 24 months |
+| `usage_events` | id, tenant_id, user_id, department_id, ts, alias, model_id, class, input_tokens, cached_tokens, output_tokens, cost_usd_micro (provider cost), price_usd_micro (our list price for overage), conversation_id, source (`chat/embedding/research/flow`), flow_run_id, fallback bool, overage bool, request_id, tool_calls | **Partitioned by month** (`ts`); retained 24 months |
 | `usage_daily` | tenant_id, day, user_id, department_id, class, model_id, sums… | Materialised by a nightly job and incremental upsert |
 | `tenant_limits` | tenant_id, month, std_tokens, prem_tokens, research_runs (computed from seats + packs) | Cache of entitlements |
 | `budget_alerts` | tenant_id, scope, scope_id, month, threshold (50/80/100), sent_at | Prevents duplicate alerts |
