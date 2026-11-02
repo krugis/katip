@@ -543,5 +543,8 @@ export const steps = [
   },
 ];
 
+/** Steps that only hold while the containers run; `dev:down` makes them pending again. */
+export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke'];
+
 /** Steps a config change doesn't affect, so they stay done when re-applying. */
 export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight', 'networks']);

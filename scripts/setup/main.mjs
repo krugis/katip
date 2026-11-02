@@ -25,6 +25,7 @@ import { composeEnv, configHash, identityOf, loadConfig } from './config.mjs';
 import {
   AUTO_KEYS,
   KEEP_ON_CONFIG_CHANGE,
+  SERVICE_STEPS,
   deriveEnv,
   platformComposeArgs,
   steps,
@@ -352,6 +353,9 @@ async function cmdDown() {
   await tryRun('docker', [...platformComposeArgs(), 'down', '--remove-orphans'], {
     env: { ...process.env, ...ce },
   }).catch(() => {});
+  const state = loadState();
+  for (const id of SERVICE_STEPS) delete state.steps?.[id];
+  saveState(state);
   console.log(ok('stopped (data kept). `pnpm dev:up` restarts everything.'));
 }
 
