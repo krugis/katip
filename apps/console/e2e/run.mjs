@@ -816,11 +816,11 @@ try {
   );
   await shot(admin, 'usage-banner');
   const alertMails = mailpit(
-    `/api/v1/search?query=${encodeURIComponent(`to:${owner} subject:kota`)}`,
+    `/api/v1/search?query=${encodeURIComponent(`bcc:${owner} subject:kota`)}`,
   );
   check(alertMails.messages_count === 1, 'the admin got one email');
   await admin.waitForTimeout(12_000);
-  const again = mailpit(`/api/v1/search?query=${encodeURIComponent(`to:${owner} subject:kota`)}`);
+  const again = mailpit(`/api/v1/search?query=${encodeURIComponent(`bcc:${owner} subject:kota`)}`);
   check(again.messages_count === 1, 'and no second one on the next check');
 
   console.log('the audit log');
