@@ -1,0 +1,79 @@
+{
+  "app": {
+    "name": "Kâtip",
+    "openChat": "Go to chat",
+    "signOut": "Sign out",
+    "language": "Language",
+    "navigation": "Main menu",
+    "skip": "Skip to main content",
+    "loading": "Loading…"
+  },
+  "area": {
+    "provider": "Provider",
+    "tenant": "Company admin",
+    "department": "Department",
+    "account": "My account"
+  },
+  "nav": {
+    "provider": {
+      "tenants": "Companies",
+      "plans": "Plans and prices",
+      "models": "Model catalog",
+      "router": "Routing rules",
+      "usage": "Usage and margin",
+      "audit": "Audit"
+    },
+    "tenant": {
+      "overview": "Overview",
+      "users": "Users",
+      "departments": "Departments",
+      "policies": "Models and policies",
+      "access": "Access rules",
+      "identity": "Identity",
+      "usage": "Usage and reports",
+      "billing": "Billing",
+      "audit": "Audit"
+    },
+    "department": {
+      "overview": "Overview",
+      "users": "Department users",
+      "requests": "Approval requests",
+      "usage": "Department usage"
+    },
+    "account": {
+      "usage": "My usage",
+      "requests": "My requests",
+      "sessions": "Devices and sessions",
+      "privacy": "Privacy (KVKK)",
+      "preferences": "Preferences"
+    }
+  },
+  "page": {
+    "soonTitle": "This screen is on its way",
+    "soonBody": "This screen arrives with a later update. There is nothing you need to do for now."
+  },
+  "tenants": {
+    "name": "Company",
+    "slug": "Short name",
+    "status": "Status",
+    "empty": "No companies yet. Use pnpm tenant:create to add the first one.",
+    "error": "The companies could not be loaded. Please try again.",
+    "statusValue": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "deleted": "Deleted"
+    }
+  },
+  "problem": {
+    "title": "We can’t reach your account",
+    "retry": "Try again",
+    "noAccessTitle": "You don’t have access to this page",
+    "noAccessBody": "This page isn’t open to your role. If you think that’s a mistake, ask your company admin.",
+    "home": "Back to home",
+    "user_disabled": "Your account has been disabled. Ask your company admin.",
+    "user_not_provisioned": "Your account isn’t set up for this company yet. Ask your company admin.",
+    "forbidden": "Your account isn’t linked to one company, or your company is suspended. Ask your company admin.",
+    "unavailable": "The server can’t be reached right now. Try again shortly.",
+    "signInFailed": "Sign-in could not be completed. Please try again."
+  }
+}

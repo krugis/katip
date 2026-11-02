@@ -14,4 +14,8 @@ export default tseslint.config(
       'no-console': ['error', { allow: ['error', 'warn', 'log'] }],
     },
   },
+  {
+    files: ['apps/console/src/**', 'apps/console/e2e/**'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 );

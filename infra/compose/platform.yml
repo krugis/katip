@@ -68,7 +68,10 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KC_DB_PASSWORD:?from katip.env}
-      KC_HOSTNAME: auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+      # A full URL, so every link Keycloak writes, such as in invite emails, uses it. Otherwise
+      # a link takes its scheme and port from whoever called, and services call it internally.
+      KC_HOSTNAME: https://auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: 'true'
     volumes:

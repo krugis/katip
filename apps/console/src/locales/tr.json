@@ -1,0 +1,79 @@
+{
+  "app": {
+    "name": "Kâtip",
+    "openChat": "Sohbete git",
+    "signOut": "Çıkış yap",
+    "language": "Dil",
+    "navigation": "Ana menü",
+    "skip": "Ana içeriğe geç",
+    "loading": "Yükleniyor…"
+  },
+  "area": {
+    "provider": "Sağlayıcı",
+    "tenant": "Şirket yönetimi",
+    "department": "Departman",
+    "account": "Hesabım"
+  },
+  "nav": {
+    "provider": {
+      "tenants": "Şirketler",
+      "plans": "Planlar ve fiyatlar",
+      "models": "Model kataloğu",
+      "router": "Yönlendirme kuralları",
+      "usage": "Kullanım ve kâr",
+      "audit": "Denetim"
+    },
+    "tenant": {
+      "overview": "Genel bakış",
+      "users": "Kullanıcılar",
+      "departments": "Departmanlar",
+      "policies": "Modeller ve politikalar",
+      "access": "Erişim kuralları",
+      "identity": "Kimlik",
+      "usage": "Kullanım ve raporlar",
+      "billing": "Faturalama",
+      "audit": "Denetim"
+    },
+    "department": {
+      "overview": "Genel bakış",
+      "users": "Departman kullanıcıları",
+      "requests": "Onay istekleri",
+      "usage": "Departman kullanımı"
+    },
+    "account": {
+      "usage": "Kullanımım",
+      "requests": "İsteklerim",
+      "sessions": "Cihazlar ve oturumlar",
+      "privacy": "Gizlilik (KVKK)",
+      "preferences": "Tercihler"
+    }
+  },
+  "page": {
+    "soonTitle": "Bu ekran hazırlanıyor",
+    "soonBody": "Bu ekran sonraki bir güncellemeyle gelecek. Şimdilik yapmanız gereken bir şey yok."
+  },
+  "tenants": {
+    "name": "Şirket",
+    "slug": "Kısa ad",
+    "status": "Durum",
+    "empty": "Henüz şirket yok. İlk şirketi oluşturmak için pnpm tenant:create komutunu kullanın.",
+    "error": "Şirketler yüklenemedi. Lütfen tekrar deneyin.",
+    "statusValue": {
+      "active": "Etkin",
+      "suspended": "Askıda",
+      "deleted": "Silindi"
+    }
+  },
+  "problem": {
+    "title": "Hesabınıza ulaşılamıyor",
+    "retry": "Tekrar dene",
+    "noAccessTitle": "Bu sayfaya erişiminiz yok",
+    "noAccessBody": "Bu sayfa rolünüze açık değil. Bunun bir hata olduğunu düşünüyorsanız şirket yöneticinize başvurun.",
+    "home": "Ana sayfaya dön",
+    "user_disabled": "Hesabınız devre dışı bırakıldı. Şirket yöneticinize başvurun.",
+    "user_not_provisioned": "Hesabınız bu şirket için henüz hazır değil. Şirket yöneticinize başvurun.",
+    "forbidden": "Hesabınız tek bir şirkete bağlı değil veya şirketiniz askıya alındı. Şirket yöneticinize başvurun.",
+    "unavailable": "Sunucuya şu anda ulaşılamıyor. Biraz sonra tekrar deneyin.",
+    "signInFailed": "Giriş tamamlanamadı. Lütfen tekrar deneyin."
+  }
+}

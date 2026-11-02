@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Values come from the environment at start, so one image serves any domain.
+server {
+  listen 8080;
+  root /usr/share/nginx/html;
+
+  # nginx drops inherited headers in any location that sets its own, so each one lists them.
+
+  location = /config.json {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    add_header Content-Security-Policy "default-src 'none'" always;
+    return 200 '{"authority":"${KATIP_OIDC_AUTHORITY}","clientId":"console","baseDomain":"${KATIP_BASE_DOMAIN}"}';
+  }
+
+  location = /healthz {
+    default_type text/plain;
+    return 200 'ok';
+  }
+
+  # Named by content, so they can be kept for good.
+  location /assets/ {
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' ${KATIP_OIDC_ORIGIN}; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header Referrer-Policy "no-referrer" always;
+    try_files $uri =404;
+  }
+
+  # The app's own routes. Never cached, so a release takes effect at once.
+  location / {
+    add_header Cache-Control "no-cache" always;
+    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' ${KATIP_OIDC_ORIGIN}; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header Referrer-Policy "no-referrer" always;
+    try_files $uri /index.html;
+  }
+}
