@@ -510,9 +510,8 @@ describe('importing a CSV', () => {
       returning id`;
     const res = await send('GET', url(a, `/imports/${job!['id']}`));
     expect(res.json().status).toBe('interrupted');
-    expect((await send('POST', url(a, '/import'), 'email,name\n1@a.test,A\n')).statusCode).toBe(
-      202,
-    );
+    // Waits for it, or it would still be writing when the next test clears the tables.
+    expect((await importCsv('email,name\n1@a.test,A\n')).status).toBe('done');
   });
 
   it("answers 404 for another company's import", async () => {
