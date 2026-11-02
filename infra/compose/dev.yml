@@ -77,9 +77,13 @@ services:
     restart: unless-stopped
     volumes:
       - ../litellm/rendered/config.dev.yaml:/app/config.yaml:ro
+    # For a model running on this machine (local-llm-relay.mjs).
+    extra_hosts:
+      - host.docker.internal:host-gateway
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
       MOCK_LLM_KEY: ${MOCK_LLM_KEY:?from katip.env}
+      LOCAL_LLM_KEY: ${KATIP_LOCAL_LLM_KEY:-none}
       # Real providers (empty = the model routes to mock-llm, see renderLiteLLMModels)
       DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

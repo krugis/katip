@@ -113,6 +113,12 @@ networks:
 
 Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, starting from a hash of the slug and stepping to the next free one, and Docker keeps what was chosen. They're set explicitly because Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.
 
+### Testing with a real model on this machine
+
+Set `KATIP_LOCAL_LLM_UPSTREAM` in `katip.env` to an OpenAI-compatible server's `host:port`, such as llama.cpp at `127.0.0.1:8080`, then run `pnpm dev:up` and `pnpm test:local-llm`. Models with no provider key then use it instead of the mock. Without it, installs and CI keep the mock, which is quick and predictable.
+
+Such a server usually listens on localhost only, which containers can't reach. So `scripts/setup/local-llm-relay.mjs` runs on the host's network, and takes connections from the `backend` network only, so a tenant's LibreChat can't reach the model around the gateway. It's a small Node script, to avoid adding a GPL tool to the stack.
+
 ## 3. Environments
 
 | Env | Host | Contents | Data |

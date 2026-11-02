@@ -252,7 +252,11 @@ try {
 
   // The answer proves the path: LibreChat → gateway (knows the user) → LiteLLM → mock.
   const chat = await chatThroughLibreChat(b1);
-  if (chat.error || !chat.text.includes('Echo:')) {
+  // The mock echoes. A real model answers as it likes, so any answer will do.
+  const answered = process.env.REAL_MODEL
+    ? chat.text.trim().length > 0
+    : chat.text.includes('Echo:');
+  if (chat.error || !answered) {
     throw new Error(`chat through LibreChat failed: ${chat.text.slice(0, 200)}`);
   }
   // Read by the smoke step, which checks the gateway recorded this conversation.

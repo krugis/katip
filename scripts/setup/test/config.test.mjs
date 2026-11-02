@@ -288,6 +288,20 @@ describe('tenants', () => {
     expect(pickTenantSubnet(config, a, all.slice(1))).toBe('10.77.1.0/24');
   });
 
+  it('prefers a real key, then a local model, then the mock', () => {
+    const local = renderLiteLLMModels(config, { KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080' });
+    expect(local).toContain('api_base: http://host.docker.internal:18090/v1');
+    expect(local).not.toContain('mock-llm');
+    const mock = renderLiteLLMModels(config, {});
+    expect(mock).toContain('mock-llm');
+    expect(mock).not.toContain('host.docker.internal');
+    const key = renderLiteLLMModels(config, {
+      KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080',
+      DEEPINFRA_API_KEY: 'k',
+    });
+    expect(key).toContain('deepinfra/deepseek-ai/DeepSeek-V4-Flash');
+  });
+
   it('keeps LibreChat off the shared networks', () => {
     const compose = read('compose', 'tenant.tmpl.yml');
     expect(compose).not.toMatch(/^\s+- (edge|backend)$/m);
