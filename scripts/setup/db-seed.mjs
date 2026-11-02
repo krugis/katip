@@ -3,6 +3,7 @@
 //   platform: migrations, roles, plans, model catalog and router rules
 //   tenants:  dev only, after provisioning: demo users, and the seats, limits and PII policy
 //             from katip.config.yaml, so editing them there takes effect on a re-run
+//   forget:   removes the rows of a tenant whose first creation failed
 // Input comes through KATIP_SEED (see seedInput in config.mjs).
 const stage = process.argv[2];
 const url = process.env.DATABASE_URL;
@@ -13,7 +14,7 @@ const { tenants, models } = JSON.parse(process.env.KATIP_SEED);
 const dbPkg = await import('@katip/db');
 const postgres = (await import('postgres')).default;
 const { drizzle } = await import('drizzle-orm/postgres-js');
-const { migrate, seed } = dbPkg;
+const { forgetUnfinishedTenant, migrate, seed } = dbPkg;
 
 const client = postgres(url, { max: 1 });
 const d = drizzle(client, { schema: dbPkg });
@@ -64,6 +65,9 @@ if (stage === 'platform') {
         set policy = tenant_policies.policy || excluded.policy`;
   }
   console.log(`${tenants.length} dev tenants seeded`);
+} else if (stage === 'forget') {
+  await forgetUnfinishedTenant(client, process.argv[3]);
+  console.log(`rows of ${process.argv[3]} removed`);
 } else {
   throw new Error(`unknown stage: ${stage}`);
 }

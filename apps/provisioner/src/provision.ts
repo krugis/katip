@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// tenant:create (LLD-07 §2, tracker P1-21). Each step checks what exists and adds what's
-// missing, so a re-run finishes a failed attempt, and changes nothing once it's complete.
+// tenant:create (LLD-07 §2, tracker P1-21, P1-22), in stages, with the host starting
+// LibreChat between them. Each step checks what exists and adds what's missing, so a re-run
+// finishes a failed attempt, and changes nothing once it's complete.
 import { z } from 'zod';
 import { hashGatewayKey, keyPrefix, verifyKey } from '@katip/shared';
 import type { ProvisionerStore } from './store.js';
@@ -37,6 +38,8 @@ export interface IdentityAdmin {
   ensureAdmin(input: TenantInput): Promise<{ id: string }>;
   /** Emails the tenant admin a link to set their password and MFA. */
   sendInvite(userId: string, input: TenantInput): Promise<void>;
+  /** Undoes a failed first attempt. Leaves anyone who has already logged in. */
+  removeTenantIdentity(input: TenantInput): Promise<void>;
 }
 
 /** MongoDB, as this needs it. True if the login was created. */
@@ -46,6 +49,7 @@ export interface ProvisionDeps {
   store: ProvisionerStore;
   identity: IdentityAdmin;
   ensureMongoUser: EnsureMongoUser;
+  dropMongoDatabase: (database: string) => Promise<void>;
 }
 
 export interface ProvisionResult {
@@ -65,6 +69,32 @@ export class ProvisionError extends Error {
   }
 }
 
+/** Runs named steps as one job, which records the step that failed. */
+async function asJob<T>(
+  store: ProvisionerStore,
+  slug: string,
+  type: string,
+  body: (step: <R>(name: string, fn: () => Promise<R>) => Promise<R>, jobId: string) => Promise<T>,
+  result: (value: T) => Record<string, unknown>,
+): Promise<T> {
+  const jobId = await store.startJob(slug, type);
+  let current = 'start';
+  try {
+    const value = await body(async (name, fn) => {
+      current = name;
+      await store.jobStep(jobId, name);
+      return fn();
+    }, jobId);
+    await store.finishJob(jobId, result(value));
+    return value;
+  } catch (e) {
+    // The step's name only: the message of a failed call may hold values.
+    await store.failJob(jobId, current).catch(() => undefined);
+    throw new ProvisionError(current, e);
+  }
+}
+
+/** Everything a tenant's LibreChat needs before it can start. */
 export async function createTenant(
   deps: ProvisionDeps,
   rawInput: unknown,
@@ -72,62 +102,108 @@ export async function createTenant(
 ): Promise<ProvisionResult> {
   const input = TenantInputSchema.parse(rawInput);
   const { store } = deps;
-  const jobId = await store.startJob(input.slug);
-  const changedSteps: string[] = [];
-  let step = 'governance-db';
-  let tenantId: string | null = null;
-  const run = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-    step = name;
-    await store.jobStep(jobId, name);
-    return fn();
-  };
+  return asJob(
+    store,
+    input.slug,
+    'tenant.create',
+    async (step, jobId) => {
+      const changedSteps: string[] = [];
+      const db = await step('governance-db', () => store.ensureTenant(input));
+      const id = db.tenantId;
+      await store.jobTenant(jobId, id);
+      if (db.created) changedSteps.push('governance-db');
 
-  try {
-    const db = await run('governance-db', () => store.ensureTenant(input));
-    tenantId = db.tenantId;
-    await store.jobTenant(jobId, tenantId);
-    const id = tenantId;
-    if (db.created) changedSteps.push('governance-db');
+      const identityChanged = await step('keycloak', () =>
+        deps.identity.ensureTenantIdentity(input, secrets.oidcClientSecret),
+      );
+      if (identityChanged) changedSteps.push('keycloak');
 
-    const identityChanged = await run('keycloak', () =>
-      deps.identity.ensureTenantIdentity(input, secrets.oidcClientSecret),
-    );
-    if (identityChanged) changedSteps.push('keycloak');
+      const mongoCreated = await step('mongodb', () =>
+        deps.ensureMongoUser(`lc_${input.slug}`, secrets.mongoPassword),
+      );
+      if (mongoCreated) changedSteps.push('mongodb');
 
-    // The DB row comes last: until it exists the invite hasn't gone out, so a re-run sends it.
-    // Once it exists, a re-run adds no second admin, whatever email it's given.
-    await run('tenant-admin', async () => {
-      if (await store.hasTenantAdmin(id)) return;
-      const admin = await deps.identity.ensureAdmin(input);
-      await deps.identity.sendInvite(admin.id, input);
-      await store.addTenantAdmin(id, admin.id, input);
-      changedSteps.push('tenant-admin');
-    });
+      await step('gateway-key', async () => {
+        const prefix = keyPrefix(secrets.gatewayKey);
+        if (!prefix) throw new Error('the gateway key has the wrong format');
+        const live = await store.liveGatewayKeys(id);
+        for (const k of live) {
+          if (await verifyKey(secrets.gatewayKey, k.keyHash)) return;
+        }
+        // The tenant has one live key, and its secrets file holds it: replace any other.
+        await store.replaceGatewayKey(id, hashGatewayKey(secrets.gatewayKey), prefix);
+        changedSteps.push('gateway-key');
+      });
 
-    const mongoCreated = await run('mongodb', () =>
-      deps.ensureMongoUser(`lc_${input.slug}`, secrets.mongoPassword),
-    );
-    if (mongoCreated) changedSteps.push('mongodb');
+      return { tenantId: id, alreadyExists: changedSteps.length === 0, changedSteps };
+    },
+    (r) => ({ steps: r.changedSteps }),
+  );
+}
 
-    await run('gateway-key', async () => {
-      const prefix = keyPrefix(secrets.gatewayKey);
-      if (!prefix) throw new Error('the gateway key has the wrong format');
-      const live = await store.liveGatewayKeys(id);
-      for (const k of live) {
-        if (await verifyKey(secrets.gatewayKey, k.keyHash)) return;
-      }
-      // The tenant has one live key, and its secrets file holds it: replace any other.
-      await store.replaceGatewayKey(id, hashGatewayKey(secrets.gatewayKey), prefix);
-      changedSteps.push('gateway-key');
-    });
+/**
+ * The last stage, once LibreChat is up and has passed its smoke test: only then is the
+ * tenant admin invited, so nobody gets a link to something that isn't running.
+ */
+export async function finishTenant(
+  deps: ProvisionDeps,
+  rawInput: unknown,
+  priorSteps: string[] = [],
+): Promise<ProvisionResult> {
+  const input = TenantInputSchema.parse(rawInput);
+  const { store } = deps;
+  return asJob(
+    store,
+    input.slug,
+    'tenant.finish',
+    async (step, jobId) => {
+      const id = await store.tenantId(input.slug);
+      if (!id) throw new Error('the tenant does not exist');
+      await store.jobTenant(jobId, id);
+      const changedSteps: string[] = [];
 
-    const alreadyExists = changedSteps.length === 0;
-    if (!alreadyExists) await store.audit(id, input.slug, changedSteps);
-    await store.finishJob(jobId, { steps: changedSteps });
-    return { tenantId: id, alreadyExists, changedSteps };
-  } catch (e) {
-    // The step's name only: the message of a failed call may hold values.
-    await store.failJob(jobId, step).catch(() => undefined);
-    throw new ProvisionError(step, e);
-  }
+      // The DB row comes last: until it exists the invite hasn't gone out, so a re-run sends it.
+      // Once it exists, a re-run adds no second admin, whatever email it's given.
+      await step('tenant-admin', async () => {
+        if (await store.hasTenantAdmin(id)) return;
+        const admin = await deps.identity.ensureAdmin(input);
+        await deps.identity.sendInvite(admin.id, input);
+        await store.addTenantAdmin(id, admin.id, input);
+        changedSteps.push('tenant-admin');
+      });
+
+      const all = [...priorSteps, ...changedSteps];
+      if (all.length > 0) await store.audit(id, input.slug, all);
+      return { tenantId: id, alreadyExists: all.length === 0, changedSteps };
+    },
+    (r) => ({ steps: r.changedSteps }),
+  );
+}
+
+/**
+ * Undoes a failed first attempt in Keycloak and Mongo, so it leaves nothing behind. A tenant
+ * with users has been in use, so this refuses it, whatever the caller believes.
+ */
+export async function rollbackTenant(
+  deps: ProvisionDeps,
+  rawInput: unknown,
+  failedStep: string,
+): Promise<void> {
+  const input = TenantInputSchema.parse(rawInput);
+  const { store } = deps;
+  await asJob(
+    store,
+    input.slug,
+    'tenant.rollback',
+    async (step) => {
+      await step('check', async () => {
+        if (await store.tenantHasUsers(input.slug)) {
+          throw new Error('this tenant has users, so it will not be rolled back');
+        }
+      });
+      await step('mongodb', () => deps.dropMongoDatabase(`lc_${input.slug}`));
+      await step('keycloak', () => deps.identity.removeTenantIdentity(input));
+    },
+    () => ({ failedStep }),
+  );
 }

@@ -167,6 +167,29 @@ export class KeycloakAdmin implements IdentityAdmin {
     return { id: user.id };
   }
 
+  async removeTenantIdentity(input: TenantInput): Promise<void> {
+    // Only someone who never set a password, and belongs nowhere else. Anyone else may be
+    // known to a LibreChat, which refuses a known email arriving with a new id (LLD-07 §2).
+    const users = await this.api<(Named & { requiredActions?: string[] })[]>(
+      'GET',
+      `/users?email=${encodeURIComponent(input.adminEmail)}&exact=true`,
+    );
+    const user = users?.[0];
+    if (user?.requiredActions?.includes('UPDATE_PASSWORD')) {
+      const orgs = await this.api<{ alias: string }[]>(
+        'GET',
+        `/organizations/members/${user.id}/organizations`,
+      );
+      if (!orgs?.some((o) => o.alias !== input.slug)) {
+        await this.api('DELETE', `/users/${user.id}`);
+      }
+    }
+    const client = await this.client(clientIdOf(input.slug));
+    if (client) await this.api('DELETE', `/clients/${client.id}`);
+    const org = await this.organization(input.slug);
+    if (org) await this.api('DELETE', `/organizations/${org.id}`);
+  }
+
   async sendInvite(userId: string, input: TenantInput): Promise<void> {
     const query = new URLSearchParams({
       client_id: clientIdOf(input.slug),
