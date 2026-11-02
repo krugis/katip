@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AppError, Errors, createLogger, type Logger } from '@katip/shared';
 import {
   PlaceholderMap,
+  conversationTokens,
   StreamingUnmasker,
   maskChatRequest,
   unmaskText,
@@ -60,6 +61,8 @@ export interface GatewayDeps {
    * On failure the request follows the tenant's `pii.onDetectorFailure`.
    */
   piiDetector?: ExtraDetector;
+  /** Secret behind conversation placeholders; without it they're numbered per request. */
+  piiTokenKey?: string;
   /** Readiness beyond "the process is up", e.g. the governance DB is migrated. */
   ready?: () => Promise<boolean>;
   upstreamTimeoutMs?: number;
@@ -211,7 +214,12 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     const reservation = q.reservation;
 
     // 3. PII masking
-    const map = new PlaceholderMap();
+    // An unfilled "{{...}}" header would put every chat in one conversation.
+    const map = new PlaceholderMap(
+      deps.piiTokenKey && conversationId && !conversationId.includes('{{')
+        ? conversationTokens(deps.piiTokenKey, ctx.tenant.id, conversationId)
+        : undefined,
+    );
     let outbound: Record<string, unknown>;
     let piiDegraded = false;
     try {

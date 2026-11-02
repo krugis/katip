@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { detectStructured, resolveOverlaps, type EntityType, type Span } from './detect.js';
-import { maskText, type PlaceholderMap } from './mask.js';
+import { maskText, withoutPlaceholders, type PlaceholderMap } from './mask.js';
 
 export type PiiMode = 'off' | 'mask' | 'block';
 
@@ -70,7 +70,8 @@ export function createMasker(
   const blocked = new Set<EntityType>();
   let detectorFailed = false;
 
-  const finish = (text: string, found: Span[]): string => {
+  const finish = (text: string, spans: Span[]): string => {
+    const found = withoutPlaceholders(text, spans);
     for (const s of found) if (effectiveMode(policy, s.type) === 'block') blocked.add(s.type);
     return maskText(text, found, map);
   };

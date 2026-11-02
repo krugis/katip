@@ -489,6 +489,87 @@ describe('what leaves for the provider', () => {
   });
 });
 
+describe('placeholders across a conversation', () => {
+  const KEY = 'k'.repeat(32);
+  const a = 'Ahmet Yilmaz';
+  const b = 'Mehmet Kaya';
+  const detector = async (text: string): Promise<Span[]> =>
+    [a, b].flatMap((name) => {
+      const i = text.indexOf(name);
+      return i < 0
+        ? []
+        : [{ type: 'PERSON' as const, start: i, end: i + name.length, value: name, score: 0.9 }];
+    });
+  const sentText = () => JSON.stringify(mock.requests.at(-1)?.body.messages);
+  const send = (content: string, conversation?: string) =>
+    chat(
+      { model: 'auto', messages: [{ role: 'user', content }] },
+      conversation ? { 'x-conversation-id': conversation } : {},
+    );
+  const tokenOf = (text: string) => text.match(/⟦PERSON_[0-9a-f]+⟧/)?.[0];
+
+  it("keeps a person's placeholder between requests, whoever else is mentioned", async () => {
+    build(tenant(), { piiDetector: detector, piiTokenKey: KEY });
+    await send(a, 'c-1');
+    const first = tokenOf(sentText());
+    await send(`${b} ve ${a}`, 'c-1');
+    expect(first).toBeDefined();
+    expect(sentText()).toContain(first!);
+  });
+
+  it('uses other placeholders in another conversation', async () => {
+    build(tenant(), { piiDetector: detector, piiTokenKey: KEY });
+    await send(a, 'c-1');
+    const first = tokenOf(sentText());
+    await send(a, 'c-2');
+    expect(sentText()).not.toContain(first!);
+  });
+
+  it('matches a placeholder from earlier tool arguments, so the reply can be restored', async () => {
+    build(tenant(), { piiDetector: detector, piiTokenKey: KEY });
+    await send(a, 'c-1');
+    const token = tokenOf(sentText())!;
+    const res = await chat(
+      {
+        model: 'auto',
+        messages: [
+          { role: 'user', content: `${a} kim?` },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: '1',
+                type: 'function',
+                function: { name: 'ara', arguments: JSON.stringify({ q: token }) },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: '1', content: `Sonuç: ${token}` },
+        ],
+      },
+      { 'x-conversation-id': 'c-1' },
+    );
+    expect(res.statusCode).toBe(200);
+    // The mock echoes the last message: the tool result, holding the same placeholder.
+    expect(res.json().choices[0].message.content).toContain(a);
+    const toolCalls = sentText();
+    expect(toolCalls).not.toContain(a);
+    expect(toolCalls.match(/PERSON_[0-9a-f]+/g)?.every((p) => token.includes(p))).toBe(true);
+  });
+
+  it('numbers placeholders per request without a key or conversation id', async () => {
+    build(tenant(), { piiDetector: detector });
+    await send(a, 'c-1');
+    expect(sentText()).toContain('⟦PERSON_1⟧');
+    build(tenant(), { piiDetector: detector, piiTokenKey: KEY });
+    await send(a);
+    expect(sentText()).toContain('⟦PERSON_1⟧');
+    await send(a, '{{LIBRECHAT_BODY_CONVERSATIONID}}');
+    expect(sentText()).toContain('⟦PERSON_1⟧');
+  });
+});
+
 describe('what the model sends to tools stays masked', () => {
   const PERSON = '⟦PERSON_1⟧';
   const args = JSON.stringify({ q: PERSON });
