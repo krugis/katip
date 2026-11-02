@@ -376,6 +376,183 @@ describe('chat pipeline', () => {
   });
 });
 
+describe('what leaves for the provider', () => {
+  const TCKN = '10000000146';
+  const secret = `Ahmet Yilmaz TCKN ${TCKN}`;
+  const detector = async (text: string): Promise<Span[]> => {
+    const i = text.indexOf('Ahmet Yilmaz');
+    return i < 0
+      ? []
+      : [{ type: 'PERSON', start: i, end: i + 12, value: 'Ahmet Yilmaz', score: 0.9 }];
+  };
+  const sent = () => JSON.stringify(mock.requests.at(-1)?.body);
+  const user = { role: 'user', content: 'merhaba' };
+
+  it.each<[string, object]>([
+    [
+      'earlier tool-call arguments',
+      {
+        messages: [
+          user,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: '1',
+                type: 'function',
+                function: { name: 'ara', arguments: JSON.stringify({ q: secret }) },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: '1', content: 'ok' },
+        ],
+      },
+    ],
+    [
+      'tool definitions',
+      {
+        messages: [user],
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'ara', description: secret, parameters: { type: 'object' } },
+          },
+        ],
+      },
+    ],
+    ['message name', { messages: [{ role: 'user', name: secret, content: 'x' }] }],
+    ['metadata and unknown fields', { messages: [user], metadata: { n: secret }, custom: secret }],
+    [
+      'response schema',
+      {
+        messages: [user],
+        response_format: { type: 'json_schema', json_schema: { schema: { description: secret } } },
+      },
+    ],
+    [
+      'file name',
+      { messages: [{ role: 'user', content: [{ type: 'file', file: { filename: secret } }] }] },
+    ],
+    ['tool results', { messages: [user, { role: 'tool', tool_call_id: '1', content: secret }] }],
+  ])('masks or drops: %s', async (_label, payload) => {
+    build(tenant(), { piiDetector: detector });
+    const res = await chat({ model: 'auto', ...payload });
+    expect(res.statusCode).toBe(200);
+    expect(sent()).not.toContain(TCKN);
+    expect(sent()).not.toContain('Ahmet');
+  });
+
+  it('allows images and files through for now, and logs that it did', async () => {
+    const logged: unknown[] = [];
+    const logger = createLogger('test', {
+      level: 'info',
+      hooks: {
+        logMethod(args, method) {
+          logged.push(args[0]);
+          method.apply(this, args);
+        },
+      },
+    });
+    build(tenant(), { piiDetector: detector, logger });
+    const image = { type: 'image_url', image_url: { url: 'https://x.test/a.png' } };
+    const res = await chat({ model: 'auto', messages: [{ role: 'user', content: [image] }] });
+    expect(res.statusCode).toBe(200);
+    expect(sent()).toContain('https://x.test/a.png');
+    expect(logged).toContainEqual({
+      event: 'non_text_content_sent',
+      tenant_id: 't-acme',
+      user_id: 'u-1',
+      parts: { image_url: 1 },
+    });
+  });
+
+  it('logs dropped field names, never their values', async () => {
+    const logged: unknown[] = [];
+    const logger = createLogger('test', {
+      level: 'warn',
+      hooks: {
+        logMethod(args, method) {
+          logged.push(args[0]);
+          method.apply(this, args);
+        },
+      },
+    });
+    build(tenant(), { logger });
+    await chat({ model: 'auto', messages: [user], custom: secret });
+    expect(logged).toContainEqual({
+      event: 'request_fields_dropped',
+      tenant_id: 't-acme',
+      fields: ['custom'],
+    });
+    expect(JSON.stringify(logged)).not.toContain(TCKN);
+  });
+});
+
+describe('what the model sends to tools stays masked', () => {
+  const PERSON = '⟦PERSON_1⟧';
+  const args = JSON.stringify({ q: PERSON });
+  const detector = async (text: string): Promise<Span[]> => {
+    const i = text.indexOf('Ahmet Yilmaz');
+    return i < 0
+      ? []
+      : [{ type: 'PERSON', start: i, end: i + 12, value: 'Ahmet Yilmaz', score: 0.9 }];
+  };
+  const payload = { model: 'auto', messages: [{ role: 'user', content: 'Ahmet Yilmaz kim?' }] };
+
+  it('non-streaming: reply text is unmasked, tool arguments are not', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          id: 'x',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: `${PERSON} aranıyor`,
+                tool_calls: [
+                  { id: '1', type: 'function', function: { name: 'ara', arguments: args } },
+                ],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
+    build(tenant(), { piiDetector: detector, fetchImpl });
+    const res = await chat(payload);
+    const m = res.json().choices[0].message;
+    expect(m.content).toBe('Ahmet Yilmaz aranıyor');
+    expect(m.tool_calls[0].function.arguments).toBe(args);
+  });
+
+  it('streaming: reply text is unmasked, tool arguments are not', async () => {
+    const chunk = (delta: object) =>
+      `data: ${JSON.stringify({ id: 'x', choices: [{ index: 0, delta }] })}\n\n`;
+    const sse =
+      chunk({ content: `${PERSON} aranıyor` }) +
+      chunk({
+        tool_calls: [
+          { index: 0, id: '1', type: 'function', function: { name: 'ara', arguments: args } },
+        ],
+      }) +
+      'data: [DONE]\n\n';
+    const fetchImpl = (async () =>
+      new Response(sse, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })) as unknown as typeof fetch;
+    build(tenant(), { piiDetector: detector, fetchImpl });
+    const res = await chat({ ...payload, stream: true });
+    expect(res.body).toContain('Ahmet Yilmaz');
+    const toolLine = res.body.split('\n').find((l) => l.includes('tool_calls'));
+    expect(toolLine).toContain('PERSON_1');
+    expect(toolLine).not.toContain('Ahmet');
+  });
+});
+
 describe('quota behaviour at the limit', () => {
   it('block → 429 with an OpenAI rate-limit error', async () => {
     build(

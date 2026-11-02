@@ -144,6 +144,16 @@ If Presidio fails or times out while `PERSON` is active, names can go undetected
 - `allow` (default): the request continues and the response carries `x-katip-pii-degraded: true`.
 - `block`: the request is rejected with 503 `pii_unavailable`, and the provider is not called.
 
+### What may leave for a provider
+
+The gateway is the one control point for LLM calls, including those made for user-added MCP tools and generated flows, so requests pass through an allow list (`maskChatRequest` in `packages/pii`). A field not on it is dropped, and its name, never its value, is logged as `request_fields_dropped`. Every string that can carry text is scanned: messages, tool results, earlier tool-call arguments, tool definitions, response schemas and file names.
+
+- **Tool arguments stay masked.** The gateway unmasks reply text for the user, but not `tool_calls`, so a tool receives placeholders rather than real values. Users can add any MCP server, so this is what keeps personal data away from them. A tool asked to find a person by name therefore can't find them; a per-tenant list of trusted tools is possible later.
+- **Images, files and audio are allowed for now, unscanned**, and counted in a `non_text_content_sent` log event. Their contents reach the provider as they are. Filtering documents before they are sent is tracked as P3-11.
+- **What this can't see:** what a tool does with what it receives, including an MCP server calling its own LLM, and personal data the detectors miss.
+
+### When the detector fails
+
 Both cases log an error-level `pii_detector_failed` event with `tenant_id`, `user_id` and `action`, never prompt text. Monitoring (P1-43) alerts on this event.
 
 Test set: `packages/pii/test/fixtures/tr-*.json` with at least 200 Turkish sentences. Target recall ≥ 0.95 for TCKN/IBAN/phone/email and ≥ 0.80 for PERSON before GA.

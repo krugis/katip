@@ -6,7 +6,7 @@ import { AppError, Errors, createLogger, type Logger } from '@katip/shared';
 import {
   PlaceholderMap,
   StreamingUnmasker,
-  maskMessages,
+  maskChatRequest,
   unmaskText,
   type ChatMessage,
   type ExtraDetector,
@@ -212,10 +212,10 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
 
     // 3. PII masking
     const map = new PlaceholderMap();
-    let masked: ChatMessage[];
+    let outbound: Record<string, unknown>;
     let piiDegraded = false;
     try {
-      const r = await maskMessages(messages, ctx.tenant.pii, map, deps.piiDetector);
+      const r = await maskChatRequest(body, ctx.tenant.pii, map, deps.piiDetector);
       if (r.detectorFailed) {
         const reject = ctx.tenant.pii.onDetectorFailure === 'block';
         // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
@@ -232,7 +232,25 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
         piiDegraded = true;
       }
       if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
-      masked = r.messages;
+      if (r.dropped.length > 0) {
+        req.log.warn(
+          { event: 'request_fields_dropped', tenant_id: ctx.tenant.id, fields: r.dropped },
+          'dropped fields not on the allow list',
+        );
+      }
+      // Sent unscanned, by the product owner's decision for now (LLD-03 §5, P3-11).
+      if (Object.keys(r.nonTextParts).length > 0) {
+        req.log.info(
+          {
+            event: 'non_text_content_sent',
+            tenant_id: ctx.tenant.id,
+            user_id: ctx.user.id,
+            parts: r.nonTextParts,
+          },
+          'images or files sent unscanned',
+        );
+      }
+      outbound = r.body;
     } catch (e) {
       await deps.quota.settle(reservation, 0);
       throw e;
@@ -240,8 +258,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
 
     // 4. Upstream with fallback
     const { model, response, fallback } = await callUpstream(routed, {
-      ...body,
-      messages: masked,
+      ...outbound,
       user: `${ctx.tenant.slug}:${ctx.user.id}`,
       metadata: {
         tenant: ctx.tenant.slug,
@@ -303,6 +320,8 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       };
       for (const c of json.choices ?? []) {
         if (c.message && typeof c.message.content === 'string')
+          // Text for the user only. tool_calls stay masked: real values must not
+          // reach tools, which may be any MCP server a user added (LLD-03 §5).
           c.message.content = unmaskText(c.message.content, map);
       }
       json.model = model.id;
@@ -479,6 +498,7 @@ async function streamThrough(
             };
           }
           for (const c of chunk.choices ?? []) {
+            // Only text: delta.tool_calls stay masked, as in the non-streaming case.
             if (c.delta && typeof c.delta.content === 'string') {
               c.delta.content = unmaskerFor(c.index ?? 0).push(c.delta.content);
             }
