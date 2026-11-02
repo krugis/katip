@@ -46,7 +46,7 @@ await client`insert into tenant_limits (tenant_id, month, std_tokens, prem_token
 
 // Other policy keys in the row are left alone; only `pii` comes from the config.
 await client`insert into tenant_policies (tenant_id, policy)
-  values (${tenantId}, ${client.json({ pii })})
+  values (${tenantId}, ${JSON.stringify({ pii })}::jsonb)
   on conflict (tenant_id) do update
     set policy = tenant_policies.policy || excluded.policy`;
 
