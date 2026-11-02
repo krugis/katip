@@ -886,7 +886,7 @@ export const steps = [
   {
     id: 'build',
     title:
-      'Build images (litellm + presidio checksum-verified, gateway, console-api, provisioner, mock)',
+      'Build images (litellm + presidio checksum-verified, gateway, console, console-api, provisioner, mock)',
     async run(ctx) {
       const { version, sha256 } = ctx.config.images.litellm;
       ctx.tui?.setDetail?.(`litellm ${version} (sha256 verified)`);
@@ -950,6 +950,14 @@ export const steps = [
         {},
       );
       ctx.log('built ghcr.io/krugis/provisioner:dev');
+
+      ctx.tui?.setDetail?.('console');
+      await tryRun(
+        'docker',
+        ['build', '-t', 'ghcr.io/krugis/console:dev', '-f', 'apps/console/Dockerfile', '.'],
+        {},
+      );
+      ctx.log('built ghcr.io/krugis/console:dev');
 
       ctx.tui?.setDetail?.('console-api');
       await tryRun(
@@ -1031,7 +1039,7 @@ export const steps = [
   {
     id: 'aiplane',
     title:
-      'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api) + gateway smoke',
+      'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api, console) + gateway smoke',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait'], ctx);
@@ -1090,8 +1098,19 @@ export const steps = [
   },
   {
     id: 'smoke',
-    title: 'End-to-end smoke (models, login with MFA + final report)',
+    title: 'End-to-end smoke (console, models, login with MFA + final report)',
     async run(ctx) {
+      const consoleHost = `console.${ctx.config.project.base_domain}`;
+      for (const [path, expected] of [
+        ['/', '200'],
+        ['/tenant/users', '200'],
+        ['/config.json', '200'],
+        ['/api/v1/me', '401'],
+      ]) {
+        const code = (await curlEdge(ctx, consoleHost, path)).trim();
+        if (code !== expected)
+          throw new Error(`console ${path}: expected ${expected}, got ${code}`);
+      }
       for (const t of ctx.config.tenants) {
         const models = await curlBackend(ctx, '/v1/models', [
           '-H',

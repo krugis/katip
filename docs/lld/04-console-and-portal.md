@@ -2,6 +2,12 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. The provider's company list uses the real API; every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+
+**How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
+
+**Tokens** stay in `sessionStorage`, so they go with the tab. They renew by refresh token rather than a hidden iframe, which that policy forbids.
+
 ## 1. Areas and screens
 
 ### 1.1 Provider admin (us)
@@ -102,7 +108,7 @@ type TenantPolicy = {
 ## 4. UI notes
 
 - **Languages.** Turkish first, English second. Use i18next; all strings in `apps/console/src/locales/{tr,en}.json`.
-- **Accessibility.** Use shadcn components and keyboard navigation.
+- **Accessibility.** shadcn-style components, keyboard navigation, landmarks and a skip link.
 - **Charts.** Recharts: usage over time, split by class.
 - **Empty states.** Every list explains the next action ("Invite your first user").
 

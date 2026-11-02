@@ -46,7 +46,8 @@ The full design is in [docs/DESIGN.md](docs/DESIGN.md), and per-component design
 ```
 apps/
   policy-gateway/   OpenAI-compatible gateway: policy, PII masking, routing, metering
-  console-api/      API for the governance console: login, roles, tenant checks (skeleton)
+  console/          The governance console's web app
+  console-api/      API for the governance console: users, roles, tenant checks
   provisioner/      Creates tenants: pnpm tenant:create
   mock-llm/         OpenAI-compatible mock provider for tests and local dev
 packages/

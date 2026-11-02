@@ -32,3 +32,6 @@ brand-private/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Screenshots from pnpm test:console
+apps/console/e2e/artifacts/
