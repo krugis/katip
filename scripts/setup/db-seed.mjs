@@ -6,7 +6,7 @@
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
 if (!process.env.KATIP_SEED) throw new Error('KATIP_SEED is required');
-const { tenant, limits, pii, models } = JSON.parse(process.env.KATIP_SEED);
+const { tenant, limits, pii, models, smokeEmail } = JSON.parse(process.env.KATIP_SEED);
 
 const dbPkg = await import('@katip/db');
 const sharedPkg = await import('@katip/shared');
@@ -38,6 +38,11 @@ await client`insert into gateway_keys (tenant_id, key_hash, prefix, type)
 // The bootstrap smoke tests use demo@example.com; ensure it exists.
 await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
   values (${tenantId}, ${`${tenant.slug}-gateway`}, 'demo@example.com', 'Demo User', 'user', ${tenant.planCode}, 'active')
+  on conflict (tenant_id, email) do update set status = 'active'`;
+
+// The smoke test's chat goes through the gateway, which only serves known users.
+await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
+  values (${tenantId}, ${`${tenant.slug}-smoke`}, ${smokeEmail}, 'Smoke Test', 'user', ${tenant.planCode}, 'active')
   on conflict (tenant_id, email) do update set status = 'active'`;
 
 const month = new Date().toISOString().slice(0, 7).replace('-', '');

@@ -183,6 +183,12 @@ export function renderLiteLLMModels(config, env) {
   return lines.join('\n');
 }
 
+/** The custom endpoint's name in infra/librechat/librechat.tmpl.yaml. */
+export const CHAT_ENDPOINT = 'SME AI';
+
+/** The login smoke test's user: Keycloak's copy is throwaway, the DB row stays so chat works. */
+const smokeEmail = (config) => `smoke-member@${config.tenant.slug}.${config.project.base_domain}`;
+
 /** Input for scripts/setup/db-seed.mjs, which runs inside the gateway image. */
 export function seedInput(config) {
   const t = config.tenant;
@@ -195,6 +201,7 @@ export function seedInput(config) {
       kvkkAddon: t.kvkk_addon,
     },
     limits: t.limits,
+    smokeEmail: smokeEmail(config),
     pii: { mode: t.pii.mode, onDetectorFailure: t.pii.on_detector_failure },
     models: config.models.map((m) => ({
       id: m.alias,
@@ -226,6 +233,8 @@ export function identityInput(config) {
     defaultLocale: config.identity.default_locale,
     baseDomain: config.project.base_domain,
     tenant: { slug, name },
+    smokeEmail: smokeEmail(config),
+    chatEndpoint: CHAT_ENDPOINT,
     client: { id: `lc-${slug}`, origin, redirectUri: `${origin}/oauth/openid/callback` },
     users: [
       demoUser('admin', 'Admin', 'tenant_admin'),

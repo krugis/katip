@@ -3,11 +3,15 @@
 //   1. a new local user is forced to enrol MFA, then reaches LibreChat
 //   2. the next login asks for the code instead of enrolling again
 //   3. a user without the tenant's `member` role is refused
-// Uses throwaway users with a random password, removed afterwards.
-import { randomBytes } from 'node:crypto';
+//   4. the logged-in user can chat through LibreChat and the gateway
+// Uses users with a random password. The member stays in Keycloak, disabled between
+// runs: LibreChat refuses a login when a known email arrives with a new Keycloak id.
+import { randomBytes, randomUUID } from 'node:crypto';
 import { adminClient, findClient, findUser, grantClientRole, totp } from './kc-lib.mjs';
 
-const { realm, baseDomain, tenant, client } = JSON.parse(process.env.KATIP_IDENTITY);
+const { realm, baseDomain, tenant, client, smokeEmail, chatEndpoint } = JSON.parse(
+  process.env.KATIP_IDENTITY,
+);
 const api = await adminClient(
   process.env.KC_URL,
   process.env.KC_ADMIN_USER,
@@ -16,6 +20,8 @@ const api = await adminClient(
 const R = `/realms/${realm}`;
 const lcUrl = `https://${tenant.slug}.${baseDomain}`;
 const password = randomBytes(24).toString('base64url');
+// LibreChat rejects API calls without a browser's user agent.
+const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36';
 
 /** Minimal browser: a cookie jar and manual redirects. */
 function browser() {
@@ -25,14 +31,15 @@ function browser() {
     let opts = init;
     for (let hops = 0; hops < 12; hops++) {
       const host = new URL(current).host;
-      const cookies = [...jar.entries()]
-        .filter(([k]) => k.startsWith(`${host}|`))
-        .map(([k, v]) => `${k.split('|')[1]}=${v}`)
-        .join('; ');
+      const cookies = cookieHeader(host);
       const r = await fetch(current, {
         ...opts,
         redirect: 'manual',
-        headers: { ...opts.headers, ...(cookies ? { cookie: cookies } : {}) },
+        headers: {
+          'user-agent': USER_AGENT,
+          ...opts.headers,
+          ...(cookies ? { cookie: cookies } : {}),
+        },
       });
       for (const c of r.headers.getSetCookie()) {
         const [pair] = c.split(';');
@@ -49,7 +56,12 @@ function browser() {
     }
     throw new Error('too many redirects');
   }
-  return { go, hasCookie: (host, name) => jar.has(`${host}|${name}`) };
+  const cookieHeader = (host) =>
+    [...jar.entries()]
+      .filter(([k]) => k.startsWith(`${host}|`))
+      .map(([k, v]) => `${k.split('|')[1]}=${v}`)
+      .join('; ');
+  return { go, cookieHeader, hasCookie: (host, name) => jar.has(`${host}|${name}`) };
 }
 
 const decode = (s) => s.replace(/&amp;/g, '&').replace(/&#x3D;/g, '=');
@@ -87,6 +99,24 @@ async function makeUser(email) {
   return findUser(api, realm, email);
 }
 
+/** The member, ready for a first login: new password, no MFA yet, and it must enrol. */
+async function prepareMember(email) {
+  const existing = await findUser(api, realm, email);
+  if (!existing) return makeUser(email);
+  const U = `${R}/users/${existing.id}`;
+  for (const c of await api('GET', `${U}/credentials`)) {
+    if (c.type === 'otp') await api('DELETE', `${U}/credentials/${c.id}`);
+  }
+  await api('PUT', `${U}/reset-password`, { type: 'password', value: password, temporary: false });
+  await api('PUT', U, { enabled: true, requiredActions: ['CONFIGURE_TOTP'] });
+  return existing;
+}
+
+async function disableUser(email) {
+  const u = await findUser(api, realm, email);
+  if (u) await api('PUT', `${R}/users/${u.id}`, { enabled: false });
+}
+
 async function removeUser(email) {
   const u = await findUser(api, realm, email);
   if (u) await api('DELETE', `${R}/users/${u.id}`);
@@ -118,17 +148,69 @@ async function enrol(b, page) {
   return submit(b, form, { totp: totp(form.fields.totpSecret), userLabel: 'smoke' });
 }
 
+/**
+ * Sends one chat message the way LibreChat's client does, and returns the answer and
+ * conversation id. Fails if the gateway refuses the user, so it proves the user header.
+ */
+async function chatThroughLibreChat(b) {
+  const common = { 'user-agent': USER_AGENT };
+  const refresh = await fetch(`${lcUrl}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { ...common, cookie: b.cookieHeader(lcHost) },
+  });
+  if (!refresh.ok) throw new Error(`LibreChat session refresh failed: HTTP ${refresh.status}`);
+  const { token } = await refresh.json();
+  const auth = { ...common, authorization: `Bearer ${token}` };
+
+  const started = await fetch(`${lcUrl}/api/agents/chat/${encodeURIComponent(chatEndpoint)}`, {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text: 'merhaba',
+      sender: 'User',
+      isCreatedByUser: true,
+      messageId: randomUUID(),
+      parentMessageId: '00000000-0000-0000-0000-000000000000',
+      conversationId: null,
+      endpoint: chatEndpoint,
+      endpointType: 'custom',
+      model: 'fast',
+    }),
+  });
+  if (!started.ok) throw new Error(`LibreChat chat request failed: HTTP ${started.status}`);
+  const { streamId, conversationId } = await started.json();
+
+  const stream = await fetch(`${lcUrl}/api/agents/chat/stream/${encodeURIComponent(streamId)}`, {
+    headers: auth,
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = await stream.text();
+  for (const line of body.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    let event;
+    try {
+      event = JSON.parse(line.slice(5));
+    } catch {
+      continue;
+    }
+    if (!event.final) continue;
+    const msg = event.responseMessage;
+    const text = msg?.text || (msg?.content ?? []).map((p) => p.text ?? '').join('');
+    return { text, conversationId, error: msg?.error === true };
+  }
+  throw new Error(`chat stream ended without an answer: ${body.slice(-300)}`);
+}
+
 const lcHost = new URL(lcUrl).host;
-const member = `smoke-member@${tenant.slug}.${baseDomain}`;
+const member = smokeEmail;
 const outsider = `smoke-outsider@${tenant.slug}.${baseDomain}`;
 
 try {
-  await removeUser(member);
   await removeUser(outsider);
   const lc = await findClient(api, realm, client.id);
 
   // 1. Forced enrolment, then into LibreChat.
-  const m = await makeUser(member);
+  const m = await prepareMember(member);
   await grantClientRole(api, realm, lc, m.id, 'member');
   const b1 = browser();
   const afterPassword = await passwordStep(b1, member);
@@ -139,6 +221,14 @@ try {
   if (!done.url.startsWith(lcUrl) || !b1.hasCookie(lcHost, 'refreshToken')) {
     throw new Error(`login with MFA did not reach LibreChat: ${done.status} ${done.url}`);
   }
+
+  // The answer proves the path: LibreChat → gateway (knows the user) → LiteLLM → mock.
+  const chat = await chatThroughLibreChat(b1);
+  if (chat.error || !chat.text.includes('Echo:')) {
+    throw new Error(`chat through LibreChat failed: ${chat.text.slice(0, 200)}`);
+  }
+  // Read by the smoke step, which checks the gateway recorded this conversation.
+  console.log(`chat-conversation=${chat.conversationId}`);
 
   // 2. The next login asks for the code, and doesn't enrol again.
   const again = await passwordStep(browser(), member);
@@ -158,8 +248,8 @@ try {
     throw new Error(`the non-member login stopped before LibreChat: ${refused.url}`);
   }
 
-  console.log('oidc smoke ok: MFA forced, login works, non-member refused');
+  console.log('oidc smoke ok: MFA forced, login and chat work, non-member refused');
 } finally {
-  await removeUser(member).catch(() => {});
+  await disableUser(member).catch(() => {});
   await removeUser(outsider).catch(() => {});
 }
