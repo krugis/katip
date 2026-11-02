@@ -24,6 +24,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: DB migrations from empty (P1-17)
+        run: pnpm --filter @katip/db test
       - name: SPDX headers
         run: pnpm spdx:check
       - name: Dependency licences
