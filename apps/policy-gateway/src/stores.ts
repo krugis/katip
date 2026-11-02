@@ -187,6 +187,7 @@ const DevFileSchema = z.object({
         .object({
           mode: z.enum(['off', 'mask', 'block']),
           entities: z.record(z.enum(['off', 'mask', 'block'])).optional(),
+          onDetectorFailure: z.enum(['allow', 'block']).optional(),
         })
         .default({ mode: 'mask' }),
       users: z.array(

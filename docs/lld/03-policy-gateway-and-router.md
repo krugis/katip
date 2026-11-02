@@ -137,6 +137,13 @@ Policy modes per tenant:
 
 Per-entity overrides are allowed, for example `PERSON: off` for HR tenants who need names.
 
+If Presidio fails or times out while `PERSON` is active, names can go undetected. The structured recognizers still run, and `policy.pii.onDetectorFailure` decides what happens next. Departments may tighten this setting but not loosen it.
+
+- `allow` (default): the request continues and the response carries `x-katip-pii-degraded: true`.
+- `block`: the request is rejected with 503 `pii_unavailable`, and the provider is not called.
+
+Both cases log an error-level `pii_detector_failed` event with `tenant_id`, `user_id` and `action`, never prompt text. Monitoring (P1-43) alerts on this event.
+
 Test set: `packages/pii/test/fixtures/tr-*.json` with at least 200 Turkish sentences. Target recall ≥ 0.95 for TCKN/IBAN/phone/email and ≥ 0.80 for PERSON before GA.
 
 ## 6. Quotas and budgets

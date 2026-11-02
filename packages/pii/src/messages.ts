@@ -8,6 +8,12 @@ export interface PiiPolicy {
   mode: PiiMode;
   /** Per-entity override, e.g. { PERSON: 'off' } for HR tenants. */
   entities?: Partial<Record<EntityType, PiiMode>>;
+  /**
+   * What happens when the extra detector fails (e.g. analyzer down), so names
+   * could go undetected. `allow` (default) sends with structured masking only;
+   * `block` rejects the request.
+   */
+  onDetectorFailure?: 'allow' | 'block';
 }
 
 type ContentPart = { type: string; text?: string; [k: string]: unknown };
@@ -21,9 +27,14 @@ export interface MaskResult {
   messages: ChatMessage[];
   /** Entity types that triggered a block (empty unless some entity is in `block` mode). */
   blocked: EntityType[];
+  /** The extra detector failed, so PERSON spans may be missing from `messages`. */
+  detectorFailed: boolean;
 }
 
-/** Optional extra detector (e.g. Presidio NER for PERSON). Must return spans in `text` coordinates. */
+/**
+ * Optional extra detector (Presidio NER for PERSON), only called while PERSON is
+ * active. Must return spans in `text` coordinates and throw when it can't detect.
+ */
 export type ExtraDetector = (text: string) => Promise<Span[]>;
 
 const ALL_TYPES: EntityType[] = [
@@ -51,22 +62,22 @@ export async function maskMessages(
   extra?: ExtraDetector,
 ): Promise<MaskResult> {
   const active = new Set(ALL_TYPES.filter((t) => effectiveMode(policy, t) !== 'off'));
-  if (active.size === 0) return { messages, blocked: [] };
+  if (active.size === 0) return { messages, blocked: [], detectorFailed: false };
 
   const blocked = new Set<EntityType>();
+  let detectorFailed = false;
 
   const maskOne = async (text: string): Promise<string> => {
     let spans = detectStructured(text, active);
-    if (extra) {
-      // Fail open: a broken extra detector (e.g. analyzer down) must not take
-      // chat down; the structured recognizers still mask what they can.
-      let more: Span[] = [];
+    // After one failure, skip the detector for the rest of the request so an
+    // outage costs at most one timeout. The caller applies onDetectorFailure.
+    if (extra && !detectorFailed && active.has('PERSON')) {
       try {
-        more = await extra(text);
+        const more = await extra(text);
+        spans = resolveOverlaps([...spans, ...more.filter((s) => active.has(s.type))]);
       } catch {
-        more = [];
+        detectorFailed = true;
       }
-      spans = resolveOverlaps([...spans, ...more.filter((s) => active.has(s.type))]);
     }
     for (const s of spans) if (effectiveMode(policy, s.type) === 'block') blocked.add(s.type);
     return maskText(text, spans, map);
@@ -90,5 +101,5 @@ export async function maskMessages(
       out.push(m);
     }
   }
-  return { messages: out, blocked: [...blocked] };
+  return { messages: out, blocked: [...blocked], detectorFailed };
 }

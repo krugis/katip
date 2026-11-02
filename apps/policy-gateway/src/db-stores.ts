@@ -191,11 +191,27 @@ export class DbTenantStore implements TenantStore {
   }
 }
 
+type StoredPii = Partial<PiiPolicy>;
+
 function piiOf(policy: unknown): PiiPolicy {
-  const p = policy as {
-    pii?: { mode?: PiiPolicy['mode']; entities?: PiiPolicy['entities'] };
-  } | null;
-  return { mode: p?.pii?.mode ?? 'mask', entities: p?.pii?.entities };
+  const p = policy as { pii?: StoredPii } | null;
+  return {
+    mode: p?.pii?.mode ?? 'mask',
+    entities: p?.pii?.entities,
+    ...(p?.pii?.onDetectorFailure === 'block' ? { onDetectorFailure: 'block' as const } : {}),
+  };
+}
+
+/** PII: departments may only tighten (mask→block, allow→block), never loosen. */
+export function effectivePii(tenantPolicy: unknown, overridePii?: StoredPii): PiiPolicy {
+  const basePii = piiOf(tenantPolicy);
+  const pii: PiiPolicy =
+    overridePii?.mode === 'block' || (overridePii?.mode === 'mask' && basePii.mode === 'off')
+      ? { mode: overridePii.mode, entities: overridePii.entities }
+      : { mode: basePii.mode, entities: basePii.entities };
+  return basePii.onDetectorFailure === 'block' || overridePii?.onDetectorFailure === 'block'
+    ? { ...pii, onDetectorFailure: 'block' }
+    : pii;
 }
 
 export { MemoryQuotaStore, MemoryUsageSink };
@@ -634,17 +650,9 @@ export class DbPolicySource {
       .where(eq(schema.tenantPolicies.tenantId, tenant.id));
     const row = rows[0];
     const base = { ...DEFAULT_POLICY, ...((row?.policy as Partial<TenantPolicy>) ?? {}) };
-    const rawOverride = (row?.override ?? {}) as Partial<TenantPolicy> & {
-      pii?: { mode?: PiiPolicy['mode']; entities?: PiiPolicy['entities'] };
-    };
-    // PII: departments may only tighten (mask→block), never loosen.
+    const rawOverride = (row?.override ?? {}) as Partial<TenantPolicy> & { pii?: StoredPii };
     const { pii: overridePii, ...override } = rawOverride;
     const policy = { ...base, ...override };
-    const basePii = piiOf(row?.policy);
-    const pii: PiiPolicy =
-      overridePii?.mode === 'block' || (overridePii?.mode === 'mask' && basePii.mode === 'off')
-        ? { mode: overridePii.mode, entities: overridePii.entities }
-        : basePii;
-    return { policy, pii };
+    return { policy, pii: effectivePii(row?.policy, overridePii) };
   }
 }

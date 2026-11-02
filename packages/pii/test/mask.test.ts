@@ -115,5 +115,42 @@ describe('maskMessages with policy', () => {
       extra,
     );
     expect(r.messages[0]!.content).toBe('⟦PERSON_1⟧ izin istedi');
+    expect(r.detectorFailed).toBe(false);
+  });
+
+  it('reports a failed detector, still masks structured data, and stops calling it', async () => {
+    let calls = 0;
+    const extra = async () => {
+      calls += 1;
+      throw new Error('analyzer down');
+    };
+    const r = await maskMessages(
+      [
+        { role: 'user', content: 'Ayşe Yılmaz TCKN 10000000146' },
+        { role: 'user', content: 'Mehmet Kaya yarın gelecek' },
+      ],
+      { mode: 'mask' },
+      new PlaceholderMap(),
+      extra,
+    );
+    expect(r.detectorFailed).toBe(true);
+    expect(calls).toBe(1);
+    expect(r.messages[0]!.content).toBe('Ayşe Yılmaz TCKN ⟦TR_TCKN_1⟧');
+  });
+
+  it('does not call the detector when PERSON masking is off', async () => {
+    let calls = 0;
+    const extra = async () => {
+      calls += 1;
+      throw new Error('analyzer down');
+    };
+    const r = await maskMessages(
+      [{ role: 'user', content: 'Ayşe Yılmaz izin istedi' }],
+      { mode: 'mask', entities: { PERSON: 'off' } },
+      new PlaceholderMap(),
+      extra,
+    );
+    expect(calls).toBe(0);
+    expect(r.detectorFailed).toBe(false);
   });
 });

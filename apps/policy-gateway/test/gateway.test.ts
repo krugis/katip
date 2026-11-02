@@ -193,43 +193,89 @@ describe('chat pipeline', () => {
     expect(mock.requests).toHaveLength(0);
   });
 
-  it('masks PERSON names via the extra NER detector and fails open when it errors', async () => {
-    // Fake presidio: detects "Ahmet Yilmaz" once, then fails on the next call.
-    let calls = 0;
-    const detector = async (text: string): Promise<Span[]> => {
-      calls += 1;
-      if (calls === 1) {
-        return [
-          {
-            type: 'PERSON',
-            start: 0,
-            end: 12,
-            value: text.slice(0, 12),
-            score: 0.85,
-          },
-        ];
-      }
-      throw new Error('analyzer down');
-    };
-    build(tenant(), {
-      piiDetector: detector,
-      logger: createLogger('test', { level: 'error' }),
-    });
+  it('masks PERSON names via the extra NER detector', async () => {
+    const detector = async (text: string): Promise<Span[]> => [
+      { type: 'PERSON', start: 0, end: 12, value: text.slice(0, 12), score: 0.85 },
+    ];
+    build(tenant(), { piiDetector: detector });
     const res = await chat({
       model: 'auto',
       messages: [{ role: 'user', content: "Ahmet Yilmaz yarin Ankara'ya gidiyor" }],
     });
     expect(res.statusCode).toBe(200);
+    expect(res.headers['x-katip-pii-degraded']).toBeUndefined();
     const sent = mock.requests[0]!.body;
     expect(sent.messages[0]!.content).toMatch(/^⟦PERSON_1⟧ yarin/);
     expect(sent.messages[0]!.content).not.toContain('Ahmet');
-    // second request: detector throws -> fail open, request still succeeds unmasked
-    const res2 = await chat({
-      model: 'auto',
-      messages: [{ role: 'user', content: 'Ayse Kaya burada mi' }],
+  });
+
+  describe('when the PII detector fails', () => {
+    const down = async (): Promise<Span[]> => {
+      throw new Error('analyzer down');
+    };
+    /** Logger that records what the gateway logs at error level. */
+    const capturingLogger = () => {
+      const logged: unknown[] = [];
+      const logger = createLogger('test', {
+        level: 'error',
+        hooks: {
+          logMethod(args, method) {
+            logged.push(args[0]);
+            method.apply(this, args);
+          },
+        },
+      });
+      return { logged, logger };
+    };
+    const content = 'Ayse Kaya burada mi, TCKN 10000000146';
+
+    it('allows by default: structured masking still applies, flagged and logged', async () => {
+      const { logged, logger } = capturingLogger();
+      build(tenant(), { piiDetector: down, logger });
+      const res = await chat({ model: 'auto', messages: [{ role: 'user', content }] });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-katip-pii-degraded']).toBe('true');
+      const sent = mock.requests[0]!.body.messages[0]!.content;
+      expect(sent).toContain('⟦TR_TCKN_1⟧');
+      expect(logged).toContainEqual({
+        event: 'pii_detector_failed',
+        tenant_id: 't-acme',
+        user_id: 'u-1',
+        action: 'allowed',
+      });
+      expect(JSON.stringify(logged)).not.toContain('Ayse');
     });
-    expect(res2.statusCode).toBe(200);
-    expect(calls).toBe(2);
+
+    it('rejects with 503 when the tenant chose block: provider is not called', async () => {
+      const { logged, logger } = capturingLogger();
+      build(tenant({ pii: { mode: 'mask', onDetectorFailure: 'block' } }), {
+        piiDetector: down,
+        logger,
+      });
+      const res = await chat({ model: 'auto', messages: [{ role: 'user', content }] });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error.code).toBe('pii_unavailable');
+      expect(mock.requests).toHaveLength(0);
+      expect(usage.events).toHaveLength(0);
+      expect(logged).toContainEqual({
+        event: 'pii_detector_failed',
+        tenant_id: 't-acme',
+        user_id: 'u-1',
+        action: 'blocked',
+      });
+    });
+
+    it('does not block a tenant with PERSON masking off, since no names are checked', async () => {
+      build(
+        tenant({ pii: { mode: 'mask', entities: { PERSON: 'off' }, onDetectorFailure: 'block' } }),
+        {
+          piiDetector: down,
+        },
+      );
+      const res = await chat({ model: 'auto', messages: [{ role: 'user', content }] });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-katip-pii-degraded']).toBeUndefined();
+    });
   });
 
   it('falls back to the next model when the primary fails', async () => {

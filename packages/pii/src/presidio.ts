@@ -32,6 +32,8 @@ const PRESIDIO_TO_KATIP: Record<string, EntityType> = {
  * Thin client for the Presidio analyzer `/analyze` endpoint (P1-11).
  * Returns PERSON spans only; used as the `extra` detector of `maskMessages`
  * for NER-based name detection (TR + EN) that the structured recognizers can't do.
+ * `detect` throws when the analyzer can't answer, so "no names found" and "could
+ * not check" stay different results. Error messages never contain the text.
  */
 export class PresidioClient {
   private readonly url: string;
@@ -66,13 +68,10 @@ export class PresidioClient {
         }),
         signal: ctrl.signal,
       });
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error(`analyzer returned HTTP ${res.status}`);
       const data: unknown = await res.json();
-      if (!Array.isArray(data)) return [];
+      if (!Array.isArray(data)) throw new Error('analyzer returned a malformed response');
       return this.toSpans(data, text);
-    } catch {
-      // Analyzer unavailable / timeout: fail open — structural detectors still run.
-      return [];
     } finally {
       clearTimeout(timer);
     }

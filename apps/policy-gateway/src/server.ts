@@ -46,7 +46,7 @@ const policySource = useDb
   : null;
 if (policySource) await policySource.start();
 
-// Presidio PERSON NER (P1-11): fail-open per call, never blocks chat.
+// Presidio PERSON NER (P1-11): on failure, the tenant's pii.onDetectorFailure decides.
 const presidio = config.PRESIDIO_URL ? new PresidioClient({ baseUrl: config.PRESIDIO_URL }) : null;
 
 const app = buildGateway({

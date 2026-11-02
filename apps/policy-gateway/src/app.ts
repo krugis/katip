@@ -57,6 +57,7 @@ export interface GatewayDeps {
   /**
    * Extra PII detector (P1-11): Presidio NER for PERSON (TR + EN).
    * Applied to messages when set and PERSON masking is active for the tenant.
+   * On failure the request follows the tenant's `pii.onDetectorFailure`.
    */
   piiDetector?: ExtraDetector;
   upstreamTimeoutMs?: number;
@@ -205,8 +206,24 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     // 3. PII masking
     const map = new PlaceholderMap();
     let masked: ChatMessage[];
+    let piiDegraded = false;
     try {
       const r = await maskMessages(messages, ctx.tenant.pii, map, deps.piiDetector);
+      if (r.detectorFailed) {
+        const reject = ctx.tenant.pii.onDetectorFailure === 'block';
+        // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
+        req.log.error(
+          {
+            event: 'pii_detector_failed',
+            tenant_id: ctx.tenant.id,
+            user_id: ctx.user.id,
+            action: reject ? 'blocked' : 'allowed',
+          },
+          'PII detector failed',
+        );
+        if (reject) throw Errors.piiUnavailable();
+        piiDegraded = true;
+      }
       if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
       masked = r.messages;
     } catch (e) {
@@ -234,6 +251,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     reply.header('x-katip-model', model.id);
     reply.header('x-katip-rule', routed.ruleId);
     if (fallback) reply.header('x-katip-fallback', 'true');
+    if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
 
     const finish = async (inputTokens: number, outputTokens: number) => {
       await deps.quota.settle(reservation, inputTokens + outputTokens);

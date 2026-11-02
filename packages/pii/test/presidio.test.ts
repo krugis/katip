@@ -60,22 +60,23 @@ describe('PresidioClient', () => {
     ] satisfies Span[]);
   });
 
-  it('fails open on fetch errors (returns [])', async () => {
+  it('throws on fetch errors', async () => {
     const { fetch } = fetchStub([], { fail: new Error('connection refused') });
     const c = new PresidioClient({ baseUrl: 'http://p:3000', fetchImpl: fetch });
-    expect(await c.detect('Ahmet burada')).toEqual([]);
+    await expect(c.detect('Ahmet burada')).rejects.toThrow('connection refused');
   });
 
-  it('fails open on HTTP errors', async () => {
+  it('throws on HTTP errors, without the text in the message', async () => {
     const { fetch } = fetchStub([], { status: 500 });
     const c = new PresidioClient({ baseUrl: 'http://p:3000', fetchImpl: fetch });
-    expect(await c.detect('Ahmet burada')).toEqual([]);
+    await expect(c.detect('Ahmet burada')).rejects.toThrow('analyzer returned HTTP 500');
+    await expect(c.detect('Ahmet burada')).rejects.not.toThrow('Ahmet');
   });
 
-  it('fails open on malformed responses', async () => {
+  it('throws on malformed responses', async () => {
     const { fetch } = fetchStub([{ not: 'an array item shape' }]);
     const c = new PresidioClient({ baseUrl: 'http://p:3000', fetchImpl: fetch });
-    expect(await c.detect('Ahmet burada')).toEqual([]);
+    await expect(c.detect('Ahmet burada')).rejects.toThrow('malformed');
   });
 
   it('skips the network call for text without letters', async () => {
