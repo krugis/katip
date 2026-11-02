@@ -71,7 +71,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-15 | Gateway metrics (Prometheus) + OTel traces (no prompt text) | 03 | P1 | todo | P1-01 | Dashboard shows requests, tokens, latency by tenant | |
 | P1-16 | M1 demo + load baseline (50 concurrent streams, mock provider) | 03 | P0 | todo | P1-01…15 | p95 overhead under 120 ms; CPU under 1 vCPU | |
 | P1-57 | Gateway request allow list: scan every text field, drop unknown fields; tool arguments stay masked; images and files allowed and logged | 03 | P0 | review | P1-12 | Each request field tested: nothing leaves unmasked except what's decided | Owner's decisions 2026-11-02: gateway is the one control point, MCP stays open to users; tool arguments stay masked; images and files allowed for now (P3-11) (#9) |
-| P1-58 | Conversation placeholders: the same value gets the same placeholder across requests, with nothing stored | 03 | P0 | review | P1-57 | A placeholder from earlier tool arguments still resolves on a later request | Keyed hash of tenant, conversation and value (`PII_TOKEN_KEY`); no personal data in Valkey |
+| P1-58 | Conversation placeholders: the same value gets the same placeholder across requests, with nothing stored | 03 | P0 | review | P1-57 | A placeholder from earlier tool arguments still resolves on a later request | Keyed hash of tenant, conversation and value (`PII_TOKEN_KEY`); no personal data in Valkey (#10) |
 
 ### M2 Governance console and portal (S4–S5)
 
