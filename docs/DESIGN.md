@@ -245,6 +245,7 @@ Changes from the unified setup and tenant isolation work (November 2026). PR num
 | **Setup script** (`pnpm dev:up`) | One script installs everything, including from a fresh `git clone`. Re-running applies config changes. Time limits on throwaway containers | P0-14…21 | #2, #6, #7 | 01 |
 | **Config and env files** | `katip.config.yaml` and `katip.env` drive all images, names, models and tenants. Unknown settings are rejected. A list of tenants, with two in dev | P0-12, P0-17, P0-19, P1-59 | #2, #6, #11 | 01 |
 | **Policy gateway** | Tenants, keys, catalog and policy from Postgres. Quotas, usage metering. Request allow list; every text field scanned; tool arguments stay masked. `/readyz` | P1-02, P1-04, P1-09, P1-10, P1-14, P0-21, P1-57 | #4, #5, #6, #9 | 03 |
+| **Tool-call log** (gateway, `usage_events`) | The tools a model asks to call are recorded by name, never with arguments. `dev:up` follows a tool call through LiteLLM and checks its arguments stay masked | P1-63 | #15 | 03, 05 |
 | **PII masking** (`packages/pii`) | Presidio name detection, with a per-tenant rule for when it fails. Placeholders hold for a whole conversation, with nothing stored | P1-11, P1-58 | #5, #10 | 03 |
 | **Presidio** | Built by the script, with its language model pinned and checksum-verified | P1-11, P0-18 | #5, #6 | 03 |
 | **Governance DB** (Postgres) | Schema, migrations, seeds. **The gateway runs as `katip_gateway`, so row-level security now applies**; it previously connected as a superuser, which bypasses it | P1-17, P1-18, P1-61 | #3, #13 | 05 |
@@ -258,4 +259,4 @@ Changes from the unified setup and tenant isolation work (November 2026). PR num
 | **LiteLLM** | Built by the script. Models and provider keys come from config and env; the static config is gone. No longer reachable from LibreChat | P0-05, P0-19, P1-60 | #2, #6, #12 | 03 |
 | **Isolation checks** | `dev:up` fails if any boundary between tenants can be crossed | P1-62 | #14 | 10 |
 
-**Not changed yet:** the `dev` and `prod` profiles and SOPS (P0-22), tool-call logging and rules, and filtering uploaded documents (P3-11).
+**Not changed yet:** the `dev` and `prod` profiles and SOPS (P0-22), per-tenant tool rules, and filtering uploaded documents (P3-11).

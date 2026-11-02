@@ -165,9 +165,12 @@ describe('the gateway stores on that role', () => {
       fallback: false,
       overage: false,
       piiEntities: {},
+      toolCalls: ['ara', 'oku'],
     } as never);
-    const rows = await admin`select tenant_id from usage_events where user_id = ${userA}`;
+    const rows =
+      await admin`select tenant_id, tool_calls from usage_events where user_id = ${userA}`;
     expect(rows.map((r) => r.tenant_id)).toEqual([a]);
+    expect(rows[0]!.tool_calls).toEqual(['ara', 'oku']);
     await sink.close();
   });
 });

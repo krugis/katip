@@ -557,6 +557,7 @@ export class DbUsageSink implements UsageSink {
           fallback: e.fallback,
           overage: e.overage,
           requestId: null,
+          toolCalls: e.toolCalls ?? [],
         })
         .onConflictDoNothing(),
     );

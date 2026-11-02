@@ -43,6 +43,9 @@ export function deriveEnv(out) {
 
 export const sha256hex = (s) => createHash('sha256').update(s).digest('hex');
 
+/** Must match TOOL_TRIGGER in apps/mock-llm: it makes the mock call the first tool. */
+const TOOL_TRIGGER = '[[use-tool]]';
+
 const edgeNetwork = (config) => `${config.project.name}_edge`;
 const backendNetwork = (config) => `${config.project.name}_backend`;
 const tenantProject = (config, t) => `${config.project.name}-${t.slug}`;
@@ -222,6 +225,53 @@ function runOnEdge(ctx, t, script, extraEnv = {}, network = edgeNetwork(ctx.conf
  * The gateway's usage row is the proof that LibreChat's headers arrived: its user comes
  * from X-User-Email and its conversation id from X-Conversation-Id (P1-05).
  */
+/**
+ * A tool call on the real path, through LiteLLM: the arguments must leave the gateway
+ * masked, and the usage row must hold the tool's name (LLD-03 §5).
+ */
+async function checkToolCallPath(ctx, t) {
+  const conversation = `smoke-tool-${randomBytes(6).toString('hex')}`;
+  const payload = {
+    model: 'fast',
+    max_tokens: 32,
+    messages: [{ role: 'user', content: `${TOOL_TRIGGER} TCKN 10000000146` }],
+    tools: [{ type: 'function', function: { name: 'smoke_tool', parameters: { type: 'object' } } }],
+  };
+  const body = await curlBackend(ctx, '/v1/chat/completions', [
+    '-H',
+    `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
+    '-H',
+    'content-type: application/json',
+    '-H',
+    'x-user-email: demo@example.com',
+    '-H',
+    `x-conversation-id: ${conversation}`,
+    '-d',
+    JSON.stringify(payload),
+  ]);
+  if (!body.includes('smoke_tool')) {
+    throw new Error(`no tool call came back for ${t.slug}: ${body.slice(0, 200)}`);
+  }
+  if (body.includes('10000000146') || !body.includes('TR_TCKN_')) {
+    throw new Error(`tool arguments were not masked for ${t.slug}`);
+  }
+  const sql =
+    `select count(*) from usage_events where conversation_id = '${conversation}' ` +
+    `and tool_calls = array['smoke_tool']`;
+  await waitUntil(
+    async () => {
+      const { out } = await platformCompose(
+        ['exec', '-T', 'postgres', 'psql', '-U', 'katip', '-d', 'governance', '-At', '-c', sql],
+        ctx,
+      );
+      return parseInt(out.trim(), 10) > 0;
+    },
+    { timeoutMs: 30_000, intervalMs: 2000 },
+  ).catch(() => {
+    throw new Error(`the gateway did not record the tool call for ${t.slug}`);
+  });
+}
+
 async function checkUsageRecorded(ctx, t, smokeOutput) {
   const id = smokeOutput.match(/chat-conversation=([\w-]+)/)?.[1];
   if (!id) throw new Error('the smoke test reported no conversation id');
@@ -767,8 +817,11 @@ export const steps = [
           tenantNetworkName(ctx.config, t),
         );
         await checkUsageRecorded(ctx, t, out);
+        await checkToolCallPath(ctx, t);
       }
-      ctx.log('e2e smoke ok (models, login with MFA, chat headers, non-member refused)');
+      ctx.log(
+        'e2e smoke ok (models, login with MFA, chat headers, tool calls, non-member refused)',
+      );
     },
   },
   {

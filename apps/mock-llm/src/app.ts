@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // OpenAI-compatible mock provider for tests and local development (tracker P0-08).
 // It echoes the last user message, so tests can check what the gateway sent upstream.
+// With tools offered and TOOL_TRIGGER in that message, it calls the first tool instead,
+// with the message as the argument, so tests can follow a tool call end to end.
 import Fastify, { type FastifyInstance } from 'fastify';
 
 export interface MockOptions {
@@ -16,7 +18,10 @@ interface ChatBody {
   model: string;
   stream?: boolean;
   messages: Array<{ role: string; content: unknown }>;
+  tools?: Array<{ function?: { name?: string } }>;
 }
+
+export const TOOL_TRIGGER = '[[use-tool]]';
 
 export interface RecordedRequest {
   headers: Record<string, unknown>;
@@ -72,6 +77,37 @@ export function buildMockApp(
     };
     const id = `chatcmpl-mock-${app.requests.length}`;
     const created = Math.floor(Date.now() / 1000);
+    const toolName = lastUserText(body.messages).includes(TOOL_TRIGGER)
+      ? body.tools?.[0]?.function?.name
+      : undefined;
+    const toolArgs = JSON.stringify({ q: lastUserText(body.messages) });
+
+    if (!body.stream && toolName) {
+      return {
+        id,
+        object: 'chat.completion',
+        created,
+        model: body.model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_mock',
+                  type: 'function',
+                  function: { name: toolName, arguments: toolArgs },
+                },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+        usage,
+      };
+    }
 
     if (!body.stream) {
       return {
@@ -99,7 +135,21 @@ export function buildMockApp(
       model: body.model,
       choices: [{ index: 0, delta: { role: 'assistant' } }],
     });
-    for (let i = 0; i < text.length; i += chunkSize) {
+    if (toolName) {
+      // Name first, then the arguments in pieces, as real providers stream them.
+      const toolDelta = (fn: object, extra: object = {}) => ({
+        id,
+        object: 'chat.completion.chunk',
+        created,
+        model: body.model,
+        choices: [{ index: 0, delta: { tool_calls: [{ index: 0, ...extra, function: fn }] } }],
+      });
+      send(toolDelta({ name: toolName, arguments: '' }, { id: 'call_mock', type: 'function' }));
+      for (let i = 0; i < toolArgs.length; i += chunkSize) {
+        send(toolDelta({ arguments: toolArgs.slice(i, i + chunkSize) }));
+      }
+    }
+    for (let i = 0; !toolName && i < text.length; i += chunkSize) {
       if (opts.delayMs) await sleep(opts.delayMs);
       send({
         id,
@@ -114,7 +164,7 @@ export function buildMockApp(
       object: 'chat.completion.chunk',
       created,
       model: body.model,
-      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      choices: [{ index: 0, delta: {}, finish_reason: toolName ? 'tool_calls' : 'stop' }],
     });
     send({ id, object: 'chat.completion.chunk', created, model: body.model, choices: [], usage });
     reply.raw.write('data: [DONE]\n\n');

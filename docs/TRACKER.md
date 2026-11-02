@@ -76,6 +76,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-60 | Per-tenant networks and a Valkey password | 01, 10 | P0 | review | P1-59 | A tenant's LibreChat reaches only Traefik, the gateway, Mongo and its own search | Subnets derived from the slug under `project.tenant_network_prefix`; internet stays open because users can add MCP tools (#12) |
 | P1-61 | Gateway runs as a limited role, so row-level security applies | 03, 05 | P0 | review | P1-18 | A query with no tenant filter can't cross tenants on the gateway's own connection | Was connecting as a superuser, which bypasses RLS; tests now connect as `katip_gateway` (#13) |
 | P1-62 | Cross-tenant checks on every install; design docs updated | 01, 05, 07, 10 | P0 | review | P1-59…61 | Breaking a boundary fails `dev:up` | Network, Mongo, search, gateway, Postgres, Valkey and login across tenants; confirmed by deliberately breaking the network boundary (#14) |
+| P1-63 | Tool-call log: record which tools models ask to call, by name | 03, 05 | P0 | review | P1-57 | Names recorded per call, arguments never; checked through LiteLLM on every install | Column on `usage_events`, so it shares the outbox and tenant scoping; per-tenant allow and block rules are not built (#15) |
 
 ### M2 Governance console and portal (S4–S5)
 
