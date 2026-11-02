@@ -2,7 +2,7 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
-**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), the department manager's area (P1-31), and each person's account (P1-32). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), the department manager's area (P1-31), each person's account (P1-32), and the audit log (P1-33). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
 
 **How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
 
@@ -85,7 +85,8 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | GET | `/api/v1/tenants/:tid/my-departments` | tenant_admin, dept_manager | Those they manage; all for an admin |
 | GET | `/api/v1/tenants/:tid/departments/:did/users`, `/usage`, `/usage/export`, `/requests` | tenant_admin, dept_manager of that department | Any other department answers 404 |
 | PATCH | `/api/v1/tenants/:tid/departments/:did/requests/:rid` | tenant_admin, dept_manager of that department | Approve or decline, once. Nobody decides their own. It records the decision, and doesn't change access yet |
-| GET | `/api/v1/tenants/:tid/audit?…` | tenant_admin | |
+| GET | `/api/v1/tenants/:tid/audit?action&before&limit` | tenant_admin | Newest first, a page at a time. Names a person only if they're in this company |
+| GET | `/api/v1/admin/audit?tenant&action&before&limit` | provider_admin | Every company's log, one company at a time under row-level security |
 | POST | `/api/v1/admin/tenants` | provider_admin | Calls the provisioner |
 | PUT | `/api/v1/admin/models/:id`, `/api/v1/admin/router-rules` | provider_admin | Publishes `policy.changed` |
 

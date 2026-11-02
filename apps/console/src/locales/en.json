@@ -283,5 +283,39 @@
     "noPrivacyRequests": "No personal data requests are waiting.",
     "markDone": "Mark as done",
     "otherRequests": "Other requests"
+  },
+  "audit": {
+    "filter": "Type of event",
+    "all": "All",
+    "empty": "No entries yet.",
+    "when": "When",
+    "who": "Who",
+    "what": "What they did",
+    "detail": "Detail",
+    "more": "Show more",
+    "deletedUser": "A user no longer in the company",
+    "actorType": {
+      "system": "System",
+      "provider": "Provider staff"
+    },
+    "action": {
+      "user_invite": "User invited",
+      "user_update": "User changed",
+      "department_create": "Department created",
+      "department_update": "Department changed",
+      "policy_update": "Policy changed",
+      "access_rules_update": "Access rules changed",
+      "request_create": "Request sent",
+      "request_decide": "Request decided",
+      "privacy_export": "Data downloaded",
+      "privacy_delete_request": "Deletion requested",
+      "privacy_complete": "Personal data request completed",
+      "tenant_create": "Company created",
+      "tenant_suspend": "Company suspended",
+      "tenant_resume": "Company resumed",
+      "tenant_delete": "Company deleted",
+      "tenant_restore": "Company restored",
+      "tenant_purge": "Company data purged"
+    }
   }
 }

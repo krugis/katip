@@ -91,6 +91,8 @@ const store: ConsoleStore = {
   }),
   listDepartments: async () => [],
   usage: async () => [],
+  auditPage: async () => ({ entries: [], next: null }),
+  auditAcrossTenants: async () => ({ entries: [], next: null }),
   ownRequests: async () => [],
   createRequest: async () => ownRequest,
   allRequests: async () => [],
@@ -424,6 +426,17 @@ const MATRIX: {
     url: (t) => `/api/v1/tenants/${t}/privacy-requests/${USER_ID}`,
     own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
     other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/audit',
+    url: (t) => `/api/v1/tenants/${t}/audit`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/admin/audit',
+    url: () => '/api/v1/admin/audit',
+    own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
   },
   {
     route: '/api/v1/tenants/:tid/overview',

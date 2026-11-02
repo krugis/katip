@@ -424,7 +424,6 @@ describe('the console role', () => {
     ['change limits', `update tenant_limits set std_tokens = 1`],
     ['delete departments', `delete from departments`],
     ['read gateway keys', `select * from gateway_keys`],
-    ['read the audit log', `select * from audit_log`],
     ['rewrite the audit log', `update audit_log set action = 'x'`],
     ['change a tenant', `update tenants set status = 'active'`],
   ])('is denied: %s', async (_label, statement) => {
@@ -1386,6 +1385,136 @@ describe('my account', () => {
   it('a plain user cannot use the admin side', async () => {
     const res = await send('GET', `/api/v1/tenants/${a}/requests`, undefined, await asUser());
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('the audit log', () => {
+  const log = (tenant: string, query = '') =>
+    send('GET', `/api/v1/tenants/${tenant}/audit${query}`);
+  const add = async (tenant: string, action: string, actor: string, ts: string) =>
+    admin.unsafe(
+      `insert into audit_log (id, tenant_id, actor_type, actor_id, action, target_type, ts, details)
+       values ('${randomUUID()}', '${tenant}', 'user', '${actor}', '${action}', 'user', '${ts}', '{"n":1}')`,
+    );
+
+  it('shows what happened, who did it, newest first', async () => {
+    await send('POST', url(a), { email: 'n@a.test', name: 'N' });
+    await send('POST', `/api/v1/tenants/${a}/departments`, { name: 'Satış' });
+    const { entries } = (await log(a)).json();
+    expect(entries.map((e: { action: string }) => e.action)).toEqual([
+      'department.create',
+      'user.invite',
+    ]);
+    expect(entries[1]).toMatchObject({
+      actorType: 'user',
+      actor: 'owner@a.test (owner@a.test)',
+      targetType: 'user',
+    });
+  });
+
+  it('pages through, without repeating or missing anyone', async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await add(a, 'user.update', ownerId, `2026-03-0${i + 1}T00:00:00Z`);
+    }
+    const first = (await log(a, '?limit=2')).json();
+    expect(first.entries).toHaveLength(2);
+    const second = (await log(a, `?limit=2&before=${encodeURIComponent(first.next)}`)).json();
+    const third = (await log(a, `?limit=2&before=${encodeURIComponent(second.next)}`)).json();
+    expect(third.next).toBeNull();
+    const days = [...first.entries, ...second.entries, ...third.entries].map((e) =>
+      e.ts.slice(0, 10),
+    );
+    expect(days).toEqual(['2026-03-05', '2026-03-04', '2026-03-03', '2026-03-02', '2026-03-01']);
+  });
+
+  it('filters by action', async () => {
+    await add(a, 'user.update', ownerId, '2026-03-01T00:00:00Z');
+    await add(a, 'policy.update', ownerId, '2026-03-02T00:00:00Z');
+    const { entries } = (await log(a, '?action=policy.update')).json();
+    expect(entries.map((e: { action: string }) => e.action)).toEqual(['policy.update']);
+  });
+
+  it.each(['?limit=0', '?limit=201', '?before=yesterday', "?action=x'%20or%201=1"])(
+    'refuses %s',
+    async (query) => {
+      expect((await log(a, query)).statusCode).toBe(400);
+    },
+  );
+
+  it("never shows another company's entries, or names their people", async () => {
+    await add(b, 'user.update', otherId, '2026-03-01T00:00:00Z');
+    await add(a, 'user.update', otherId, '2026-03-02T00:00:00Z');
+    expect((await log(b)).statusCode).toBe(404);
+    const { entries } = (await log(a)).json();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].actor).toBeNull();
+  });
+
+  it('holds no names or addresses in what it records', async () => {
+    await send('POST', url(a), { email: 'ayse.gizli@a.test', name: 'Ayşe Gizli' });
+    const rows =
+      await admin`select actor_id, target_id, details from audit_log where tenant_id = ${a}`;
+    expect(JSON.stringify(rows)).not.toMatch(/gizli/i);
+  });
+
+  it('records every kind of change', async () => {
+    const id = await addUser(a, 'u@a.test');
+    const bearer = await token('u@a.test', 'tenant-a', ['user']);
+    const made = await send(
+      'POST',
+      '/api/v1/me/requests',
+      { type: 'model', reason: 'gizli sebep' },
+      bearer,
+    );
+    await send('POST', '/api/v1/me/privacy/delete', undefined, bearer);
+    await send('POST', '/api/v1/me/privacy/export', undefined, bearer);
+    await send('PATCH', `/api/v1/tenants/${a}/requests/${made.json().id}`, { status: 'approved' });
+    await send('PATCH', url(a, `/${id}`), { name: 'Yeni' });
+    const policy = (await send('GET', `/api/v1/tenants/${a}/policy`)).json();
+    await send('PUT', `/api/v1/tenants/${a}/policy`, {
+      policy: policy.policy,
+      version: policy.version,
+    });
+    const created = await send('POST', `/api/v1/tenants/${a}/departments`, { name: 'S' });
+    await send('PATCH', `/api/v1/tenants/${a}/departments/${created.json().id}`, { name: 'T' });
+    await api.inject({
+      method: 'PUT',
+      url: `/api/v1/tenants/${a}/access-rules`,
+      headers: { authorization: `Bearer ${await asOwner()}` },
+      payload: { ipAllowlist: [], countries: ['TR'], sessionIdleMin: 30, sessionMaxH: 10 },
+    });
+    await send('POST', url(a), { email: 'n@a.test', name: 'N' });
+    const rows = await admin`select distinct action from audit_log where tenant_id = ${a}`;
+    expect(rows.map((r) => r['action']).sort()).toEqual([
+      'access_rules.update',
+      'department.create',
+      'department.update',
+      'policy.update',
+      'privacy.delete_request',
+      'privacy.export',
+      'request.create',
+      'request.decide',
+      'user.invite',
+      'user.update',
+    ]);
+    const all = await admin`select details from audit_log where tenant_id = ${a}`;
+    expect(JSON.stringify(all)).not.toContain('gizli sebep');
+  });
+
+  describe('for a provider admin', () => {
+    const provider = () => token('staff@katip.test', 'provider', ['provider_admin']);
+    it('shows every company, newest first, and can narrow to one', async () => {
+      await add(a, 'user.update', ownerId, '2026-03-01T00:00:00Z');
+      await add(b, 'policy.update', otherId, '2026-03-02T00:00:00Z');
+      const bearer = await provider();
+      const all = (await send('GET', '/api/v1/admin/audit', undefined, bearer)).json();
+      expect(all.entries.map((e: { tenantSlug: string }) => e.tenantSlug)).toEqual([
+        'tenant-b',
+        'tenant-a',
+      ]);
+      const one = (await send('GET', `/api/v1/admin/audit?tenant=${a}`, undefined, bearer)).json();
+      expect(one.entries.map((e: { tenantSlug: string }) => e.tenantSlug)).toEqual(['tenant-a']);
+    });
   });
 });
 

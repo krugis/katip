@@ -15,6 +15,7 @@ import { dataProviderFor } from './data-provider';
 import { setLanguage, type Language } from './i18n';
 import { AccountProblem, ComingSoon, NoAccess, ProviderTenants } from './pages';
 import { TenantAccessRules } from './access-page';
+import { ProviderAudit, TenantAudit } from './audit-page';
 import {
   DepartmentOverview,
   DepartmentRequests,
@@ -35,6 +36,8 @@ import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
 
 const SCREENS: Record<string, (me: Me, getToken: GetToken, config: AppConfig) => React.ReactNode> =
   {
+    '/tenant/audit': (me, getToken) => <TenantAudit me={me} getToken={getToken} />,
+    '/provider/audit': (_me, getToken) => <ProviderAudit getToken={getToken} />,
     '/account/usage': (_me, getToken) => <AccountUsage getToken={getToken} />,
     '/account/requests': (_me, getToken) => <AccountRequests getToken={getToken} />,
     '/account/sessions': (_me, _getToken, config) => <AccountSessions config={config} />,
