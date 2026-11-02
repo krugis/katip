@@ -9,6 +9,8 @@ import {
   loadConfig,
   renderLiteLLMModels,
   seedInput,
+  tenantSecretName,
+  tenantSecretNames,
   validateConfig,
 } from '../config.mjs';
 import { totp } from '../kc-lib.mjs';
@@ -31,8 +33,8 @@ describe('validateConfig', () => {
     const c = { ...clone(), services: { keycloak: { realm: 'katip' } } };
     expect(validateConfig(c)).toContain('config.services: unknown setting');
     const t = clone();
-    t.tenant.region = 'eu';
-    expect(validateConfig(t)).toContain('tenant.region: unknown setting');
+    t.tenants[0].region = 'eu';
+    expect(validateConfig(t)).toContain('tenants[demo].region: unknown setting');
   });
 
   it('rejects unpinned images', () => {
@@ -56,12 +58,12 @@ describe('validateConfig', () => {
 
   it('rejects a bad slug, duplicate aliases and bad policy values', () => {
     const c = clone();
-    c.tenant.slug = 'No';
-    c.tenant.pii.on_detector_failure = 'maybe';
+    c.tenants[0].slug = 'No';
+    c.tenants[0].pii.on_detector_failure = 'maybe';
     c.models[1].alias = c.models[0].alias;
     const errors = validateConfig(c);
-    expect(errors).toContain('tenant.slug: must match ^[a-z0-9-]{3,32}$');
-    expect(errors).toContain('tenant.pii.on_detector_failure: must be allow or block');
+    expect(errors).toContain('tenants[No].slug: must match ^[a-z0-9-]{3,32}$');
+    expect(errors).toContain('tenants[No].pii.on_detector_failure: must be allow or block');
     expect(errors.some((e) => e.includes('duplicate alias'))).toBe(true);
   });
 });
@@ -129,9 +131,8 @@ describe('identity', () => {
 
   it('derives the client and redirect URI from the tenant and domain', () => {
     const c = clone();
-    c.tenant.slug = 'acme';
     c.project.base_domain = 'example.test';
-    const i = identityInput(c);
+    const i = identityInput(c, { slug: 'acme', name: 'Acme' });
     expect(i.client).toEqual({
       id: 'lc-acme',
       origin: 'https://acme.example.test',
@@ -150,11 +151,13 @@ describe('identity', () => {
     const tmpl = read('librechat', 'librechat.tmpl.yaml');
     expect(tmpl).toContain(`- name: ${CHAT_ENDPOINT}`);
     expect(tmpl).toContain("X-User-Email: '{{LIBRECHAT_USER_EMAIL}}'");
-    expect(identityInput(config).chatEndpoint).toBe(CHAT_ENDPOINT);
+    expect(identityInput(config, config.tenants[0]).chatEndpoint).toBe(CHAT_ENDPOINT);
   });
 
   it('gives the DB and Keycloak the same smoke user', () => {
-    expect(seedInput(config).smokeEmail).toBe(identityInput(config).smokeEmail);
+    for (const [i, t] of config.tenants.entries()) {
+      expect(seedInput(config).tenants[i].smokeEmail).toBe(identityInput(config, t).smokeEmail);
+    }
   });
 
   it('makes LibreChat wait for the issuer before it starts', () => {
@@ -167,13 +170,50 @@ describe('identity', () => {
   });
 });
 
+describe('tenants', () => {
+  it('runs at least two in dev, so isolation is tested on every install', () => {
+    expect(new Set(config.tenants.map((t) => t.slug)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('rejects duplicate slugs', () => {
+    const c = clone();
+    c.tenants[1].slug = c.tenants[0].slug;
+    expect(validateConfig(c)).toContain('tenants[demo]: duplicate slug');
+  });
+
+  it('names secrets per tenant, so tenants never share one', () => {
+    const names = tenantSecretNames(config);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain('KATIP_T_DEMO_LC_CREDS_KEY');
+    expect(names).toContain('KATIP_T_ACME_LC_CREDS_KEY');
+    expect(tenantSecretName('a-b', 'MEILI_KEY')).toBe('KATIP_T_A_B_MEILI_KEY');
+  });
+
+  it('generates each secret in the format it needs', () => {
+    expect(generatorFor('KATIP_T_ACME_LC_CREDS_KEY')()).toMatch(/^[0-9a-f]{64}$/);
+    expect(generatorFor('KATIP_T_ACME_LC_CREDS_IV')()).toMatch(/^[0-9a-f]{32}$/);
+    expect(generatorFor('KATIP_T_ACME_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
+  });
+
+  it('gives each tenant its own search and a Mongo login scoped to its database', () => {
+    const compose = read('compose', 'tenant.tmpl.yml');
+    expect(compose).toContain('meili-${KATIP_SLUG}:');
+    const env = read('env', 'tenant.example.env');
+    expect(env).toContain('MEILI_HOST=http://meili-${KATIP_SLUG}:7700');
+    expect(env).toContain('authSource=lc_${KATIP_SLUG}');
+    expect(env).not.toContain('authSource=admin');
+    expect(read('compose', 'platform.yml')).not.toContain('meilisearch');
+  });
+});
+
 describe('seedInput', () => {
   it('covers every model and tenant setting', () => {
     const s = seedInput(config);
     expect(s.models.map((m) => m.id)).toEqual(config.models.map((m) => m.alias));
     expect(s.models[0]).toMatchObject({ priceInUsdMicroPerM: config.models[0].price_in });
-    expect(s.tenant).toMatchObject({ slug: config.tenant.slug, seats: config.tenant.seats });
-    expect(s.pii.onDetectorFailure).toBe(config.tenant.pii.on_detector_failure);
+    const t = config.tenants[0];
+    expect(s.tenants[0].tenant).toMatchObject({ slug: t.slug, seats: t.seats });
+    expect(s.tenants[0].pii.onDetectorFailure).toBe(t.pii.on_detector_failure);
   });
 });
 
@@ -192,9 +232,9 @@ describe('util', () => {
   });
 
   it('generates LibreChat credentials in the hex format it requires', () => {
-    expect(generatorFor('KATIP_LC_CREDS_KEY')()).toMatch(/^[0-9a-f]{64}$/);
-    expect(generatorFor('KATIP_LC_CREDS_IV')()).toMatch(/^[0-9a-f]{32}$/);
-    expect(generatorFor('KATIP_DEMO_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
+    expect(generatorFor('KATIP_T_DEMO_LC_CREDS_KEY')()).toMatch(/^[0-9a-f]{64}$/);
+    expect(generatorFor('KATIP_T_DEMO_LC_CREDS_IV')()).toMatch(/^[0-9a-f]{32}$/);
+    expect(generatorFor('KATIP_T_DEMO_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
     expect(generatorFor('POSTGRES_PASSWORD')()).toMatch(/^[\w-]{43}$/);
   });
 

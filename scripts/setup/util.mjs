@@ -154,9 +154,9 @@ const genHex = (bytes) => randomBytes(bytes).toString('hex');
 /** Secret generator for an AUTO key. LibreChat requires CREDS_KEY = 32 bytes and
  * CREDS_IV = 16 bytes, both hex. */
 export function generatorFor(key) {
-  if (key === 'KATIP_DEMO_GATEWAY_KEY') return genGatewayKey;
-  if (key === 'KATIP_LC_CREDS_KEY') return () => genHex(32);
-  if (key === 'KATIP_LC_CREDS_IV') return () => genHex(16);
+  if (key.endsWith('_GATEWAY_KEY')) return genGatewayKey;
+  if (key.endsWith('_CREDS_KEY')) return () => genHex(32);
+  if (key.endsWith('_CREDS_IV')) return () => genHex(16);
   return () => genSecret(32);
 }
 
@@ -164,7 +164,7 @@ export function generatorFor(key) {
  * Ensure infra/env/katip.env exists with every key from the template.
  * Existing values are NEVER overwritten. AUTO values are filled once.
  */
-export function ensureEnvFile(autoKeys, derive) {
+export function ensureEnvFile(autoKeys, derive, generatedKeys = []) {
   const templatePath = join(INFRA, 'env', 'katip.example.env');
   const envPath = join(INFRA, 'env', 'katip.env');
   const tmpl = parseEnvFile(readFileSync(templatePath, 'utf8'));
@@ -173,6 +173,13 @@ export function ensureEnvFile(autoKeys, derive) {
   let changed = false;
   for (const k of Object.keys(out)) {
     if (autoKeys.has(k) && (!out[k] || out[k] === 'AUTO')) {
+      out[k] = generatorFor(k)();
+      changed = true;
+    }
+  }
+  // Keys that exist per tenant, so they aren't in the template.
+  for (const k of generatedKeys) {
+    if (!out[k]) {
       out[k] = generatorFor(k)();
       changed = true;
     }
@@ -196,6 +203,11 @@ export function ensureEnvFile(autoKeys, derive) {
         const k = t.slice(0, eq).trim();
         return k in out ? `${k}=${out[k]}` : l;
       });
+    if (generatedKeys.length > 0) {
+      rendered.push('# ---- per-tenant secrets (generated) ' + '-'.repeat(42));
+      for (const k of generatedKeys) rendered.push(`${k}=${out[k]}`);
+      rendered.push('');
+    }
     writeFileSync(envPath, rendered.join('\n'), { mode: 0o600 });
     chmodSync(envPath, 0o600);
   }

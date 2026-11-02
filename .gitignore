@@ -20,6 +20,7 @@ infra/traefik/dev-certs/
 infra/litellm/rendered/
 infra/policy-gateway/
 infra/compose/tenants/*.yml
+infra/compose/rendered/
 infra/traefik/dynamic/*-ipallow.yml
 infra/librechat/rendered/
 

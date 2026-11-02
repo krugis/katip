@@ -18,13 +18,6 @@ services:
       - ../traefik/dev-certs:/certs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
-    networks:
-      edge:
-        # Dev has no DNS: containers reach public hostnames through Traefik, so
-        # LibreChat can use the same Keycloak URL as the browser.
-        aliases:
-          - auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
-          - ${KATIP_TENANT_SLUG:?from katip.config.yaml}.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
 
   postgres:
     # dev: expose on localhost for psql / IDE access while developing.
@@ -41,10 +34,6 @@ services:
   mongodb:
     ports:
       - '127.0.0.1:27017:27017'
-
-  meilisearch:
-    ports:
-      - '127.0.0.1:7700:7700'
 
   valkey:
     ports:

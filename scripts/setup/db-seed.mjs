@@ -6,7 +6,8 @@
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
 if (!process.env.KATIP_SEED) throw new Error('KATIP_SEED is required');
-const { tenant, limits, pii, models, smokeEmail } = JSON.parse(process.env.KATIP_SEED);
+const { tenants, models } = JSON.parse(process.env.KATIP_SEED);
+const keys = JSON.parse(process.env.KATIP_TENANT_KEYS ?? '{}');
 
 const dbPkg = await import('@katip/db');
 const sharedPkg = await import('@katip/shared');
@@ -18,44 +19,49 @@ const { hashGatewayKey, keyPrefix } = sharedPkg;
 await migrate(url);
 const client = postgres(url, { max: 1 });
 const d = drizzle(client, { schema: dbPkg });
-await seed(d, { models, tenant });
 
-const key = process.env.KATIP_DEMO_GATEWAY_KEY;
-if (!key) throw new Error('KATIP_DEMO_GATEWAY_KEY is required');
-// The gateway's own function: the random part of a key can itself contain '-'.
-const prefix = keyPrefix(key);
-if (!prefix) throw new Error('KATIP_DEMO_GATEWAY_KEY has the wrong format');
+for (const { tenant, limits, pii, smokeEmail } of tenants) {
+  await seed(d, { models, tenant });
 
-const rows = await client`select id from tenants where slug = ${tenant.slug}`;
-const tenantId = rows[0]?.id;
-if (!tenantId) throw new Error(`tenant ${tenant.slug} missing after seed`);
+  const key = keys[tenant.slug];
+  if (!key) throw new Error(`no gateway key for tenant ${tenant.slug}`);
+  // The gateway's own function: the random part of a key can itself contain '-'.
+  const prefix = keyPrefix(key);
+  if (!prefix) throw new Error(`the gateway key for tenant ${tenant.slug} has the wrong format`);
 
-// The tenant has exactly one live gateway key: replace all rows for it.
-await client`delete from gateway_keys where tenant_id = ${tenantId}`;
-await client`insert into gateway_keys (tenant_id, key_hash, prefix, type)
-  values (${tenantId}, ${hashGatewayKey(key)}, ${prefix}, 'tenant')`;
+  const rows = await client`select id from tenants where slug = ${tenant.slug}`;
+  const tenantId = rows[0]?.id;
+  if (!tenantId) throw new Error(`tenant ${tenant.slug} missing after seed`);
 
-// The bootstrap smoke tests use demo@example.com; ensure it exists.
-await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
-  values (${tenantId}, ${`${tenant.slug}-gateway`}, 'demo@example.com', 'Demo User', 'user', ${tenant.planCode}, 'active')
-  on conflict (tenant_id, email) do update set status = 'active'`;
+  // A tenant has exactly one live gateway key: replace all rows for it.
+  await client`delete from gateway_keys where tenant_id = ${tenantId}`;
+  await client`insert into gateway_keys (tenant_id, key_hash, prefix, type)
+    values (${tenantId}, ${hashGatewayKey(key)}, ${prefix}, 'tenant')`;
 
-// The smoke test's chat goes through the gateway, which only serves known users.
-await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
-  values (${tenantId}, ${`${tenant.slug}-smoke`}, ${smokeEmail}, 'Smoke Test', 'user', ${tenant.planCode}, 'active')
-  on conflict (tenant_id, email) do update set status = 'active'`;
+  // The bootstrap smoke tests use demo@example.com; ensure it exists.
+  await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
+    values (${tenantId}, ${`${tenant.slug}-gateway`}, 'demo@example.com', 'Demo User', 'user', ${tenant.planCode}, 'active')
+    on conflict (tenant_id, email) do update set status = 'active'`;
 
-const month = new Date().toISOString().slice(0, 7).replace('-', '');
-await client`insert into tenant_limits (tenant_id, month, std_tokens, prem_tokens, research_runs)
-  values (${tenantId}, ${month}, ${limits.standard}, ${limits.premium}, 40)
-  on conflict (tenant_id, month) do update
-    set std_tokens = excluded.std_tokens, prem_tokens = excluded.prem_tokens`;
+  // The smoke test's chat goes through the gateway, which only serves known users.
+  await client`insert into users (tenant_id, keycloak_id, email, name, role, seat_plan_code, status)
+    values (${tenantId}, ${`${tenant.slug}-smoke`}, ${smokeEmail}, 'Smoke Test', 'user', ${tenant.planCode}, 'active')
+    on conflict (tenant_id, email) do update set status = 'active'`;
 
-// Other policy keys in the row are left alone; only `pii` comes from the config.
-await client`insert into tenant_policies (tenant_id, policy)
-  values (${tenantId}, ${JSON.stringify({ pii })}::jsonb)
-  on conflict (tenant_id) do update
-    set policy = tenant_policies.policy || excluded.policy`;
+  const month = new Date().toISOString().slice(0, 7).replace('-', '');
+  await client`insert into tenant_limits (tenant_id, month, std_tokens, prem_tokens, research_runs)
+    values (${tenantId}, ${month}, ${limits.standard}, ${limits.premium}, 40)
+    on conflict (tenant_id, month) do update
+      set std_tokens = excluded.std_tokens, prem_tokens = excluded.prem_tokens`;
+
+  // Other policy keys in the row are left alone; only `pii` comes from the config.
+  await client`insert into tenant_policies (tenant_id, policy)
+    values (${tenantId}, ${JSON.stringify({ pii })}::jsonb)
+    on conflict (tenant_id) do update
+      set policy = tenant_policies.policy || excluded.policy`;
+}
 
 await client.end();
-console.log('governance db ready: migrated, seeded, demo key stored (argon2id)');
+console.log(
+  `governance db ready: migrated, seeded, ${tenants.length} tenant keys stored (argon2id)`,
+);

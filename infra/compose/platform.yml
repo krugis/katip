@@ -120,25 +120,6 @@ services:
       start_period: 30s
     logging: *default-logging
 
-  meilisearch:
-    image: ${KATIP_IMAGE_MEILISEARCH:?from katip.config.yaml}
-    restart: unless-stopped
-    environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?from katip.env}
-      MEILI_NO_ANALYTICS: 'true'
-      MEILI_ENV: development
-    volumes:
-      - meili:/meili_data
-    networks:
-      - backend
-    healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:7700/health']
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    logging: *default-logging
-
   valkey:
     image: ${KATIP_IMAGE_VALKEY:?from katip.config.yaml}
     restart: unless-stopped
@@ -188,5 +169,4 @@ volumes:
   traefik-certs: {}
   pgdata: {}
   mongodata: {}
-  meili: {}
   valkey: {}
