@@ -335,8 +335,6 @@ export function loadAllTenantSecrets(ctx) {
   for (const t of allTenants(ctx)) Object.assign(ctx.env, ensureTenantSecrets(ctx.infra, t.slug));
 }
 
-const ipallowFile = (ctx, t) => join(ctx.infra, 'traefik', 'dynamic', `${t.slug}-ipallow.yml`);
-
 /**
  * What the tenants add to the platform stack. Generated as a compose file so that
  * compose keeps it on every recreate. Dev has no DNS: containers reach public
@@ -416,10 +414,6 @@ export function renderTenantFiles(ctx, t) {
   const tDir = join(ctx.infra, 'compose', 'tenants');
   mkdirSync(tDir, { recursive: true });
   writeFileSync(join(tDir, `${slug}.yml`), comp);
-
-  // Traefik ipallow middleware the tenant router refers to
-  const tmplIp = readFileSync(join(ctx.infra, 'traefik', 'tenant-ipallow.tmpl.yml'), 'utf8');
-  writeFileSync(ipallowFile(ctx, t), fill(tmplIp, { KATIP_SLUG: slug }));
 }
 
 function renderAll(ctx) {
@@ -670,7 +664,6 @@ export async function removeTenantFromHost(ctx, t) {
     join(envDir, `${t.slug}.meili.env`),
     join(ctx.infra, 'librechat', 'rendered', `${t.slug}.librechat.yaml`),
     join(ctx.infra, 'compose', 'tenants', `${t.slug}.yml`),
-    ipallowFile(ctx, t),
     tenantSecretsFile(ctx.infra, t.slug),
   ]) {
     rmSync(file, { force: true });
@@ -836,7 +829,6 @@ export const steps = [
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.env`), { force: true });
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.meili.env`), { force: true });
         rmSync(tenantSecretsFile(ctx.infra, t.slug), { force: true });
-        rmSync(ipallowFile(ctx, t), { force: true });
       }
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
     },

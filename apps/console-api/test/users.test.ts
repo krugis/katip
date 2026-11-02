@@ -36,7 +36,12 @@ let failAnnounce = false;
 let failInvite: AppError | null = null;
 let failEmail = false;
 let failEnabled = false;
+let failLimits = false;
 const identity: IdentityClient = {
+  setSessionLimits: async (slug, idle, max) => {
+    calls.push(`limits ${slug} ${idle} ${max}`);
+    if (failLimits) throw new AppError(502, 'identity_unavailable', 'no');
+  },
   invite: async (slug, input) => {
     calls.push(`invite ${slug} ${input.email} ${input.role}`);
     if (failInvite) throw failInvite;
@@ -141,6 +146,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   calls.length = 0;
+  failLimits = false;
   announced.length = 0;
   failAnnounce = false;
   failInvite = null;
@@ -407,6 +413,7 @@ describe('the console role', () => {
     ['change the catalog', `update model_catalog set enabled = false`],
     ['rewrite policy history', `update policy_history set version = 0`],
     ['delete a policy', `delete from tenant_policies`],
+    ['turn MFA off', `update access_rules set mfa_required = false`],
     ['read conversation ids', `select conversation_id from usage_events`],
     ['read who used what', `select user_id from usage_events`],
     ['change limits', `update tenant_limits set std_tokens = 1`],
@@ -795,6 +802,116 @@ describe('the policy', () => {
     const [row] = await admin`select policy from tenant_policies where tenant_id = ${b}`;
     expect(row!['policy']).toEqual({ pii: { mode: 'off' } });
     expect(announced).toEqual([]);
+  });
+});
+
+describe('access rules', () => {
+  const path = (tenant: string) => `/api/v1/tenants/${tenant}/access-rules`;
+  const body = {
+    ipAllowlist: [] as string[],
+    countries: ['TR', 'DE'],
+    sessionIdleMin: 15,
+    sessionMaxH: 8,
+  };
+  const put = async (change: object, ip = '198.51.100.7', tenant = a) =>
+    api.inject({
+      method: 'PUT',
+      url: path(tenant),
+      headers: { authorization: `Bearer ${await asOwner()}`, 'x-real-ip': ip },
+      payload: { ...body, ...change },
+    });
+
+  it('starts open, with MFA required', async () => {
+    const res = await send('GET', path(a));
+    expect(res.json()).toMatchObject({ ipAllowlist: [], mfaRequired: true });
+  });
+
+  it('saves, sets Keycloak, and audits counts rather than addresses', async () => {
+    const res = await put({ ipAllowlist: ['198.51.100.7', '203.0.113.0/24'] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      ipAllowlist: ['198.51.100.7/32', '203.0.113.0/24'],
+      countries: ['TR', 'DE'],
+      sessionIdleMin: 15,
+      callerIp: '198.51.100.7',
+    });
+    expect(calls).toEqual(['limits tenant-a 900 28800']);
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'access_rules.update', actor_id: ownerId });
+    expect(entry!['details']).toMatchObject({ ipRanges: 2, countries: 2 });
+    expect(JSON.stringify(entry)).not.toContain('198.51');
+  });
+
+  it('changes nothing if Keycloak fails', async () => {
+    failLimits = true;
+    const res = await put({ ipAllowlist: ['198.51.100.7'] });
+    expect(res.statusCode).toBe(502);
+    expect((await send('GET', path(a))).json().ipAllowlist).toEqual([]);
+  });
+
+  it('refuses a list that leaves out the caller, unless forced', async () => {
+    const refused = await put({ ipAllowlist: ['203.0.113.0/24'] });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().code).toBe('would_lock_out');
+    expect((await send('GET', path(a))).json().ipAllowlist).toEqual([]);
+    const forced = await put({ ipAllowlist: ['203.0.113.0/24'], force: true });
+    expect(forced.statusCode).toBe(200);
+  });
+
+  it('counts a caller inside a range, and an empty list as open', async () => {
+    expect((await put({ ipAllowlist: ['198.51.100.0/24'] })).statusCode).toBe(200);
+    expect((await put({ ipAllowlist: [] }, '203.0.113.9')).statusCode).toBe(200);
+  });
+
+  it('reads an IPv6 caller, and a mapped IPv4 one', async () => {
+    expect((await put({ ipAllowlist: ['2001:db8::/32'] }, '2001:db8::1')).statusCode).toBe(200);
+    expect((await put({ ipAllowlist: ['198.51.100.7'] }, '::ffff:198.51.100.7')).statusCode).toBe(
+      200,
+    );
+  });
+
+  it.each([
+    ['a bad address', { ipAllowlist: ['999.1.1.1'], force: true }],
+    ['a name', { ipAllowlist: ['acme.com'], force: true }],
+    ['a bad prefix', { ipAllowlist: ['10.0.0.0/33'], force: true }],
+    ['two slashes', { ipAllowlist: ['10.0.0.0/8/8'], force: true }],
+    ['no countries', { countries: [] }],
+    ['a long country', { countries: ['TUR'] }],
+    ['an idle time past the realm', { sessionIdleMin: 31 }],
+    ['a session past the realm', { sessionMaxH: 11 }],
+    ['turning MFA off', { mfaRequired: false }],
+  ])('refuses %s', async (_label, change) => {
+    expect((await put(change)).statusCode).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("can't reach another company's rules", async () => {
+    expect((await send('GET', path(b))).statusCode).toBe(404);
+    expect((await put({}, '198.51.100.7', b)).statusCode).toBe(404);
+    expect(calls).toEqual([]);
+  });
+
+  it("gives Traefik each company's list, open when it's empty", async () => {
+    await put({ ipAllowlist: ['198.51.100.0/24'] });
+    const res = await api.inject({ method: 'GET', url: '/internal/traefik' });
+    expect(res.json()).toEqual({
+      http: {
+        middlewares: {
+          'tenant-a-ipallow': { ipAllowList: { sourceRange: ['198.51.100.0/24'] } },
+          'tenant-b-ipallow': { ipAllowList: { sourceRange: ['0.0.0.0/0', '::/0'] } },
+        },
+      },
+    });
+  });
+});
+
+describe('the Turkish model', () => {
+  it('is only offered with the KVKK add-on', async () => {
+    const read = async () => (await send('GET', `/api/v1/tenants/${a}/policy`)).json().catalog;
+    const classes = (rows: { class: string }[]) => rows.map((m) => m.class);
+    expect(classes(await read())).not.toContain('tr');
+    await admin`update tenants set kvkk_addon = true where id = ${a}`;
+    expect(classes(await read())).toContain('tr');
   });
 });
 

@@ -25,6 +25,7 @@ export interface IdentityDirectory {
   setEnabled(userId: string, enabled: boolean): Promise<void>;
   endSessions(userId: string): Promise<void>;
   sendInviteEmail(slug: string, userId: string): Promise<void>;
+  setClientSessionLimits(slug: string, idleSeconds: number, maxSeconds: number): Promise<void>;
 }
 
 export class IdentityRefused extends Error {
@@ -92,6 +93,12 @@ export class TenantUsers {
   async setRole(slug: string, email: string, role: TenantRole): Promise<void> {
     const user = await this.member(slug, email);
     await this.directory.setRealmRole(user.id, role, TENANT_ROLES);
+  }
+
+  /** How long a login to this company's LibreChat lasts. */
+  async setSessionLimits(slug: string, idleSeconds: number, maxSeconds: number): Promise<void> {
+    this.refuseProviderOrganization(slug);
+    await this.directory.setClientSessionLimits(slug, idleSeconds, maxSeconds);
   }
 
   /** Disabling also ends their sessions, so an open login can't be renewed. */

@@ -58,6 +58,17 @@ export function buildIdentityServer(
     return {};
   });
 
+  app.put('/v1/tenants/:slug/session-limits', async (req) => {
+    const { idleSeconds, maxSeconds } = z
+      .object({
+        idleSeconds: z.number().int().min(60).max(1800),
+        maxSeconds: z.number().int().min(3600).max(36_000),
+      })
+      .parse(req.body);
+    await users.setSessionLimits(slugOf(req.params), idleSeconds, maxSeconds);
+    return {};
+  });
+
   app.put('/v1/tenants/:slug/users/enabled', async (req) => {
     const { email, enabled } = z.object({ email: Email, enabled: z.boolean() }).parse(req.body);
     await users.setEnabled(slugOf(req.params), email, enabled);

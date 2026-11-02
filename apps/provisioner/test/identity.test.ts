@@ -19,6 +19,7 @@ interface FakeUser {
 
 let people: FakeUser[];
 let invitesSent: string[];
+let limits: string[];
 
 const byId = (id: string) => people.find((p) => p.id === id)!;
 const directory: IdentityDirectory = {
@@ -46,6 +47,9 @@ const directory: IdentityDirectory = {
   sendInviteEmail: async (_slug, id) => {
     invitesSent.push(id);
   },
+  setClientSessionLimits: async (slug, idle, max) => {
+    limits.push(`${slug} ${idle} ${max}`);
+  },
 };
 
 let app: FastifyInstance;
@@ -69,6 +73,7 @@ afterAll(async () => app?.close());
 
 beforeEach(() => {
   invitesSent = [];
+  limits = [];
   people = [
     { id: 'a', email: 'a@acme.test', orgs: ['acme'], roles: ['user'], enabled: true, sessions: 2 },
     { id: 'b', email: 'b@beta.test', orgs: ['beta'], roles: ['user'], enabled: true, sessions: 1 },
@@ -241,6 +246,34 @@ describe('role and enabled', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(byId('a').enabled).toBe(true);
+  });
+});
+
+describe('session limits', () => {
+  it('sets them for a company', async () => {
+    const res = await call('PUT', '/v1/tenants/acme/session-limits', {
+      idleSeconds: 900,
+      maxSeconds: 7200,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(limits).toEqual(['acme 900 7200']);
+  });
+
+  it.each([
+    ['past the realm idle limit', { idleSeconds: 1801, maxSeconds: 7200 }],
+    ['past the realm session limit', { idleSeconds: 900, maxSeconds: 36_001 }],
+    ['too short', { idleSeconds: 10, maxSeconds: 7200 }],
+  ])('refuses %s', async (_label, body) => {
+    expect((await call('PUT', '/v1/tenants/acme/session-limits', body)).statusCode).toBe(400);
+    expect(limits).toEqual([]);
+  });
+
+  it('refuses the provider organization', async () => {
+    const res = await call('PUT', '/v1/tenants/provider/session-limits', {
+      idleSeconds: 900,
+      maxSeconds: 7200,
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
 

@@ -99,7 +99,28 @@ export interface PolicyView {
   catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
 }
 
+export interface AccessRulesInput {
+  ipAllowlist: string[];
+  countries: string[];
+  sessionIdleMin: number;
+  sessionMaxH: number;
+}
+
+export interface AccessRulesView extends AccessRulesInput {
+  mfaRequired: boolean;
+}
+
 export interface ConsoleStore {
+  accessRules(tenantId: string): Promise<AccessRulesView | null>;
+  /** If `applyIdentity` throws, nothing changes. */
+  saveAccessRules(
+    tenantId: string,
+    input: AccessRulesInput,
+    actor: Actor,
+    applyIdentity: () => Promise<void>,
+  ): Promise<AccessRulesView>;
+  /** Every company's allowlist, for Traefik. */
+  allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
   policy(tenantId: string): Promise<PolicyView | null>;
   /** null: no such company. Throws if someone else saved since `version` was read. */
   savePolicy(
@@ -628,6 +649,91 @@ export class DbConsoleStore implements ConsoleStore {
     });
   }
 
+  private async accessRulesOf(tx: Tx, tenantId: string): Promise<AccessRulesView> {
+    const [row] = await tx
+      .select({
+        ipAllowlist: schema.accessRules.ipAllowlist,
+        countries: schema.accessRules.countries,
+        mfaRequired: schema.accessRules.mfaRequired,
+        sessionIdleMin: schema.accessRules.sessionIdleMin,
+        sessionMaxH: schema.accessRules.sessionMaxH,
+      })
+      .from(schema.accessRules)
+      .where(eq(schema.accessRules.tenantId, tenantId));
+    // Within what Keycloak's realm allows, whatever an older row says.
+    const fit = (r: AccessRulesView) => ({
+      ...r,
+      sessionIdleMin: Math.min(r.sessionIdleMin, 30),
+      sessionMaxH: Math.min(r.sessionMaxH, 10),
+    });
+    return fit(
+      row ?? {
+        ipAllowlist: [],
+        countries: ['TR'],
+        mfaRequired: true,
+        sessionIdleMin: 30,
+        sessionMaxH: 10,
+      },
+    );
+  }
+
+  async accessRules(tenantId: string): Promise<AccessRulesView | null> {
+    if (!(await this.tenantById(tenantId))) return null;
+    return this.inTenant(tenantId, (tx) => this.accessRulesOf(tx, tenantId));
+  }
+
+  async saveAccessRules(
+    tenantId: string,
+    input: AccessRulesInput,
+    actor: Actor,
+    applyIdentity: () => Promise<void>,
+  ): Promise<AccessRulesView> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      await applyIdentity();
+      const now = new Date();
+      await tx
+        .insert(schema.accessRules)
+        .values({ tenantId, ...input, updatedAt: now })
+        .onConflictDoUpdate({
+          target: schema.accessRules.tenantId,
+          set: { ...input, updatedAt: now },
+        });
+      // Counts, not the addresses: an address can identify a person.
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'access_rules.update',
+        tenantId,
+        {
+          ipRanges: input.ipAllowlist.length,
+          countries: input.countries.length,
+          sessionIdleMin: input.sessionIdleMin,
+          sessionMaxH: input.sessionMaxH,
+        },
+        'access_rules',
+      );
+      return this.accessRulesOf(tx, tenantId);
+    });
+  }
+
+  async allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]> {
+    const tenants = await this.listTenants();
+    // One at a time: row-level security gives this role one company's rows at a time.
+    const out: { slug: string; ipAllowlist: string[] }[] = [];
+    for (const tenant of tenants) {
+      const rows = await this.inTenant(tenant.id, (tx) =>
+        tx
+          .select({ ipAllowlist: schema.accessRules.ipAllowlist })
+          .from(schema.accessRules)
+          .where(eq(schema.accessRules.tenantId, tenant.id)),
+      );
+      out.push({ slug: tenant.slug, ipAllowlist: rows[0]?.ipAllowlist ?? [] });
+    }
+    return out;
+  }
+
   private async policyView(tx: Tx, tenantId: string): Promise<PolicyView | null> {
     const [tenant] = await tx
       .select({ kvkkAddon: schema.tenants.kvkkAddon })
@@ -658,7 +764,8 @@ export class DbConsoleStore implements ConsoleStore {
       } as PolicyDocument,
       version: row?.version ?? 0,
       kvkkAddon: tenant.kvkkAddon,
-      catalog,
+      // The Turkish model comes with the KVKK add-on.
+      catalog: tenant.kvkkAddon ? catalog : catalog.filter((m) => m.class !== 'tr'),
     };
   }
 

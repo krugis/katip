@@ -28,7 +28,7 @@ interface PolicyResponse {
 const SELECT =
   'mt-1 w-full max-w-sm rounded-md border border-line bg-surface px-2 py-1.5 text-sm disabled:opacity-60';
 const SECTION = 'rounded-lg border border-line bg-surface p-4';
-const TITLE = 'text-sm font-medium';
+const TITLE = 'block text-sm font-medium';
 const HELP = 'mt-1 text-sm text-muted';
 
 function Check({

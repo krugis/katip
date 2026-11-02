@@ -293,6 +293,24 @@ export class KeycloakAdmin implements IdentityAdmin, IdentityDirectory {
     await this.api('PUT', `/users/${userId}`, { enabled });
   }
 
+  async setClientSessionLimits(
+    slug: string,
+    idleSeconds: number,
+    maxSeconds: number,
+  ): Promise<void> {
+    const client = await this.client(clientIdOf(slug));
+    if (!client) throw new Error('the LibreChat client is missing');
+    const attributes = (client['attributes'] ?? {}) as Record<string, string>;
+    await this.api('PUT', `/clients/${client.id}`, {
+      ...client,
+      attributes: {
+        ...attributes,
+        'client.session.idle.timeout': String(idleSeconds),
+        'client.session.max.lifespan': String(maxSeconds),
+      },
+    });
+  }
+
   async endSessions(userId: string): Promise<void> {
     await this.api('POST', `/users/${userId}/logout`);
   }

@@ -89,7 +89,7 @@ services:
       - traefik.docker.network=${PROJECT}_t_${SLUG}
       - traefik.http.routers.${SLUG}.rule=Host(`${SLUG}.${BASE_DOMAIN}`)${CUSTOM_DOMAIN_RULE}
       - traefik.http.routers.${SLUG}.tls=true
-      - traefik.http.routers.${SLUG}.middlewares=${SLUG}-ipallow@file,ratelimit-user@file,secure-headers@file
+      - traefik.http.routers.${SLUG}.middlewares=${SLUG}-ipallow@http,ratelimit-user@file,secure-headers@file
       - traefik.http.services.${SLUG}.loadbalancer.server.port=3080
 volumes:
   lc-uploads-${SLUG}: {}
@@ -99,7 +99,7 @@ networks:
 ```
 
 - **Why a Meilisearch per tenant:** LibreChat's index names are fixed (`convos`, `messages`) with no prefix setting, and its sync deletes documents missing from its own Mongo database, so a shared instance would lose other tenants' search data. It costs about 45 MB idle.
-- The `${SLUG}-ipallow` middleware is written to Traefik's file provider by the provisioner.
+- The `${SLUG}-ipallow` middleware comes from `console-api`, through Traefik's HTTP provider.
 - When the tenant has no allowlist, the middleware is a pass-through (`0.0.0.0/0`) (LLD-02 §6).
 
 ### 2.3 Networks

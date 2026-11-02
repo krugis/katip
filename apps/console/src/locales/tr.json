@@ -198,5 +198,19 @@
     "residencyAddon": "Veri konumu seçimi KVKK eklentisiyle gelir.",
     "save": "Kaydet",
     "saved": "Kaydedildi. 30 saniye içinde geçerli olur."
+  },
+  "access": {
+    "ipAllowlist": "İzin verilen IP adresleri",
+    "ipHelp": "Satır başına bir adres veya aralık. Boş bırakılırsa her yerden erişilebilir. Sohbete erişimi kısıtlar; birkaç saniye içinde geçerli olur.",
+    "yourAddress": "Adresiniz:",
+    "countries": "İzin verilen ülkeler",
+    "countriesHelp": "İki harfli ülke kodları. Kaydedilir, ancak ülke kısıtlaması ancak Cloudflare bağlandığında uygulanır.",
+    "idle": "Boşta kalma süresi (dakika)",
+    "max": "En uzun oturum (saat)",
+    "mfa": "Çok faktörlü doğrulama her zaman açık",
+    "mfaHelp": "Şirket hesaplarında çok faktörlü doğrulama zorunludur ve kapatılamaz.",
+    "save": "Kaydet",
+    "saved": "Kaydedildi. Birkaç saniye içinde geçerli olur.",
+    "confirmLockOut": "Bu liste sizin adresinizi içermiyor, bu yüzden sohbete erişemeyebilirsiniz. Yine de kaydedilsin mi?"
   }
 }

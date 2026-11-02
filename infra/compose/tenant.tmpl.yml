@@ -64,7 +64,7 @@ services:
       - traefik.http.routers.${KATIP_SLUG}.rule=Host(`${KATIP_SLUG}.${KATIP_BASE_DOMAIN}`)
       - traefik.http.routers.${KATIP_SLUG}.entrypoints=websecure
       - traefik.http.routers.${KATIP_SLUG}.tls=true
-      - traefik.http.routers.${KATIP_SLUG}.middlewares=${KATIP_SLUG}-ipallow@file,ratelimit-user@file,secure-headers@file
+      - traefik.http.routers.${KATIP_SLUG}.middlewares=${KATIP_SLUG}-ipallow@http,ratelimit-user@file,secure-headers@file
       - traefik.http.services.${KATIP_SLUG}.loadbalancer.server.port=3080
     logging: *default-logging
 
