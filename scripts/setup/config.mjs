@@ -44,7 +44,7 @@ export function validateConfig(c) {
     }
   };
 
-  unknown(c, ['project', 'images', 'models', 'tenant'], 'config');
+  unknown(c, ['project', 'identity', 'images', 'models', 'tenant'], 'config');
 
   unknown(c.project, ['name', 'base_domain'], 'project');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(c.project?.name ?? '')) {
@@ -52,6 +52,16 @@ export function validateConfig(c) {
   }
   if (!/^[a-z0-9.-]+$/.test(c.project?.base_domain ?? '')) {
     errors.push('project.base_domain: must be a domain name');
+  }
+
+  unknown(c.identity, ['realm', 'default_locale', 'locales'], 'identity');
+  if (!/^[a-z0-9-]+$/.test(c.identity?.realm ?? '')) {
+    errors.push('identity.realm: must match ^[a-z0-9-]+$');
+  }
+  if (!Array.isArray(c.identity?.locales) || c.identity.locales.length === 0) {
+    errors.push('identity.locales: at least one locale is required');
+  } else if (!c.identity.locales.includes(c.identity.default_locale)) {
+    errors.push('identity.default_locale: must be one of identity.locales');
   }
 
   const images = c.images ?? {};
@@ -144,6 +154,7 @@ export function composeEnv(config) {
   const env = {
     KATIP_COMPOSE_PROJECT: config.project.name,
     KATIP_BASE_DOMAIN: config.project.base_domain,
+    KATIP_TENANT_SLUG: config.tenant.slug,
     LITELLM_VERSION: litellm.version,
     LITELLM_SHA256: litellm.sha256,
     KATIP_PRESIDIO_REGISTRY: presidio.registry,
@@ -196,6 +207,31 @@ export function seedInput(config) {
       priceInUsdMicroPerM: m.price_in,
       priceOutUsdMicroPerM: m.price_out,
     })),
+  };
+}
+
+/** Input for scripts/setup/keycloak.mjs and oidc-smoke.mjs. Users match the DB seed. */
+export function identityInput(config) {
+  const { slug, name } = config.tenant;
+  const origin = `https://${slug}.${config.project.base_domain}`;
+  const demoUser = (local, firstName, realmRole) => ({
+    email: `${local}@${slug}.localhost`,
+    firstName,
+    lastName: 'Demo',
+    realmRole,
+  });
+  return {
+    realm: config.identity.realm,
+    locales: config.identity.locales,
+    defaultLocale: config.identity.default_locale,
+    baseDomain: config.project.base_domain,
+    tenant: { slug, name },
+    client: { id: `lc-${slug}`, origin, redirectUri: `${origin}/oauth/openid/callback` },
+    users: [
+      demoUser('admin', 'Admin', 'tenant_admin'),
+      demoUser('manager', 'Manager', 'dept_manager'),
+      demoUser('user', 'User', 'user'),
+    ],
   };
 }
 

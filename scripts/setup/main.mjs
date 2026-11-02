@@ -285,6 +285,11 @@ function printSummary(ctx) {
   console.log(`    ${bold('Traefik dashboard')} http://127.0.0.1:9090`);
   console.log('');
   console.log(dim('    Gateway smoke passed: chat through policy-gateway → LiteLLM → mock.'));
+  console.log(
+    dim(
+      `    Demo login: user@${slug}.localhost, password KATIP_DEMO_USER_PASSWORD in katip.env; MFA enrolment at first login.`,
+    ),
+  );
   console.log(dim(`    Secrets: infra/env/katip.env  ·  state: .katip/setup-state.json`));
   console.log(
     dim('    Stop: pnpm dev:down  ·  Remove: pnpm dev:rollback  ·  Status: pnpm dev:status'),

@@ -13,7 +13,7 @@ const sharedPkg = await import('@katip/shared');
 const postgres = (await import('postgres')).default;
 const { drizzle } = await import('drizzle-orm/postgres-js');
 const { migrate, seed } = dbPkg;
-const { hashGatewayKey } = sharedPkg;
+const { hashGatewayKey, keyPrefix } = sharedPkg;
 
 await migrate(url);
 const client = postgres(url, { max: 1 });
@@ -22,7 +22,9 @@ await seed(d, { models, tenant });
 
 const key = process.env.KATIP_DEMO_GATEWAY_KEY;
 if (!key) throw new Error('KATIP_DEMO_GATEWAY_KEY is required');
-const prefix = key.split('-')[3].slice(0, 8);
+// The gateway's own function: the random part of a key can itself contain '-'.
+const prefix = keyPrefix(key);
+if (!prefix) throw new Error('KATIP_DEMO_GATEWAY_KEY has the wrong format');
 
 const rows = await client`select id from tenants where slug = ${tenant.slug}`;
 const tenantId = rows[0]?.id;

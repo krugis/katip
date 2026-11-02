@@ -18,6 +18,13 @@ services:
       - ../traefik/dev-certs:/certs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
+    networks:
+      edge:
+        # Dev has no DNS: containers reach public hostnames through Traefik, so
+        # LibreChat can use the same Keycloak URL as the browser.
+        aliases:
+          - auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+          - ${KATIP_TENANT_SLUG:?from katip.config.yaml}.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
 
   postgres:
     # dev: expose on localhost for psql / IDE access while developing.
@@ -27,6 +34,9 @@ services:
   keycloak:
     environment:
       KC_LOG_LEVEL: INFO
+      # One node in dev: skip clustering, which stalls startup looking for peers
+      # recorded by the previous container.
+      KC_CACHE: local
 
   mongodb:
     ports:

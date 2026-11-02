@@ -71,6 +71,8 @@ services:
       KC_HOSTNAME: auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: 'true'
+    volumes:
+      - ../keycloak/themes/katip:/opt/keycloak/themes/katip:ro
     depends_on:
       postgres:
         condition: service_healthy
