@@ -135,6 +135,7 @@ services:
       DATABASE_URL: postgres://katip:${POSTGRES_PASSWORD:?from katip.env}@postgres:5432/governance
       VALKEY_URL: redis://valkey:6379
       PRESIDIO_URL: http://presidio-analyzer:3000
+      PII_TOKEN_KEY: ${KATIP_PII_TOKEN_KEY:?from katip.env}
       LOG_LEVEL: info
     networks:
       - backend

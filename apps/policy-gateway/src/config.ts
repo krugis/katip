@@ -20,6 +20,11 @@ export const ConfigSchema = z.object({
    */
   PRESIDIO_URL: z.string().url().optional(),
   /**
+   * Secret behind conversation placeholders (optional). Without it, placeholders are
+   * numbered per request, and tools can't rely on them across a conversation.
+   */
+  PII_TOKEN_KEY: z.string().min(32).optional(),
+  /**
    * DEV ONLY: JSON file with tenants, keys and users. Takes precedence over
    * DATABASE_URL for local runs without Postgres. See dev-tenants.example.json.
    */

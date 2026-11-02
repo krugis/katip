@@ -3,6 +3,8 @@ export { isValidTckn, isValidVkn, vknCheckDigit, isValidIban } from './validator
 export { detectStructured, resolveOverlaps, type EntityType, type Span } from './detect.js';
 export {
   PlaceholderMap,
+  conversationTokens,
+  type PlaceholderToken,
   maskText,
   unmaskText,
   StreamingUnmasker,

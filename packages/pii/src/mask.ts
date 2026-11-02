@@ -1,30 +1,63 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createHmac } from 'node:crypto';
 import type { EntityType, Span } from './detect.js';
 
 export const PLACEHOLDER_OPEN = '⟦';
 export const PLACEHOLDER_CLOSE = '⟧';
-const PLACEHOLDER_RE = /⟦([A-Z_]+_\d+)⟧/g;
+const PLACEHOLDER_RE = /⟦[A-Z_]+_[0-9a-f]+⟧/g;
 /** Longest possible placeholder; used to bound the streaming buffer. */
 const MAX_PLACEHOLDER = 48;
 
+/** Token for a normalised value; `length` grows only if a token is already taken. */
+export type PlaceholderToken = (type: EntityType, normalised: string, length: number) => string;
+
 /**
- * Per-request mapping between original values and placeholders.
- * The same value gets the same placeholder across all messages of one request,
- * so the model can still reason about "the same person / the same IBAN".
- * Lives in request memory only; never persisted or logged.
+ * Tokens that stay the same for a value throughout a conversation, across requests,
+ * with nothing stored: earlier tool-call arguments and tool results come back holding
+ * placeholders, which must keep meaning the same value. They are keyed, so a provider
+ * can't guess a TCKN from its token, and per conversation, so tokens can't be linked
+ * across conversations or tenants.
+ */
+export function conversationTokens(
+  key: string,
+  tenantId: string,
+  conversationId: string,
+): PlaceholderToken {
+  return (type, normalised, length) =>
+    createHmac('sha256', key)
+      .update(`${tenantId}\u0000${conversationId}\u0000${type}\u0000${normalised}`)
+      .digest('hex')
+      .slice(0, length);
+}
+
+const TOKEN_LENGTH = 8;
+
+/**
+ * Mapping between original values and placeholders for one request. The same value gets
+ * the same placeholder across its messages, so the model can still reason about "the
+ * same person / the same IBAN"; with `token` set, across the whole conversation too.
+ * Without it, placeholders are numbered per request. Lives in request memory only;
+ * never persisted or logged.
  */
 export class PlaceholderMap {
   private readonly byValue = new Map<string, string>();
   private readonly byPlaceholder = new Map<string, string>();
   private readonly counters = new Map<EntityType, number>();
 
+  constructor(private readonly token?: PlaceholderToken) {}
+
   placeholderFor(type: EntityType, value: string): string {
-    const key = `${type}\u0000${normalise(type, value)}`;
+    const normalised = normalise(type, value);
+    const key = `${type}\u0000${normalised}`;
     const existing = this.byValue.get(key);
     if (existing) return existing;
     const n = (this.counters.get(type) ?? 0) + 1;
     this.counters.set(type, n);
-    const ph = `${PLACEHOLDER_OPEN}${type}_${n}${PLACEHOLDER_CLOSE}`;
+    const build = (id: string | number) => `${PLACEHOLDER_OPEN}${type}_${id}${PLACEHOLDER_CLOSE}`;
+    let ph = build(this.token ? this.token(type, normalised, TOKEN_LENGTH) : n);
+    if (this.token && this.byPlaceholder.has(ph)) {
+      ph = build(this.token(type, normalised, TOKEN_LENGTH * 2));
+    }
     this.byValue.set(key, ph);
     this.byPlaceholder.set(ph, value);
     return ph;
@@ -46,8 +79,22 @@ export class PlaceholderMap {
 
 function normalise(type: EntityType, value: string): string {
   if (type === 'EMAIL_ADDRESS') return value.toLowerCase();
-  if (type === 'PERSON') return value.trim();
+  if (type === 'PERSON') return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('tr');
   return value.replace(/[\s-]/g, '').toUpperCase();
+}
+
+/**
+ * Removes spans touching a placeholder already in the text. Tool results and earlier
+ * tool-call arguments come back holding placeholders, and name detection may take one
+ * for a name; masking it again would make it unrecoverable.
+ */
+export function withoutPlaceholders(text: string, spans: Span[]): Span[] {
+  const existing = [...text.matchAll(PLACEHOLDER_RE)].map((m) => ({
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
+  if (existing.length === 0) return spans;
+  return spans.filter((s) => !existing.some((p) => s.start < p.end && p.start < s.end));
 }
 
 /** Replaces spans (non-overlapping, any order) with placeholders. */

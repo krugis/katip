@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PlaceholderMap,
+  conversationTokens,
+  type PlaceholderToken,
   StreamingUnmasker,
   detectStructured,
   maskMessages,
@@ -152,5 +154,99 @@ describe('maskMessages with policy', () => {
     );
     expect(calls).toBe(0);
     expect(r.detectorFailed).toBe(false);
+  });
+});
+
+describe('conversation placeholders', () => {
+  const tokens = (conversation = 'c-1', tenant = 't-1', key = 'k'.repeat(32)) =>
+    conversationTokens(key, tenant, conversation);
+  const name = 'Ayşe Yılmaz';
+
+  it('gives a value the same placeholder on every request, whatever the order', () => {
+    const first = new PlaceholderMap(tokens());
+    const ph = first.placeholderFor('PERSON', name);
+    first.placeholderFor('PERSON', 'Mehmet Kaya');
+
+    const second = new PlaceholderMap(tokens());
+    second.placeholderFor('PERSON', 'Mehmet Kaya');
+    expect(second.placeholderFor('PERSON', name)).toBe(ph);
+    expect(ph).toMatch(/^⟦PERSON_[0-9a-f]{8}⟧$/);
+  });
+
+  it('treats spacing and Turkish casing as the same person', () => {
+    const map = new PlaceholderMap(tokens());
+    const ph = map.placeholderFor('PERSON', 'Işık Yılmaz');
+    expect(map.placeholderFor('PERSON', 'ışık  yılmaz')).toBe(ph);
+    expect(map.original(ph)).toBe('Işık Yılmaz');
+  });
+
+  it.each([
+    ['conversation', tokens('c-2')],
+    ['tenant', tokens('c-1', 't-2')],
+    ['key', tokens('c-1', 't-1', 'x'.repeat(32))],
+  ])('differs per %s, so tokens cannot be linked', (_label, other) => {
+    const a = new PlaceholderMap(tokens()).placeholderFor('TR_TCKN', '10000000146');
+    const b = new PlaceholderMap(other).placeholderFor('TR_TCKN', '10000000146');
+    expect(a).not.toBe(b);
+  });
+
+  it('does not put the value in the token', () => {
+    const ph = new PlaceholderMap(tokens()).placeholderFor('TR_TCKN', '10000000146');
+    expect(ph).not.toContain('10000000146');
+  });
+
+  it('uses a longer token if one is already taken', () => {
+    const fixed: PlaceholderToken = (type, value, length) =>
+      length > 8 ? value.padEnd(length, '0').replace(/[^0-9a-f]/g, 'a') : 'abcd1234';
+    const map = new PlaceholderMap(fixed);
+    const a = map.placeholderFor('PERSON', 'Ayşe');
+    const b = map.placeholderFor('PERSON', 'Mehmet');
+    expect(a).not.toBe(b);
+    expect(map.original(a)).toBe('Ayşe');
+    expect(map.original(b)).toBe('Mehmet');
+  });
+
+  it('numbers placeholders per request when there is no conversation', () => {
+    expect(new PlaceholderMap().placeholderFor('PERSON', name)).toBe('⟦PERSON_1⟧');
+  });
+
+  it('restores hash placeholders in text and across stream chunks', () => {
+    const map = new PlaceholderMap(tokens());
+    const ph = map.placeholderFor('PERSON', name);
+    expect(unmaskText(`Merhaba ${ph}!`, map)).toBe(`Merhaba ${name}!`);
+    const u = new StreamingUnmasker(map);
+    const cut = 5;
+    const out = u.push(`Merhaba ${ph.slice(0, cut)}`) + u.push(`${ph.slice(cut)}!`) + u.flush();
+    expect(out).toBe(`Merhaba ${name}!`);
+  });
+
+  it('leaves a placeholder alone when its value is not in this request', () => {
+    const other = new PlaceholderMap(tokens());
+    const ph = other.placeholderFor('PERSON', name);
+    expect(unmaskText(`Merhaba ${ph}`, new PlaceholderMap(tokens()))).toBe(`Merhaba ${ph}`);
+  });
+
+  it('does not mask a placeholder again when name detection flags it', async () => {
+    const map = new PlaceholderMap(tokens());
+    const ph = map.placeholderFor('PERSON', name);
+    const text = `Sonuç: ${ph} ve Mehmet Kaya`;
+    const flagsEverything = async (t: string) => {
+      const i = t.indexOf('PERSON_');
+      const j = t.indexOf('Mehmet Kaya');
+      return [
+        { type: 'PERSON' as const, start: i, end: i + 15, value: t.slice(i, i + 15), score: 0.9 },
+        { type: 'PERSON' as const, start: j, end: j + 11, value: 'Mehmet Kaya', score: 0.9 },
+      ];
+    };
+    const r = await maskMessages(
+      [{ role: 'tool', content: text }],
+      { mode: 'mask' },
+      map,
+      flagsEverything,
+    );
+    const out = r.messages[0]!.content as string;
+    expect(out).toContain(ph);
+    expect(out).not.toContain('Mehmet');
+    expect(out.match(/⟦/g)).toHaveLength(2);
   });
 });

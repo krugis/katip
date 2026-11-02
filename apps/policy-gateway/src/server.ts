@@ -49,6 +49,10 @@ if (policySource) await policySource.start();
 // Presidio PERSON NER (P1-11): on failure, the tenant's pii.onDetectorFailure decides.
 const presidio = config.PRESIDIO_URL ? new PresidioClient({ baseUrl: config.PRESIDIO_URL }) : null;
 
+if (!config.PII_TOKEN_KEY) {
+  log.warn('PII_TOKEN_KEY not set: placeholders change between requests of a conversation');
+}
+
 const catalogStore = useDb ? new DbCatalogStore(config.DATABASE_URL!) : null;
 
 const app = buildGateway({
@@ -67,6 +71,7 @@ const app = buildGateway({
       }
     : {}),
   ...(presidio ? { piiDetector: (text) => presidio.detect(text) } : {}),
+  ...(config.PII_TOKEN_KEY ? { piiTokenKey: config.PII_TOKEN_KEY } : {}),
   logger: log,
 });
 
