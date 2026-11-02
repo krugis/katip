@@ -32,6 +32,7 @@ const OverviewSchema = z.object({
   seats: z.array(z.object({ planCode: z.string(), quantity: z.number(), used: z.number() })),
   limits: z.object({ standard: z.number(), premium: z.number(), research: z.number() }).nullable(),
   used: z.object({ standard: z.number(), premium: z.number(), research: z.number() }),
+  alerts: z.array(z.object({ class: z.string(), threshold: z.number() })),
 });
 
 const actorOf = (caller: Caller): Actor =>

@@ -32,7 +32,7 @@ import {
   TenantRequests,
 } from './portal-page';
 import { TenantUsage } from './usage-page';
-import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
+import { TenantDepartments, TenantOverview, TenantUsers, UsageBanner } from './tenant-pages';
 
 const SCREENS: Record<string, (me: Me, getToken: GetToken, config: AppConfig) => React.ReactNode> =
   {
@@ -127,6 +127,9 @@ function Signed({ config, getToken }: { config: AppConfig; getToken: GetToken })
       chatUrl={slug ? `https://${slug}.${config.baseDomain}` : null}
       onSignOut={() => void auth.signoutRedirect()}
     >
+      {me.data.tenant && me.data.roles.includes('tenant_admin') && (
+        <UsageBanner me={me.data} getToken={getToken} />
+      )}
       <Routes>
         <Route
           path="*"

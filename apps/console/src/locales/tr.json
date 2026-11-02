@@ -85,7 +85,9 @@
     "research": "Derin araştırma",
     "usedOf": "{{limit}} içinden {{used}} kullanıldı",
     "nearLimit": "Sınıra yaklaşıldı.",
-    "noLimits": "Bu ay için kota tanımlı değil."
+    "noLimits": "Bu ay için kota tanımlı değil.",
+    "alert": "{{kind}} kotasının %{{threshold}} kadarı bu ay kullanıldı.",
+    "alertFull": "{{kind}} kotası bu ay doldu. Kota dolunca ne olacağını Modeller ve politikalar ekranından seçebilirsiniz."
   },
   "roles": {
     "user": "Kullanıcı",

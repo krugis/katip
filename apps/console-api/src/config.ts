@@ -17,6 +17,11 @@ export const ConfigSchema = z.object({
   IDENTITY_TOKEN: z.string().min(32),
   /** For telling the gateways a policy changed. */
   VALKEY_URL: z.string().url().optional(),
+  /** For usage alerts. Without a host, none are sent. */
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(25),
+  MAIL_FROM: z.string().default('noreply@localhost'),
+  ALERT_CHECK_SECONDS: z.coerce.number().int().min(5).default(60),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

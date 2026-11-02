@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWK } from 'jose';
 import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { checkAlerts, type Mail, type Mailer } from '../src/alerts.js';
 import { buildApi } from '../src/app.js';
 import { createVerifier } from '../src/auth.js';
 import { parseCsv } from '../src/csv.js';
@@ -422,6 +423,7 @@ describe('the console role', () => {
     ['read conversation ids', `select conversation_id from usage_events`],
     ['read who used what', `select user_id from usage_events`],
     ['change limits', `update tenant_limits set std_tokens = 1`],
+    ['forget an alert', `delete from budget_alerts`],
     ['delete departments', `delete from departments`],
     ['read gateway keys', `select * from gateway_keys`],
     ['rewrite the audit log', `update audit_log set action = 'x'`],
@@ -1515,6 +1517,115 @@ describe('the audit log', () => {
       const one = (await send('GET', `/api/v1/admin/audit?tenant=${a}`, undefined, bearer)).json();
       expect(one.entries.map((e: { tenantSlug: string }) => e.tenantSlug)).toEqual(['tenant-a']);
     });
+  });
+});
+
+describe('usage alerts', () => {
+  const month = new Date().toISOString().slice(0, 7).replace('-', '');
+  const silent = createLogger('test', { level: 'silent' });
+  const mails: Mail[] = [];
+  const mailer: Mailer = async (m) => {
+    mails.push(m);
+  };
+  const setLimit = (tenant: string, standard: number, premium = 1000) =>
+    admin`insert into tenant_limits (tenant_id, month, std_tokens, prem_tokens, research_runs)
+      values (${tenant}, ${month}, ${standard}, ${premium}, 10)
+      on conflict (tenant_id, month) do update set std_tokens = excluded.std_tokens`;
+  const use = async (tenant: string, tokens: number, cls = 'standard') =>
+    admin.unsafe(
+      `insert into usage_events (id, tenant_id, user_id, alias, model_id, class, input_tokens, output_tokens, cost_usd_micro, price_usd_micro, source)
+       values ('${randomUUID()}', '${tenant}', '${randomUUID()}', 'fast', 'm', '${cls}', ${tokens}, 0, 1, 1, 'chat')`,
+    );
+  beforeEach(() => {
+    mails.length = 0;
+  });
+
+  it('stays quiet under 50%', async () => {
+    await setLimit(a, 100);
+    await use(a, 49);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toEqual([]);
+  });
+
+  it('tells the admins once at each threshold', async () => {
+    await setLimit(a, 100);
+    await use(a, 50);
+    await checkAlerts(store, mailer, silent);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.to).toEqual(['owner@a.test']);
+    expect(mails[0]!.subject).toContain('%50');
+    await use(a, 30);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(2);
+    expect(mails[1]!.subject).toContain('%80');
+    await use(a, 20);
+    await checkAlerts(store, mailer, silent);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(3);
+    expect(mails[2]!.subject).toContain('doldu');
+  });
+
+  it('jumping past several sends one email, for the highest', async () => {
+    await setLimit(a, 100);
+    await use(a, 95);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.subject).toContain('%80');
+  });
+
+  it('retries next time if the email fails', async () => {
+    await setLimit(a, 100);
+    await use(a, 50);
+    await checkAlerts(
+      store,
+      async () => {
+        throw new Error('smtp down');
+      },
+      silent,
+    );
+    expect(await admin`select 1 from budget_alerts where tenant_id = ${a}`).toHaveLength(0);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(1);
+  });
+
+  it('counts each kind of token apart, and only this month', async () => {
+    await setLimit(a, 100, 100);
+    await use(a, 60, 'premium');
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.subject).toContain('premium');
+    await checkAlerts(store, mailer, silent, new Date('2020-01-15T00:00:00Z'));
+    expect(mails).toHaveLength(1);
+  });
+
+  it('tells only that company, and only its active admins', async () => {
+    await addUser(a, 'second@a.test', 'tenant_admin');
+    await addUser(a, 'off@a.test', 'tenant_admin', 'disabled');
+    await addUser(a, 'plain@a.test');
+    await setLimit(a, 100);
+    await setLimit(b, 100);
+    await use(a, 60);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.to.sort()).toEqual(['owner@a.test', 'second@a.test']);
+  });
+
+  it('skips a suspended company', async () => {
+    await admin`update tenants set status = 'suspended' where id = ${a}`;
+    await setLimit(a, 100);
+    await use(a, 60);
+    await checkAlerts(store, mailer, silent);
+    expect(mails).toEqual([]);
+  });
+
+  it('shows on the overview, and holds no usage detail in the email', async () => {
+    await setLimit(a, 100);
+    await use(a, 85);
+    await checkAlerts(store, mailer, silent);
+    const res = await send('GET', `/api/v1/tenants/${a}/overview`);
+    expect(res.json().alerts).toEqual([{ class: 'standard', threshold: 80 }]);
+    expect(mails[0]!.text).not.toMatch(/\b85\b/);
   });
 });
 
