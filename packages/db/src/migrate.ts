@@ -7,7 +7,13 @@ import { migrate as drizzleMigrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { isCliEntry } from './cli-entry.js';
-import { GATEWAY_ROLE_SQL, PROVIDER_ROLE_SQL, TENANT_OWNED_TABLES, tenantRlsSql } from './rls.js';
+import {
+  CONSOLE_ROLE_SQL,
+  GATEWAY_ROLE_SQL,
+  PROVIDER_ROLE_SQL,
+  TENANT_OWNED_TABLES,
+  tenantRlsSql,
+} from './rls.js';
 import * as schema from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +32,7 @@ export async function migrateWithClient(client: postgres.Sql): Promise<string[]>
   }
   await client.unsafe(PROVIDER_ROLE_SQL);
   await client.unsafe(GATEWAY_ROLE_SQL);
+  await client.unsafe(CONSOLE_ROLE_SQL);
   return [...TENANT_OWNED_TABLES];
 }
 

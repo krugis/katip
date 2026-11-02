@@ -5,9 +5,8 @@
 // config.mjs through KATIP_IDENTITY; secrets come as separate env variables.
 import { adminClient, findClient, findUser, grantClientRole } from './kc-lib.mjs';
 
-const { realm, locales, defaultLocale, baseDomain, tenant, client, users } = JSON.parse(
-  process.env.KATIP_IDENTITY,
-);
+const { realm, locales, defaultLocale, baseDomain, consoleOrigin, tenant, client, users } =
+  JSON.parse(process.env.KATIP_IDENTITY);
 const api = await adminClient(
   process.env.KC_URL,
   process.env.KC_ADMIN_USER,
@@ -112,6 +111,46 @@ if (lc) {
 if (!(await api('GET', `${R}/clients/${lc.id}/roles/member`))) {
   await api('POST', `${R}/clients/${lc.id}/roles`, { name: 'member' });
 }
+
+// ---- the console: a browser app, so a public client with PKCE (LLD-02 §1) ------
+const CONSOLE_CLIENT = 'console';
+const consoleRep = {
+  clientId: CONSOLE_CLIENT,
+  name: 'Kâtip console',
+  protocol: 'openid-connect',
+  publicClient: true,
+  standardFlowEnabled: true,
+  directAccessGrantsEnabled: false,
+  redirectUris: [`${consoleOrigin}/*`],
+  webOrigins: [consoleOrigin],
+  attributes: {
+    'pkce.code.challenge.method': 'S256',
+    'post.logout.redirect.uris': `${consoleOrigin}/*`,
+  },
+};
+let consoleClient = await findClient(api, realm, CONSOLE_CLIENT);
+if (consoleClient) {
+  await api('PUT', `${R}/clients/${consoleClient.id}`, { ...consoleClient, ...consoleRep });
+} else {
+  await api('POST', `${R}/clients`, consoleRep);
+  consoleClient = await findClient(api, realm, CONSOLE_CLIENT);
+}
+// console-api only accepts tokens made for it.
+const mappers = await api('GET', `${R}/clients/${consoleClient.id}/protocol-mappers/models`);
+if (!mappers.some((m) => m.name === 'console-api-audience')) {
+  await api('POST', `${R}/clients/${consoleClient.id}/protocol-mappers/models`, {
+    name: 'console-api-audience',
+    protocol: 'openid-connect',
+    protocolMapper: 'oidc-audience-mapper',
+    config: { 'included.custom.audience': 'console-api', 'access.token.claim': 'true' },
+  });
+}
+// The tenant comes from the organization claim. Keycloak only adds it when the login asks
+// for scope=organization, even as a default scope, so the console must request it.
+const scopes = await api('GET', `${R}/client-scopes`);
+const organizationScope = scopes.find((s) => s.name === 'organization');
+if (!organizationScope) throw new Error('the organization client scope is missing');
+await api('PUT', `${R}/clients/${consoleClient.id}/optional-client-scopes/${organizationScope.id}`);
 
 // ---- demo users, matching the governance DB seed ----------------------------
 for (const u of users) {

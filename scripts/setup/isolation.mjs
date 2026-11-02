@@ -15,6 +15,7 @@ const NOT_FOR_TENANTS = [
   'mock-llm:8080',
   'keycloak:8080',
   'mailpit:8025',
+  'console-api:8081',
 ];
 
 /**

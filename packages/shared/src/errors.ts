@@ -47,6 +47,8 @@ function openAIType(status: number): string {
 
 export const Errors = {
   unauthorized: (msg = 'Invalid or missing API key') => new AppError(401, 'unauthorized', msg),
+  forbidden: (msg = 'You do not have access to this') => new AppError(403, 'forbidden', msg),
+  notFound: () => new AppError(404, 'not_found', 'Not found'),
   userNotProvisioned: () =>
     new AppError(403, 'user_not_provisioned', 'This user is not set up for Kâtip in this company'),
   userDisabled: () => new AppError(403, 'user_disabled', 'This user account is disabled'),

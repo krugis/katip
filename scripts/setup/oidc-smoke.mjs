@@ -6,12 +6,19 @@
 //   4. the logged-in user can chat through LibreChat and the gateway
 // Uses users with a random password. The member stays in Keycloak, disabled between
 // runs: LibreChat refuses a login when a known email arrives with a new Keycloak id.
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { adminClient, findClient, findUser, grantClientRole, totp } from './kc-lib.mjs';
 
-const { realm, baseDomain, tenant, client, smokeEmail, chatEndpoint, otherClientId } = JSON.parse(
-  process.env.KATIP_IDENTITY,
-);
+const {
+  realm,
+  baseDomain,
+  consoleOrigin,
+  tenant,
+  client,
+  smokeEmail,
+  chatEndpoint,
+  otherClientId,
+} = JSON.parse(process.env.KATIP_IDENTITY);
 const api = await adminClient(
   process.env.KC_URL,
   process.env.KC_ADMIN_USER,
@@ -112,6 +119,17 @@ async function prepareMember(email) {
   return existing;
 }
 
+/** Puts the member in the tenant's organization, as the token's tenant comes from there. */
+async function joinOrganization(userId) {
+  const orgs = await api('GET', `${R}/organizations?max=1000`);
+  const org = orgs.find((o) => o.alias === tenant.slug);
+  if (!org) throw new Error(`organization ${tenant.slug} is missing`);
+  const members = await api('GET', `${R}/organizations/${org.id}/members?max=1000`);
+  if (!members.some((m) => m.id === userId)) {
+    await api('POST', `${R}/organizations/${org.id}/members`, userId);
+  }
+}
+
 async function disableUser(email) {
   const u = await findUser(api, realm, email);
   if (u) await api('PUT', `${R}/users/${u.id}`, { enabled: false });
@@ -201,6 +219,69 @@ async function chatThroughLibreChat(b) {
   throw new Error(`chat stream ended without an answer: ${body.slice(-300)}`);
 }
 
+/**
+ * Logs in to the console as a browser would: the Keycloak session already exists, so only
+ * the code exchange is left. Then calls console-api with that real token.
+ */
+async function checkConsoleApi(b) {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const redirectUri = `${consoleOrigin}/callback`;
+  const authorize = new URL(`${process.env.KC_URL}/realms/${realm}/protocol/openid-connect/auth`);
+  authorize.search = new URLSearchParams({
+    client_id: 'console',
+    response_type: 'code',
+    scope: 'openid organization',
+    redirect_uri: redirectUri,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  }).toString();
+  const landed = await b.go(authorize.href);
+  const code = new URL(landed.url).searchParams.get('code');
+  if (!code) throw new Error(`no console login code: ${landed.status} ${landed.url.split('?')[0]}`);
+  const tokenRes = await fetch(
+    `${process.env.KC_URL}/realms/${realm}/protocol/openid-connect/token`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: 'console',
+        code,
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+      }),
+    },
+  );
+  if (!tokenRes.ok) throw new Error(`console token exchange failed: HTTP ${tokenRes.status}`);
+  const { access_token: token } = await tokenRes.json();
+  const call = (path, bearer = token) =>
+    fetch(`${consoleOrigin}${path}`, {
+      headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
+    });
+
+  const me = await call('/api/v1/me');
+  if (me.status !== 200) throw new Error(`console-api /me: HTTP ${me.status} ${await me.text()}`);
+  const body = await me.json();
+  if (body.tenant?.slug !== tenant.slug || body.user?.email !== smokeEmail) {
+    throw new Error(`console-api /me named the wrong company or user: ${body.tenant?.slug}`);
+  }
+  const expected = [
+    ['/api/v1/admin/tenants', token, 403],
+    [`/api/v1/tenants/${body.tenant.id}`, token, 403],
+    ['/api/v1/me', null, 401],
+    ['/api/v1/me', `${token}x`, 401],
+  ];
+  for (const [path, bearer, status] of expected) {
+    const r = await call(path, bearer);
+    if (r.status !== status) {
+      throw new Error(`console-api ${path}: expected ${status}, got ${r.status}`);
+    }
+  }
+  const openapi = await call('/api/v1/openapi.json', null);
+  if (openapi.status !== 200) throw new Error(`console-api openapi: HTTP ${openapi.status}`);
+}
+
 const lcHost = new URL(lcUrl).host;
 const member = smokeEmail;
 const outsider = `smoke-outsider@${tenant.slug}.${baseDomain}`;
@@ -211,6 +292,7 @@ try {
 
   // 1. Forced enrolment, then into LibreChat.
   const m = await prepareMember(member);
+  await joinOrganization(m.id);
   await grantClientRole(api, realm, lc, m.id, 'member');
   const b1 = browser();
   const afterPassword = await passwordStep(b1, member);
@@ -221,6 +303,8 @@ try {
   if (!done.url.startsWith(lcUrl) || !b1.hasCookie(lcHost, 'refreshToken')) {
     throw new Error(`login with MFA did not reach LibreChat: ${done.status} ${done.url}`);
   }
+
+  await checkConsoleApi(b1);
 
   // The answer proves the path: LibreChat → gateway (knows the user) → LiteLLM → mock.
   const chat = await chatThroughLibreChat(b1);

@@ -29,6 +29,7 @@ export const AUTO_KEYS = new Set([
   'KATIP_PII_TOKEN_KEY',
   'VALKEY_PASSWORD',
   'KATIP_GATEWAY_DB_PASSWORD',
+  'KATIP_CONSOLE_DB_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -330,7 +331,9 @@ function renderPlatformOverlay(ctx) {
   for (const t of ctx.config.tenants) {
     const key = `t_${t.slug}`;
     overlay.networks[key] = { name: tenantNetworkName(ctx.config, t), external: true };
-    overlay.services.traefik.networks[key] = { aliases: [`auth.${base}`, `${t.slug}.${base}`] };
+    overlay.services.traefik.networks[key] = {
+      aliases: [`auth.${base}`, `console.${base}`, `${t.slug}.${base}`],
+    };
     overlay.services['policy-gateway'].networks[key] = {};
     overlay.services.mongodb.networks[key] = {};
   }
@@ -480,7 +483,7 @@ export const steps = [
       // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
       // on a two-label name (*.localhost), so the names containers use are listed too.
       const base = ctx.config.project.base_domain;
-      const hosts = [base, `*.${base}`, `auth.${base}`, `mailpit.${base}`];
+      const hosts = [base, `*.${base}`, `auth.${base}`, `mailpit.${base}`, `console.${base}`];
       hosts.push(...ctx.config.tenants.map((t) => `${t.slug}.${base}`));
       const san = `${hosts.map((h) => `DNS:${h}`).join(',')},IP:127.0.0.1`;
       const certDir = join(ctx.infra, 'traefik', 'dev-certs');
@@ -585,7 +588,7 @@ export const steps = [
   },
   {
     id: 'build',
-    title: 'Build images (litellm + presidio checksum-verified, gateway, mock)',
+    title: 'Build images (litellm + presidio checksum-verified, gateway, console-api, mock)',
     async run(ctx) {
       const { version, sha256 } = ctx.config.images.litellm;
       ctx.tui?.setDetail?.(`litellm ${version} (sha256 verified)`);
@@ -642,6 +645,14 @@ export const steps = [
       );
       ctx.log('built ghcr.io/krugis/policy-gateway:dev');
 
+      ctx.tui?.setDetail?.('console-api');
+      await tryRun(
+        'docker',
+        ['build', '-t', 'ghcr.io/krugis/console-api:dev', '-f', 'apps/console-api/Dockerfile', '.'],
+        {},
+      );
+      ctx.log('built ghcr.io/krugis/console-api:dev');
+
       ctx.tui?.setDetail?.('mock-llm');
       await tryRun(
         'docker',
@@ -692,6 +703,7 @@ export const steps = [
       const env = {
         DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
         KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
+        KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
         KATIP_TENANT_KEYS: JSON.stringify(
           Object.fromEntries(
             ctx.config.tenants.map((t) => [t.slug, tenantSecret(ctx, t, 'GATEWAY_KEY')]),
@@ -707,6 +719,8 @@ export const steps = [
           'DATABASE_URL',
           '-e',
           'KATIP_GATEWAY_DB_PASSWORD',
+          '-e',
+          'KATIP_CONSOLE_DB_PASSWORD',
           '-e',
           'KATIP_TENANT_KEYS',
           '-e',
@@ -727,7 +741,7 @@ export const steps = [
   },
   {
     id: 'aiplane',
-    title: 'AI plane (mock-llm, litellm, presidio, policy-gateway) + gateway smoke',
+    title: 'Services (mock-llm, litellm, presidio, policy-gateway, console-api) + gateway smoke',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait'], ctx);

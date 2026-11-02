@@ -80,3 +80,16 @@ GRANT SELECT ON ${GATEWAY_READS.join(', ')} TO katip_gateway;
 GRANT INSERT ON usage_events TO katip_gateway;
 DROP POLICY IF EXISTS gateway_key_lookup ON gateway_keys;
 CREATE POLICY gateway_key_lookup ON gateway_keys FOR SELECT TO katip_gateway USING (true);`;
+
+/** Tables the console API may read so far. Each new endpoint adds only what it needs. */
+const CONSOLE_READS = ['tenants', 'users'];
+
+/** The console API's own role: not a superuser and bound by RLS, with no lookup exception. */
+export const CONSOLE_ROLE_SQL = `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'katip_console') THEN
+    CREATE ROLE katip_console LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO katip_console;
+GRANT SELECT ON ${CONSOLE_READS.join(', ')} TO katip_console;`;

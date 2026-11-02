@@ -6,7 +6,7 @@
 | --- | --- |
 | Realm | `identity.realm` in `katip.config.yaml`, default `katip` (single realm) |
 | Organizations | one per tenant (`alias = tenant slug`), plus `provider` for our staff |
-| Clients | `console` (public, PKCE); `lc-<slug>` per tenant LibreChat instance (confidential); `gateway-admin` (service account, provisioner only) |
+| Clients | `console` (public, PKCE; its tokens carry audience `console-api`); `lc-<slug>` per tenant LibreChat instance (confidential); `gateway-admin` (service account, provisioner only) |
 | Realm roles | `provider_admin`, `tenant_admin`, `dept_manager`, `user` |
 | Client roles (per `lc-<slug>`) | `member`: required to log in to that tenant's LibreChat |
 | Identity providers | Per tenant (optional): the customer's Entra ID (OIDC) or Google Workspace, linked to the tenant organization (Keycloak 26 organizations support IdP linking; verify behaviour for the pinned version) |
@@ -19,8 +19,7 @@
 | Claim | Source | Used by |
 | --- | --- | --- |
 | `sub`, `email`, `name` | built-in | LibreChat, console |
-| `organization` | organization scope | console-api, gateway (admin calls) |
-| `tenant_id` | user attribute set by provisioner | console-api |
+| `organization` | organization scope, which the login must request (`scope=openid organization`): Keycloak leaves it out otherwise, even as a default scope | console-api: **this is the tenant**, looked up by alias. Exactly one customer organization is required, so a token without it is refused |
 | `department_id` | user attribute | console-api |
 | `realm_access.roles` | built-in | console RBAC |
 | `resource_access.lc-<slug>.roles` | built-in | LibreChat login gate |
@@ -61,7 +60,7 @@ These variables and the client-role path are verified on LibreChat v0.7.8 by the
 
 ## 4. Console authorisation (RBAC)
 
-Rules are enforced in `console-api` middleware from the token roles + tenant claim. Every query also passes `tenant_id` into Postgres RLS (`SET app.tenant_id`).
+Rules are enforced in `console-api` from the token's roles and organization. `provider_admin` also requires membership of the `provider` organization, so one wrongly assigned role can't make a customer's user a provider admin. Every query also passes `tenant_id` into Postgres RLS (`SET app.tenant_id`).
 
 | Role | Scope |
 | --- | --- |
