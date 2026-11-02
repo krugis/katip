@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Redis } from 'ioredis';
 import { createLogger } from '@katip/shared';
+import { PresidioClient } from '@katip/pii';
 import { buildGateway } from './app.js';
 import { loadConfig } from './config.js';
 import {
@@ -45,6 +46,9 @@ const policySource = useDb
   : null;
 if (policySource) await policySource.start();
 
+// Presidio PERSON NER (P1-11): fail-open per call, never blocks chat.
+const presidio = config.PRESIDIO_URL ? new PresidioClient({ baseUrl: config.PRESIDIO_URL }) : null;
+
 const app = buildGateway({
   litellmBaseUrl: config.LITELLM_BASE_URL,
   litellmApiKey: config.LITELLM_API_KEY,
@@ -54,6 +58,7 @@ const app = buildGateway({
   usage,
   ...(policySource ? { policySource } : {}),
   ...(useDb ? { catalogStore: new DbCatalogStore(config.DATABASE_URL!) } : {}),
+  ...(presidio ? { piiDetector: (text) => presidio.detect(text) } : {}),
   logger: log,
 });
 

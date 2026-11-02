@@ -9,6 +9,7 @@ import {
   maskMessages,
   unmaskText,
   type ChatMessage,
+  type ExtraDetector,
   type PiiPolicy,
 } from '@katip/pii';
 import {
@@ -53,6 +54,11 @@ export interface GatewayDeps {
   policySource?: {
     effectivePolicy(tenant: Tenant, user: User): Promise<{ policy: TenantPolicy; pii: PiiPolicy }>;
   };
+  /**
+   * Extra PII detector (P1-11): Presidio NER for PERSON (TR + EN).
+   * Applied to messages when set and PERSON masking is active for the tenant.
+   */
+  piiDetector?: ExtraDetector;
   upstreamTimeoutMs?: number;
   logger?: Logger;
   fetchImpl?: typeof fetch;
@@ -200,7 +206,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     const map = new PlaceholderMap();
     let masked: ChatMessage[];
     try {
-      const r = await maskMessages(messages, ctx.tenant.pii, map);
+      const r = await maskMessages(messages, ctx.tenant.pii, map, deps.piiDetector);
       if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
       masked = r.messages;
     } catch (e) {

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildMockApp } from '@katip/mock-llm';
 import { DEFAULT_POLICY } from '@katip/policy-engine';
+import type { Span } from '@katip/pii';
 import { createLogger } from '@katip/shared';
 import { buildGateway } from '../src/app.js';
 import {
@@ -190,6 +191,45 @@ describe('chat pipeline', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('pii_blocked');
     expect(mock.requests).toHaveLength(0);
+  });
+
+  it('masks PERSON names via the extra NER detector and fails open when it errors', async () => {
+    // Fake presidio: detects "Ahmet Yilmaz" once, then fails on the next call.
+    let calls = 0;
+    const detector = async (text: string): Promise<Span[]> => {
+      calls += 1;
+      if (calls === 1) {
+        return [
+          {
+            type: 'PERSON',
+            start: 0,
+            end: 12,
+            value: text.slice(0, 12),
+            score: 0.85,
+          },
+        ];
+      }
+      throw new Error('analyzer down');
+    };
+    build(tenant(), {
+      piiDetector: detector,
+      logger: createLogger('test', { level: 'error' }),
+    });
+    const res = await chat({
+      model: 'auto',
+      messages: [{ role: 'user', content: "Ahmet Yilmaz yarin Ankara'ya gidiyor" }],
+    });
+    expect(res.statusCode).toBe(200);
+    const sent = mock.requests[0]!.body;
+    expect(sent.messages[0]!.content).toMatch(/^⟦PERSON_1⟧ yarin/);
+    expect(sent.messages[0]!.content).not.toContain('Ahmet');
+    // second request: detector throws -> fail open, request still succeeds unmasked
+    const res2 = await chat({
+      model: 'auto',
+      messages: [{ role: 'user', content: 'Ayse Kaya burada mi' }],
+    });
+    expect(res2.statusCode).toBe(200);
+    expect(calls).toBe(2);
   });
 
   it('falls back to the next model when the primary fails', async () => {

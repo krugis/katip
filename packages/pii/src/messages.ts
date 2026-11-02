@@ -58,8 +58,15 @@ export async function maskMessages(
   const maskOne = async (text: string): Promise<string> => {
     let spans = detectStructured(text, active);
     if (extra) {
-      const more = (await extra(text)).filter((s) => active.has(s.type));
-      spans = resolveOverlaps([...spans, ...more]);
+      // Fail open: a broken extra detector (e.g. analyzer down) must not take
+      // chat down; the structured recognizers still mask what they can.
+      let more: Span[] = [];
+      try {
+        more = await extra(text);
+      } catch {
+        more = [];
+      }
+      spans = resolveOverlaps([...spans, ...more.filter((s) => active.has(s.type))]);
     }
     for (const s of spans) if (effectiveMode(policy, s.type) === 'block') blocked.add(s.type);
     return maskText(text, spans, map);

@@ -26,6 +26,11 @@ images:
   valkey: valkey/valkey:8.0.12
   mailpit: axllent/mailpit:v1.33.0
   librechat: ghcr.io/danny-avila/librechat:v0.7.8
+  # Presidio analyzer (P1-11): upstream moved to GHCR (LLD-01 still says MCR).
+  # Self-built from infra/presidio/Dockerfile on top of this base.
+  presidio_analyzer:
+    registry: ghcr.io/data-privacy-stack/presidio-analyzer
+    version: '2.2.366'
   # Self-built from infra/litellm/Dockerfile; sha256 = wheel checksum from PyPI.
   litellm:
     version: '1.79.3'
