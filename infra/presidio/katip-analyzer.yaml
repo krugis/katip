@@ -1,0 +1,6 @@
+# Kâtip analyzer config: TR + EN; only what the gateway needs from Presidio
+# (PERSON via NER — structured TR recognizers live in packages/pii).
+supported_languages:
+  - en
+  - tr
+default_score_threshold: 0

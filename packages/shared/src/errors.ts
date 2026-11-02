@@ -66,6 +66,12 @@ export const Errors = {
       `Message contains personal data that company policy does not allow to send: ${types.join(', ')}`,
       { entityTypes: types },
     ),
+  piiUnavailable: () =>
+    new AppError(
+      503,
+      'pii_unavailable',
+      'Personal data checks are temporarily unavailable, and company policy does not allow sending without them. Please try again shortly.',
+    ),
   badRequest: (msg: string) => new AppError(400, 'bad_request', msg),
   upstream: (msg = 'All model providers failed. Please try again.') =>
     new AppError(502, 'upstream_failed', msg),

@@ -117,6 +117,7 @@ services:
       LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
       DATABASE_URL: postgres://katip:${POSTGRES_PASSWORD:?from katip.env}@postgres:5432/governance
       VALKEY_URL: redis://valkey:6379
+      PRESIDIO_URL: http://presidio-analyzer:3000
       LOG_LEVEL: info
     networks:
       - backend
@@ -127,12 +128,42 @@ services:
         condition: service_healthy
       litellm:
         condition: service_healthy
+      presidio-analyzer:
+        condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  presidio-analyzer:
+    # P1-11: Presidio analyzer with multilingual spaCy (TR+EN PERSON NER).
+    # No host port: only the policy-gateway talks to it on the backend network.
+    image: ghcr.io/krugis/presidio-analyzer:dev
+    build:
+      context: ../presidio
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: '3000'
+    networks:
+      - backend
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python3 -c "import urllib.request;urllib.request.urlopen(''http://127.0.0.1:3000/health'')"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     logging:
       driver: json-file
       options:

@@ -9,10 +9,12 @@ export {
   PLACEHOLDER_OPEN,
   PLACEHOLDER_CLOSE,
 } from './mask.js';
+export { PresidioClient, type PresidioClientOptions } from './presidio.js';
 export {
   maskMessages,
   type ChatMessage,
   type PiiMode,
   type PiiPolicy,
   type MaskResult,
+  type ExtraDetector,
 } from './messages.js';
