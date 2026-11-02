@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
 import { Errors } from '@katip/shared';
-import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -51,7 +51,68 @@ export interface UserChange {
   status?: string;
 }
 
+export interface Overview {
+  month: string;
+  seats: { planCode: string; quantity: number; used: number }[];
+  limits: { standard: number; premium: number; research: number } | null;
+  used: { standard: number; premium: number; research: number };
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  budgetUsdMicro: number | null;
+  managerIds: string[];
+  userCount: number;
+}
+
+export interface DepartmentChange {
+  name?: string;
+  budgetUsdMicro?: number | null;
+  managerIds?: string[];
+}
+
+/** Rows by number and reason only: the job outlives the import, and holds no addresses. */
+export interface ImportProgress {
+  total: number;
+  created: number;
+  skipped: number;
+  notInvited: number;
+  failed: { row: number; reason: string }[];
+}
+
+export interface ImportJob extends ImportProgress {
+  id: string;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+}
+
+/** A running import that hasn't moved for this long lost its process. */
+const STALE_IMPORT_MS = 5 * 60_000;
+const IMPORT_JOB = 'users.import';
+
 export interface ConsoleStore {
+  overview(tenantId: string, month: string): Promise<Overview>;
+  listDepartments(tenantId: string): Promise<Department[]>;
+  createDepartment(
+    tenantId: string,
+    input: { name: string; budgetUsdMicro: number | null },
+    actor: Actor,
+  ): Promise<Department>;
+  updateDepartment(
+    tenantId: string,
+    id: string,
+    change: DepartmentChange,
+    actor: Actor,
+  ): Promise<Department | null>;
+  startImport(tenantId: string, total: number, actor: Actor): Promise<string>;
+  recordImport(
+    tenantId: string,
+    id: string,
+    progress: ImportProgress,
+    done: boolean,
+  ): Promise<void>;
+  failImport(tenantId: string, id: string): Promise<void>;
+  importJob(tenantId: string, id: string): Promise<ImportJob | null>;
   listUsers(tenantId: string): Promise<ManagedUser[]>;
   userById(tenantId: string, id: string): Promise<ManagedUser | null>;
   departmentIdByName(tenantId: string, name: string): Promise<string | null>;
@@ -207,6 +268,7 @@ export class DbConsoleStore implements ConsoleStore {
     action: string,
     targetId: string,
     details: Record<string, unknown>,
+    targetType = 'user',
   ): Promise<void> {
     await tx.insert(schema.auditLog).values({
       id: randomUUID(),
@@ -214,7 +276,7 @@ export class DbConsoleStore implements ConsoleStore {
       actorType: actor.type,
       actorId: actor.id,
       action,
-      targetType: 'user',
+      targetType,
       targetId,
       details,
     });
@@ -348,6 +410,287 @@ export class DbConsoleStore implements ConsoleStore {
       });
       return user!;
     });
+  }
+
+  async overview(tenantId: string, month: string): Promise<Overview> {
+    return this.inTenant(tenantId, async (tx) => {
+      const seats = await tx
+        .select({ planCode: schema.seats.planCode, quantity: schema.seats.quantity })
+        .from(schema.seats)
+        .where(eq(schema.seats.tenantId, tenantId))
+        .orderBy(asc(schema.seats.planCode));
+      const used = await tx
+        .select({ planCode: schema.users.seatPlanCode, n: count() })
+        .from(schema.users)
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.status, 'active')))
+        .groupBy(schema.users.seatPlanCode);
+      const [limits] = await tx
+        .select({
+          standard: schema.tenantLimits.stdTokens,
+          premium: schema.tenantLimits.premTokens,
+          research: schema.tenantLimits.researchRuns,
+        })
+        .from(schema.tenantLimits)
+        .where(
+          and(eq(schema.tenantLimits.tenantId, tenantId), eq(schema.tenantLimits.month, month)),
+        );
+      const start = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(4)) - 1, 1));
+      const end = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(4)), 1));
+      // As the gateway counts it: input plus output, with premium apart from the rest.
+      const [totals] = await tx
+        .select({
+          premium: sql<string>`coalesce(sum(case when ${schema.usageEvents.class} = 'premium' then ${schema.usageEvents.inputTokens} + ${schema.usageEvents.outputTokens} end), 0)`,
+          standard: sql<string>`coalesce(sum(case when ${schema.usageEvents.class} <> 'premium' then ${schema.usageEvents.inputTokens} + ${schema.usageEvents.outputTokens} end), 0)`,
+          research: sql<string>`count(*) filter (where ${schema.usageEvents.source} = 'research')`,
+        })
+        .from(schema.usageEvents)
+        .where(
+          and(
+            eq(schema.usageEvents.tenantId, tenantId),
+            sql`${schema.usageEvents.ts} >= ${start.toISOString()}::timestamptz`,
+            sql`${schema.usageEvents.ts} < ${end.toISOString()}::timestamptz`,
+          ),
+        );
+      return {
+        month,
+        seats: seats.map((seat) => ({
+          ...seat,
+          used: used.find((u) => u.planCode === seat.planCode)?.n ?? 0,
+        })),
+        limits: limits ?? null,
+        used: {
+          standard: Number(totals?.standard ?? 0),
+          premium: Number(totals?.premium ?? 0),
+          research: Number(totals?.research ?? 0),
+        },
+      };
+    });
+  }
+
+  private async departmentRows(tx: Tx, tenantId: string, only?: string): Promise<Department[]> {
+    const rows = await tx
+      .select({
+        id: schema.departments.id,
+        name: schema.departments.name,
+        budgetUsdMicro: schema.departments.budgetUsdMicro,
+      })
+      .from(schema.departments)
+      .where(
+        and(
+          eq(schema.departments.tenantId, tenantId),
+          only ? eq(schema.departments.id, only) : undefined,
+        ),
+      )
+      .orderBy(asc(schema.departments.name));
+    const managers = await tx
+      .select({
+        departmentId: schema.departmentManagers.departmentId,
+        userId: schema.departmentManagers.userId,
+      })
+      .from(schema.departmentManagers)
+      .where(eq(schema.departmentManagers.tenantId, tenantId));
+    const people = await tx
+      .select({ departmentId: schema.users.departmentId, n: count() })
+      .from(schema.users)
+      .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.status, 'active')))
+      .groupBy(schema.users.departmentId);
+    return rows.map((d) => ({
+      ...d,
+      managerIds: managers.filter((m) => m.departmentId === d.id).map((m) => m.userId),
+      userCount: people.find((p) => p.departmentId === d.id)?.n ?? 0,
+    }));
+  }
+
+  listDepartments(tenantId: string): Promise<Department[]> {
+    return this.inTenant(tenantId, (tx) => this.departmentRows(tx, tenantId));
+  }
+
+  /** Departments are named once per company. */
+  private async refuseTakenName(tx: Tx, tenantId: string, name: string, except?: string) {
+    const taken = await tx
+      .select({ id: schema.departments.id })
+      .from(schema.departments)
+      .where(
+        and(
+          eq(schema.departments.tenantId, tenantId),
+          eq(schema.departments.name, name),
+          except ? ne(schema.departments.id, except) : undefined,
+        ),
+      );
+    if (taken.length > 0) {
+      throw Errors.conflict('department_exists', 'A department with this name already exists');
+    }
+  }
+
+  async createDepartment(
+    tenantId: string,
+    input: { name: string; budgetUsdMicro: number | null },
+    actor: Actor,
+  ): Promise<Department> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      await this.refuseTakenName(tx, tenantId, input.name);
+      const [row] = await tx
+        .insert(schema.departments)
+        .values({ tenantId, name: input.name, budgetUsdMicro: input.budgetUsdMicro })
+        .returning({ id: schema.departments.id });
+      await this.audit(tx, tenantId, actor, 'department.create', row!.id, {}, 'department');
+      const [department] = await this.departmentRows(tx, tenantId, row!.id);
+      return department!;
+    });
+  }
+
+  async updateDepartment(
+    tenantId: string,
+    id: string,
+    change: DepartmentChange,
+    actor: Actor,
+  ): Promise<Department | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [existing] = await tx
+        .select({ id: schema.departments.id })
+        .from(schema.departments)
+        .where(and(eq(schema.departments.tenantId, tenantId), eq(schema.departments.id, id)));
+      if (!existing) return null;
+
+      const fields: { name?: string; budgetUsdMicro?: number | null } = {};
+      if (change.name !== undefined) {
+        await this.refuseTakenName(tx, tenantId, change.name, id);
+        fields.name = change.name;
+      }
+      if (change.budgetUsdMicro !== undefined) fields.budgetUsdMicro = change.budgetUsdMicro;
+      if (Object.keys(fields).length > 0) {
+        await tx.update(schema.departments).set(fields).where(eq(schema.departments.id, id));
+      }
+
+      if (change.managerIds) {
+        const wanted = [...new Set(change.managerIds)];
+        // Only this company's active managers: row-level security hides everyone else anyway.
+        const valid =
+          wanted.length === 0
+            ? []
+            : await tx
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(
+                  and(
+                    eq(schema.users.tenantId, tenantId),
+                    eq(schema.users.role, 'dept_manager'),
+                    eq(schema.users.status, 'active'),
+                    inArray(schema.users.id, wanted),
+                  ),
+                );
+        if (valid.length !== wanted.length) {
+          throw Errors.badRequest('A manager must be an active department manager of this company');
+        }
+        await tx
+          .delete(schema.departmentManagers)
+          .where(eq(schema.departmentManagers.departmentId, id));
+        if (wanted.length > 0) {
+          await tx
+            .insert(schema.departmentManagers)
+            .values(wanted.map((userId) => ({ tenantId, departmentId: id, userId })));
+        }
+      }
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'department.update',
+        id,
+        {
+          ...(change.budgetUsdMicro === undefined ? {} : { budgetUsdMicro: change.budgetUsdMicro }),
+          ...(change.managerIds ? { managerIds: change.managerIds } : {}),
+          ...(change.name === undefined ? {} : { nameChanged: true }),
+        },
+        'department',
+      );
+      const [department] = await this.departmentRows(tx, tenantId, id);
+      return department!;
+    });
+  }
+
+  async startImport(tenantId: string, total: number, actor: Actor): Promise<string> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [latest] = await tx
+        .select({ status: schema.jobs.status, updatedAt: schema.jobs.updatedAt })
+        .from(schema.jobs)
+        .where(and(eq(schema.jobs.tenantId, tenantId), eq(schema.jobs.type, IMPORT_JOB)))
+        .orderBy(desc(schema.jobs.createdAt))
+        .limit(1);
+      if (
+        latest?.status === 'running' &&
+        Date.now() - latest.updatedAt.getTime() < STALE_IMPORT_MS
+      ) {
+        throw Errors.conflict('import_running', 'An import is already running for this company');
+      }
+      const progress: ImportProgress = { total, created: 0, skipped: 0, notInvited: 0, failed: [] };
+      const [job] = await tx
+        .insert(schema.jobs)
+        .values({
+          type: IMPORT_JOB,
+          tenantId,
+          status: 'running',
+          payload: { actor: actor.id },
+          result: progress,
+        })
+        .returning({ id: schema.jobs.id });
+      return job!.id;
+    });
+  }
+
+  async recordImport(
+    tenantId: string,
+    id: string,
+    progress: ImportProgress,
+    done: boolean,
+  ): Promise<void> {
+    await this.inTenant(tenantId, (tx) =>
+      tx
+        .update(schema.jobs)
+        .set({ result: progress, updatedAt: new Date(), ...(done ? { status: 'done' } : {}) })
+        .where(and(eq(schema.jobs.tenantId, tenantId), eq(schema.jobs.id, id))),
+    );
+  }
+
+  async failImport(tenantId: string, id: string): Promise<void> {
+    await this.inTenant(tenantId, (tx) =>
+      tx
+        .update(schema.jobs)
+        .set({ status: 'failed', updatedAt: new Date() })
+        .where(and(eq(schema.jobs.tenantId, tenantId), eq(schema.jobs.id, id))),
+    );
+  }
+
+  async importJob(tenantId: string, id: string): Promise<ImportJob | null> {
+    const rows = await this.inTenant(tenantId, (tx) =>
+      tx
+        .select({
+          id: schema.jobs.id,
+          status: schema.jobs.status,
+          result: schema.jobs.result,
+          updatedAt: schema.jobs.updatedAt,
+        })
+        .from(schema.jobs)
+        .where(
+          and(
+            eq(schema.jobs.tenantId, tenantId),
+            eq(schema.jobs.id, id),
+            eq(schema.jobs.type, IMPORT_JOB),
+          ),
+        ),
+    );
+    const row = rows[0];
+    if (!row) return null;
+    const stale =
+      row.status === 'running' && Date.now() - row.updatedAt.getTime() >= STALE_IMPORT_MS;
+    return {
+      ...(row.result as ImportProgress),
+      id: row.id,
+      status: stale ? 'interrupted' : (row.status as ImportJob['status']),
+    };
   }
 
   async ready(): Promise<boolean> {

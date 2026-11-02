@@ -21,6 +21,7 @@ import { authorize, resolveCaller, type Access, type Caller, type TokenVerifier 
 import type { IdentityClient } from './identity.js';
 import type { ConsoleStore } from './stores.js';
 import { registerUserRoutes } from './users.js';
+import { registerCompanyRoutes } from './company.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -193,6 +194,7 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
   );
 
   registerUserRoutes(app as unknown as FastifyInstance, deps, API_PREFIX, callerOf);
+  registerCompanyRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
 
   deps.extraRoutes?.(app as unknown as FastifyInstance);
   await app.ready();

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Refine's window on console-api. Lists are all it needs so far: the screens that change
-// things bring what they need with them.
+// Refine's window on console-api.
 import type { BaseRecord, DataProvider } from '@refinedev/core';
-import { apiFetch, type GetToken } from './api';
+import { apiFetch, apiSend, type GetToken } from './api';
 
 export interface TenantRow extends BaseRecord {
   id: string;
@@ -23,8 +22,12 @@ export function dataProviderFor(getToken: GetToken): DataProvider {
       return { data, total: data.length };
     },
     getOne: notYet('getOne'),
-    create: notYet('create'),
-    update: notYet('update'),
+    create: async ({ resource, variables }) => ({
+      data: (await apiSend('POST', `/${resource}`, getToken, variables)) as never,
+    }),
+    update: async ({ resource, id, variables }) => ({
+      data: (await apiSend('PATCH', `/${resource}/${id}`, getToken, variables)) as never,
+    }),
     deleteOne: notYet('deleteOne'),
   };
 }

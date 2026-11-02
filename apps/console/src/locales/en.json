@@ -75,5 +75,84 @@
     "forbidden": "Your account isn’t linked to one company, or your company is suspended. Ask your company admin.",
     "unavailable": "The server can’t be reached right now. Try again shortly.",
     "signInFailed": "Sign-in could not be completed. Please try again."
+  },
+  "overview": {
+    "seats": "Seats",
+    "quota": "This month’s use",
+    "standard": "Standard tokens",
+    "premium": "Premium tokens",
+    "research": "Deep research",
+    "usedOf": "{{used}} of {{limit}} used",
+    "nearLimit": "Close to the limit.",
+    "noLimits": "No quota is set for this month."
+  },
+  "roles": {
+    "user": "User",
+    "dept_manager": "Department manager",
+    "tenant_admin": "Company admin"
+  },
+  "users": {
+    "invite": "Invite a user",
+    "import": "Import a CSV",
+    "email": "Email",
+    "name": "Full name",
+    "role": "Role",
+    "department": "Department",
+    "noDepartment": "No department",
+    "tier": "Tier",
+    "sendInvite": "Send invite",
+    "invited": "Invite sent.",
+    "invitedNoEmail": "The user was added, but the email could not be sent. Send the invite again.",
+    "person": "Person",
+    "statusLabel": "Status",
+    "actions": "Actions",
+    "resend": "Send again",
+    "resent": "Invite sent again.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "confirmDisable": "Disable {{email}}? Their sessions end at once.",
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "importLabel": "Choose a CSV file",
+    "importHelp": "Columns: email, name, department, tier. Up to 1000 people. Departments must already exist.",
+    "importStatus": {
+      "running": "Importing: {{done}} of {{total}} rows done…",
+      "done": "Import finished.",
+      "failed": "The import stopped. You can upload the file again; people already added are skipped.",
+      "interrupted": "The import was interrupted. You can upload the file again; people already added are skipped."
+    },
+    "importCounts": "{{created}} added, {{skipped}} skipped, {{failed}} failed.",
+    "importNotInvited": "{{count}} people could not be emailed. Send their invites again.",
+    "importRow": "Row {{row}}"
+  },
+  "departments": {
+    "name": "Department name",
+    "budget": "Monthly budget (USD)",
+    "create": "Create department",
+    "empty": "No departments yet. Create the first one above.",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "managers": "Managers",
+    "noManagers": "First give a user the Department manager role.",
+    "noManagerYet": "No manager assigned",
+    "noBudget": "No budget",
+    "people_one": "{{count}} person",
+    "people_other": "{{count}} people"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "user_exists": "This user is already in the company.",
+    "email_in_use": "This email address cannot be invited.",
+    "no_seats": "No seats are left.",
+    "last_admin": "A company must keep at least one active admin.",
+    "bad_request": "Check what you entered.",
+    "identity_unavailable": "The identity service can’t be reached right now. Try again shortly.",
+    "department_exists": "A department with this name already exists.",
+    "import_running": "An import is already running for this company.",
+    "invalid_row": "Invalid email or name",
+    "unknown_department": "Department not found"
   }
 }

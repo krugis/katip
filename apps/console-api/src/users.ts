@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Caller } from './auth.js';
 import { parseCsv } from './csv.js';
 import type { IdentityClient, TenantRole } from './identity.js';
-import type { Actor, ConsoleStore, ManagedUser, TenantRecord } from './stores.js';
+import type { Actor, ConsoleStore, ImportProgress, ManagedUser, TenantRecord } from './stores.js';
 
 const ROLES = ['tenant_admin', 'dept_manager', 'user'] as const;
 const MAX_IMPORT_ROWS = 1000;
@@ -229,24 +229,15 @@ export function registerUserRoutes(
     {
       config: { access },
       schema: {
-        summary: 'Invite users from a CSV file: email, name, department, tier',
+        summary: 'Start inviting users from a CSV file: email, name, department, tier',
         security: secured,
         params: TenantParams,
         consumes: ['text/csv'],
         body: z.string().max(1_000_000),
-        response: {
-          200: z.object({
-            created: z.array(
-              z.object({ row: z.number(), email: z.string(), invited: z.boolean() }),
-            ),
-            skipped: z.array(z.object({ row: z.number(), email: z.string() })),
-            failed: z.array(z.object({ row: z.number(), email: z.string(), reason: z.string() })),
-          }),
-          ...errors,
-        },
+        response: { 202: z.object({ id: z.string().uuid(), total: z.number() }), ...errors },
       },
     },
-    async (req) => {
+    async (req, reply) => {
       const tenant = await activeTenant(req.params.tid);
       const actor = actorOf(callerOf(req));
       let parsed: ReturnType<typeof parseCsv>;
@@ -263,48 +254,92 @@ export function registerUserRoutes(
       if (parsed.rows.length > MAX_IMPORT_ROWS) {
         throw Errors.badRequest(`A file can hold up to ${MAX_IMPORT_ROWS} users`);
       }
+      const total = parsed.rows.length;
+      const id = await store.startImport(tenant.id, total, actor);
 
-      const created: { row: number; email: string; invited: boolean }[] = [];
-      const skipped: { row: number; email: string }[] = [];
-      const failed: { row: number; email: string; reason: string }[] = [];
-      // One row at a time, so a bad row costs only itself.
-      for (const { row, values } of parsed.rows) {
-        const email = (values['email'] ?? '').toLowerCase();
-        const fail = (reason: string) => failed.push({ row, email, reason });
-        const input = NewUser.safeParse({ email, name: values['name'] });
-        if (!input.success) {
-          fail('invalid_row');
-          continue;
-        }
-        try {
-          let departmentId: string | null = null;
-          if (values['department']) {
-            departmentId = await store.departmentIdByName(tenant.id, values['department']);
-            if (!departmentId) {
-              fail('unknown_department');
-              continue;
+      // In the background: a long file would outlast the request. A re-run after a crash is
+      // safe, because users already in the company are skipped.
+      void (async () => {
+        const progress: ImportProgress = {
+          total,
+          created: 0,
+          skipped: 0,
+          notInvited: 0,
+          failed: [],
+        };
+        // One row at a time, so a bad row costs only itself.
+        for (const { row, values } of parsed.rows) {
+          const email = (values['email'] ?? '').toLowerCase();
+          const input = NewUser.safeParse({ email, name: values['name'] });
+          if (!input.success) {
+            progress.failed.push({ row, reason: 'invalid_row' });
+          } else {
+            try {
+              const departmentId = values['department']
+                ? await store.departmentIdByName(tenant.id, values['department'])
+                : null;
+              if (values['department'] && !departmentId) {
+                progress.failed.push({ row, reason: 'unknown_department' });
+              } else {
+                const { invited } = await invite(
+                  req,
+                  tenant,
+                  {
+                    email,
+                    name: input.data.name,
+                    role: 'user',
+                    departmentId,
+                    seatPlanCode: values['tier'] || null,
+                  },
+                  actor,
+                );
+                progress.created += 1;
+                if (!invited) progress.notInvited += 1;
+              }
+            } catch (e) {
+              if (e instanceof AppError && e.code === 'user_exists') progress.skipped += 1;
+              else if (e instanceof AppError) progress.failed.push({ row, reason: e.code });
+              else throw e;
             }
           }
-          const { invited } = await invite(
-            req,
-            tenant,
-            {
-              email,
-              name: input.data.name,
-              role: 'user',
-              departmentId,
-              seatPlanCode: values['tier'] || null,
-            },
-            actor,
-          );
-          created.push({ row, email, invited });
-        } catch (e) {
-          if (e instanceof AppError && e.code === 'user_exists') skipped.push({ row, email });
-          else if (e instanceof AppError) fail(e.code);
-          else throw e;
+          await store.recordImport(tenant.id, id, progress, false);
         }
-      }
-      return { created, skipped, failed };
+        await store.recordImport(tenant.id, id, progress, true);
+      })().catch(async (e: Error) => {
+        req.log.error({ err: { name: e.name }, importId: id }, 'import failed');
+        await store.failImport(tenant.id, id).catch(() => undefined);
+      });
+
+      return reply.code(202).send({ id, total });
+    },
+  );
+
+  app.get(
+    `${prefix}/tenants/:tid/users/imports/:jid`,
+    {
+      config: { access },
+      schema: {
+        summary: 'How an import is going',
+        security: secured,
+        params: TenantParams.extend({ jid: z.string().uuid() }),
+        response: {
+          200: z.object({
+            id: z.string().uuid(),
+            status: z.enum(['running', 'done', 'failed', 'interrupted']),
+            total: z.number(),
+            created: z.number(),
+            skipped: z.number(),
+            notInvited: z.number(),
+            failed: z.array(z.object({ row: z.number(), reason: z.string() })),
+          }),
+          ...errors,
+        },
+      },
+    },
+    async (req) => {
+      const job = await store.importJob(req.params.tid, req.params.jid);
+      if (!job) throw Errors.notFound();
+      return job;
     },
   );
 }

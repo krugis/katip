@@ -390,6 +390,13 @@ describe('the console role', () => {
     ['change a user email', `update users set email = 'x'`],
     ['change a user tenant', `update users set tenant_id = null`],
     ['change seats', `update seats set quantity = 100`],
+    ['read provider cost', `select cost_usd_micro from usage_events`],
+    ['read list price', `select price_usd_micro from usage_events`],
+    ['read conversation ids', `select conversation_id from usage_events`],
+    ['read who used what', `select user_id from usage_events`],
+    ['change limits', `update tenant_limits set std_tokens = 1`],
+    ['delete departments', `delete from departments`],
+    ['read gateway keys', `select * from gateway_keys`],
     ['read the audit log', `select * from audit_log`],
     ['rewrite the audit log', `update audit_log set action = 'x'`],
     ['change a tenant', `update tenants set status = 'active'`],
@@ -403,13 +410,24 @@ describe('the console role', () => {
   });
 });
 
+/** Starts an import and waits for it to finish. */
+const importCsv = async (csv: string) => {
+  const started = await send('POST', url(a, '/import'), csv);
+  expect(started.statusCode).toBe(202);
+  const { id, total } = started.json();
+  for (let i = 0; i < 100; i += 1) {
+    const res = await send('GET', url(a, `/imports/${id}`));
+    if (res.json().status !== 'running') return { ...res.json(), id, total };
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('the import did not finish');
+};
+
 describe('importing a CSV', () => {
-  it('invites good rows, skips existing ones, and reports bad ones', async () => {
+  it('invites good rows in the background, skips existing ones, and reports bad ones', async () => {
     const [d] =
       await admin`insert into departments (tenant_id, name) values (${a}, 'Satış') returning id`;
-    const res = await send(
-      'POST',
-      url(a, '/import'),
+    const job = await importCsv(
       [
         'email,name,department,tier',
         'ayse@a.test,"Yılmaz, Ayşe",Satış,business',
@@ -418,27 +436,66 @@ describe('importing a CSV', () => {
         'x@a.test,X,Nowhere,',
       ].join('\n'),
     );
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
-      created: [{ row: 2, email: 'ayse@a.test', invited: true }],
-      skipped: [{ row: 3, email: 'owner@a.test' }],
+    expect(job).toMatchObject({
+      status: 'done',
+      total: 4,
+      created: 1,
+      skipped: 1,
+      notInvited: 0,
       failed: [
-        { row: 4, email: 'not-an-email', reason: 'invalid_row' },
-        { row: 5, email: 'x@a.test', reason: 'unknown_department' },
+        { row: 4, reason: 'invalid_row' },
+        { row: 5, reason: 'unknown_department' },
       ],
     });
     const [u] = await admin`select name, department_id from users where email = 'ayse@a.test'`;
     expect(u).toMatchObject({ name: 'Yılmaz, Ayşe', department_id: d!['id'] });
   });
 
+  it('keeps no addresses in the job', async () => {
+    const job = await importCsv('email,name\nayse@a.test,Ayşe Yılmaz\nnot-an-email,Bad\n');
+    const [row] = await admin`select payload, result from jobs where id = ${job.id}`;
+    const text = JSON.stringify(row);
+    expect(text).not.toContain('ayse');
+    expect(text).not.toContain('Yılmaz');
+    expect(text).not.toContain('not-an-email');
+  });
+
   it('reports the rows past the seat limit', async () => {
-    const res = await send(
-      'POST',
-      url(a, '/import'),
-      'email,name\n1@a.test,A\n2@a.test,B\n3@a.test,C\n',
+    const job = await importCsv('email,name\n1@a.test,A\n2@a.test,B\n3@a.test,C\n');
+    expect(job.created).toBe(2);
+    expect(job.failed).toEqual([{ row: 4, reason: 'no_seats' }]);
+  });
+
+  it('counts an invite whose email failed', async () => {
+    failEmail = true;
+    const job = await importCsv('email,name\n1@a.test,A\n');
+    expect(job).toMatchObject({ created: 1, notInvited: 1 });
+  });
+
+  it('refuses a second import while one is running', async () => {
+    await admin`insert into jobs (type, tenant_id, status, result)
+      values ('users.import', ${a}, 'running', '{}'::jsonb)`;
+    const res = await send('POST', url(a, '/import'), 'email,name\n1@a.test,A\n');
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('import_running');
+  });
+
+  it('calls a running import that stopped moving interrupted, and allows another', async () => {
+    const [job] = await admin`insert into jobs (type, tenant_id, status, result, updated_at)
+      values ('users.import', ${a}, 'running', ${JSON.stringify({ total: 3, created: 1, skipped: 0, notInvited: 0, failed: [] })}::jsonb, now() - interval '10 minutes')
+      returning id`;
+    const res = await send('GET', url(a, `/imports/${job!['id']}`));
+    expect(res.json().status).toBe('interrupted');
+    expect((await send('POST', url(a, '/import'), 'email,name\n1@a.test,A\n')).statusCode).toBe(
+      202,
     );
-    expect(res.json().created).toHaveLength(2);
-    expect(res.json().failed).toEqual([{ row: 4, email: '3@a.test', reason: 'no_seats' }]);
+  });
+
+  it("answers 404 for another company's import", async () => {
+    const [job] = await admin`insert into jobs (type, tenant_id, status, result)
+      values ('users.import', ${b}, 'done', '{}'::jsonb) returning id`;
+    expect((await send('GET', url(a, `/imports/${job!['id']}`))).statusCode).toBe(404);
+    expect((await send('GET', url(b, `/imports/${job!['id']}`))).statusCode).toBe(404);
   });
 
   it('refuses a file with no email column', async () => {
@@ -451,6 +508,165 @@ describe('importing a CSV', () => {
     const res = await send('POST', url(a, '/import'), `email,name\n${rows}\n`);
     expect(res.statusCode).toBe(400);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('the overview', () => {
+  const overview = (tenant: string) => send('GET', `/api/v1/tenants/${tenant}/overview`);
+  const month = new Date().toISOString().slice(0, 7).replace('-', '');
+
+  const addUsage = async (
+    tenant: string,
+    cls: string,
+    source: string,
+    tokens: number,
+    ts = 'now()',
+  ) =>
+    admin.unsafe(
+      `insert into usage_events (id, tenant_id, user_id, ts, alias, model_id, class, input_tokens, output_tokens, cost_usd_micro, price_usd_micro, source)
+       values ('${randomUUID()}', '${tenant}', '${randomUUID()}', ${ts}, 'fast', 'm', '${cls}', ${tokens}, ${tokens}, 999, 999, '${source}')`,
+    );
+
+  it('shows seats used, not counting the disabled', async () => {
+    await addUser(a, 'u@a.test');
+    await addUser(a, 'off@a.test', 'user', 'disabled');
+    const res = await overview(a);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().seats).toEqual([{ planCode: 'business', quantity: 3, used: 2 }]);
+  });
+
+  it("counts this month's tokens as the gateway does", async () => {
+    await admin`insert into tenant_limits (tenant_id, month, std_tokens, prem_tokens, research_runs)
+      values (${a}, ${month}, 1000, 500, 10)`;
+    await addUsage(a, 'standard', 'chat', 10);
+    await addUsage(a, 'tr', 'chat', 5);
+    await addUsage(a, 'premium', 'chat', 7);
+    await addUsage(a, 'standard', 'research', 1);
+    await addUsage(a, 'standard', 'chat', 1000, `now() - interval '45 days'`);
+    await addUsage(b, 'standard', 'chat', 1000);
+    expect((await overview(a)).json()).toMatchObject({
+      month,
+      limits: { standard: 1000, premium: 500, research: 10 },
+      used: { standard: 32, premium: 14, research: 1 },
+    });
+  });
+
+  it('never carries cost, which is our margin', async () => {
+    await addUsage(a, 'standard', 'chat', 10);
+    expect((await overview(a)).body).not.toContain('999');
+    expect((await overview(a)).body).not.toMatch(/cost|price/i);
+  });
+
+  it('copes with no limits yet', async () => {
+    const body = (await overview(a)).json();
+    expect(body.limits).toBeNull();
+    expect(body.used).toEqual({ standard: 0, premium: 0, research: 0 });
+  });
+});
+
+describe('departments', () => {
+  const path = (tenant: string, rest = '') => `/api/v1/tenants/${tenant}/departments${rest}`;
+  const make = async (name = 'Satış', budgetUsdMicro: number | null = 50_000_000) =>
+    (await send('POST', path(a), { name, budgetUsdMicro })).json();
+
+  it('creates one, and lists it with its people', async () => {
+    const created = await make();
+    expect(created).toMatchObject({
+      name: 'Satış',
+      budgetUsdMicro: 50_000_000,
+      managerIds: [],
+      userCount: 0,
+    });
+    const id = await addUser(a, 'u@a.test');
+    await send('PATCH', url(a, `/${id}`), { departmentId: created.id });
+    const [listed] = (await send('GET', path(a))).json().departments;
+    expect(listed.userCount).toBe(1);
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'user.update' });
+  });
+
+  it('refuses a name already taken, on create and on rename', async () => {
+    await make('Satış');
+    const other = await make('Destek');
+    const create = await send('POST', path(a), { name: 'Satış' });
+    expect(create.statusCode).toBe(409);
+    expect(create.json().code).toBe('department_exists');
+    const rename = await send('PATCH', path(a, `/${other.id}`), { name: 'Satış' });
+    expect(rename.statusCode).toBe(409);
+  });
+
+  it('lets two companies use the same name', async () => {
+    await make('Satış');
+    const theirs = await token('other@b.test', 'tenant-b');
+    const res = await send('POST', path(b), { name: 'Satış' }, theirs);
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('changes the budget, and can clear it', async () => {
+    const d = await make();
+    const res = await send('PATCH', path(a, `/${d.id}`), { budgetUsdMicro: null });
+    expect(res.json().budgetUsdMicro).toBeNull();
+  });
+
+  it.each([
+    ['a negative budget', { budgetUsdMicro: -1 }],
+    ['a fractional budget', { budgetUsdMicro: 1.5 }],
+    ['an empty name', { name: ' ' }],
+    ['nothing', {}],
+  ])('refuses %s', async (_label, body) => {
+    const d = await make();
+    expect((await send('PATCH', path(a, `/${d.id}`), body)).statusCode).toBe(400);
+  });
+
+  it('assigns managers, and replaces them', async () => {
+    const d = await make();
+    const m1 = await addUser(a, 'm1@a.test', 'dept_manager');
+    const m2 = await addUser(a, 'm2@a.test', 'dept_manager');
+    let res = await send('PATCH', path(a, `/${d.id}`), { managerIds: [m1, m2, m1] });
+    expect(res.json().managerIds.sort()).toEqual([m1, m2].sort());
+    res = await send('PATCH', path(a, `/${d.id}`), { managerIds: [m2] });
+    expect(res.json().managerIds).toEqual([m2]);
+    res = await send('PATCH', path(a, `/${d.id}`), { managerIds: [] });
+    expect(res.json().managerIds).toEqual([]);
+  });
+
+  it.each([
+    ['a plain user', 'user', 'active'],
+    ['a disabled manager', 'dept_manager', 'disabled'],
+  ])('refuses %s as a manager', async (_label, role, status) => {
+    const d = await make();
+    const id = await addUser(a, 'x@a.test', role, status);
+    const res = await send('PATCH', path(a, `/${d.id}`), { managerIds: [id] });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("refuses another company's manager, and changes nothing", async () => {
+    const d = await make();
+    const mine = await addUser(a, 'm@a.test', 'dept_manager');
+    await send('PATCH', path(a, `/${d.id}`), { managerIds: [mine] });
+    const theirs = await addUser(b, 'm@b.test', 'dept_manager');
+    const res = await send('PATCH', path(a, `/${d.id}`), { managerIds: [theirs] });
+    expect(res.statusCode).toBe(400);
+    const [listed] = (await send('GET', path(a))).json().departments;
+    expect(listed.managerIds).toEqual([mine]);
+  });
+
+  it("answers 404 for another company's department", async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${b}, 'Theirs') returning id`;
+    const id = d!['id'] as string;
+    expect((await send('PATCH', path(a, `/${id}`), { name: 'Mine' })).statusCode).toBe(404);
+    expect((await send('PATCH', path(b, `/${id}`), { name: 'Mine' })).statusCode).toBe(404);
+    const [row] = await admin`select name from departments where id = ${id}`;
+    expect(row!['name']).toBe('Theirs');
+  });
+
+  it('audits changes without names', async () => {
+    const d = await make('Gizli Birim');
+    await send('PATCH', path(a, `/${d.id}`), { name: 'Yeni Gizli' });
+    const entries = await audit(a);
+    expect(entries.map((e) => e['action'])).toEqual(['department.update', 'department.create']);
+    expect(JSON.stringify(entries)).not.toContain('Gizli');
   });
 });
 

@@ -37,6 +37,13 @@ const managed: ManagedUser = {
   seatPlanCode: 'business',
   lastSeenAt: null,
 };
+const department = {
+  id: USER_ID,
+  name: 'Sales',
+  budgetUsdMicro: null,
+  managerIds: [],
+  userCount: 0,
+};
 const identity: IdentityClient = {
   invite: async () => ({ keycloakId: 'kc' }),
   sendInvite: async () => undefined,
@@ -44,6 +51,27 @@ const identity: IdentityClient = {
   setEnabled: async () => undefined,
 };
 const store: ConsoleStore = {
+  overview: async () => ({
+    month: '202611',
+    seats: [],
+    limits: null,
+    used: { standard: 0, premium: 0, research: 0 },
+  }),
+  listDepartments: async () => [],
+  createDepartment: async () => department,
+  updateDepartment: async () => department,
+  startImport: async () => USER_ID,
+  recordImport: async () => undefined,
+  failImport: async () => undefined,
+  importJob: async () => ({
+    id: USER_ID,
+    status: 'done',
+    total: 0,
+    created: 0,
+    skipped: 0,
+    notInvited: 0,
+    failed: [],
+  }),
   listUsers: async () => [managed],
   userById: async () => managed,
   departmentIdByName: async () => null,
@@ -191,6 +219,40 @@ const MATRIX: {
     method: 'POST',
     body: 'email,name\n',
     url: (t) => `/api/v1/tenants/${t}/users/import`,
+    own: { provider_admin: 202, tenant_admin: 202, ...ADMIN_ONLY },
+    other: { provider_admin: 202, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/users/imports/:jid',
+    url: (t) => `/api/v1/tenants/${t}/users/imports/${USER_ID}`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/overview',
+    url: (t) => `/api/v1/tenants/${t}/overview`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/departments',
+    url: (t) => `/api/v1/tenants/${t}/departments`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/departments',
+    method: 'POST',
+    body: { name: 'Sales' },
+    url: (t) => `/api/v1/tenants/${t}/departments`,
+    own: { provider_admin: 201, tenant_admin: 201, ...ADMIN_ONLY },
+    other: { provider_admin: 201, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/departments/:did',
+    method: 'PATCH',
+    body: { name: 'Sales 2' },
+    url: (t) => `/api/v1/tenants/${t}/departments/${USER_ID}`,
     own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
     other: { provider_admin: 200, ...OTHER_TENANT },
   },
