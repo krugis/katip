@@ -2,14 +2,14 @@
 // End-to-end login check (P1-19, LLD-02 §8) through Traefik, as a browser would:
 //   1. a new local user is forced to enrol MFA, then reaches LibreChat
 //   2. the next login asks for the code instead of enrolling again
-//   3. a user without the tenant's `member` role is refused
+//   3. a user who is a member of another tenant is refused
 //   4. the logged-in user can chat through LibreChat and the gateway
 // Uses users with a random password. The member stays in Keycloak, disabled between
 // runs: LibreChat refuses a login when a known email arrives with a new Keycloak id.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { adminClient, findClient, findUser, grantClientRole, totp } from './kc-lib.mjs';
 
-const { realm, baseDomain, tenant, client, smokeEmail, chatEndpoint } = JSON.parse(
+const { realm, baseDomain, tenant, client, smokeEmail, chatEndpoint, otherClientId } = JSON.parse(
   process.env.KATIP_IDENTITY,
 );
 const api = await adminClient(
@@ -237,7 +237,11 @@ try {
   }
 
   // 3. No `member` role: refused, even with correct password and MFA.
-  await makeUser(outsider);
+  // A member of another tenant, which is what must not get in.
+  const o = await makeUser(outsider);
+  if (otherClientId) {
+    await grantClientRole(api, realm, await findClient(api, realm, otherClientId), o.id, 'member');
+  }
   const b3 = browser();
   const refused = await enrol(b3, await passwordStep(b3, outsider));
   if (b3.hasCookie(lcHost, 'refreshToken')) {

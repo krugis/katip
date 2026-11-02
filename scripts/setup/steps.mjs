@@ -15,6 +15,7 @@ import {
   tenantSecretName,
   tenantSubnet,
 } from './config.mjs';
+import { checkIsolation } from './isolation.mjs';
 import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const AUTO_KEYS = new Set([
@@ -770,10 +771,38 @@ export const steps = [
       ctx.log('e2e smoke ok (models, login with MFA, chat headers, non-member refused)');
     },
   },
+  {
+    id: 'isolation',
+    title: 'Tenant isolation checks (network, Mongo, search, gateway, Postgres, Valkey)',
+    async run(ctx) {
+      await checkIsolation(ctx, {
+        secret: (t, name) => tenantSecret(ctx, t, name),
+        gatewayStatus: async (t, email) =>
+          (
+            await curlBackend(ctx, '/v1/models', [
+              '-o',
+              '/dev/null',
+              '-w',
+              '%{http_code}',
+              '-H',
+              `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
+              '-H',
+              `x-user-email: ${email}`,
+            ])
+          ).trim(),
+        waitForTenant: (t) =>
+          waitUntil(async () => {
+            const code = await curlEdge(ctx, `${t.slug}.${ctx.config.project.base_domain}`, '/');
+            return ['200', '301', '302', '307', '308'].includes(code.trim());
+          }),
+      });
+      ctx.log('tenant isolation checks passed');
+    },
+  },
 ];
 
 /** Steps that only hold while the containers run; `dev:down` makes them pending again. */
-export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke'];
+export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke', 'isolation'];
 
 /** Steps a config change doesn't affect, so they stay done when re-applying. */
 export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight']);

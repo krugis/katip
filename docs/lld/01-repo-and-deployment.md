@@ -47,9 +47,8 @@ librechat-sme/
 | traefik | traefik:v3.x | 80, 443 (only public ports) | certs, dynamic config | Cloudflare origin certs or Let's Encrypt DNS challenge |
 | keycloak | quay.io/keycloak/keycloak:26.x | 8080 | – (DB in Postgres) | `KC_HOSTNAME=auth.<domain>`, admin console only via Tailscale |
 | postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`, `lago`, `rag` |
-| mongodb | mongo:7 | 27017 | mongodata | One database per tenant (`lc_<slug>`), user per tenant |
-| meilisearch | getmeili/meilisearch:v1.x | 7700 | meili | Index prefix per tenant (verify LibreChat support) or one instance per tenant if not supported |
-| valkey | valkey/valkey:8 | 6379 | valkey | AOF on; BullMQ + counters + LiteLLM cache |
+| mongodb | mongo:7 | 27017 | mongodata | One database per tenant (`lc_<slug>`), with a login limited to it. On each tenant's network |
+| valkey | valkey/valkey:8 | 6379 | valkey | AOF on; BullMQ + counters + LiteLLM cache. Password required; `backend` network only |
 | litellm | ghcr.io/<org>/litellm:<pinned> (self-built) | 4000 | – | Internal only; master key used only by the gateway and provisioner |
 | presidio-analyzer | mcr.microsoft.com/presidio-analyzer:<pinned> | 3000 | – | Custom TR recognizers mounted |
 | presidio-anonymizer | mcr.microsoft.com/presidio-anonymizer:<pinned> | 3000 | – | Optional; masking is done in `packages/pii` |
@@ -69,8 +68,13 @@ librechat-sme/
 ### 2.2 Per-tenant services (`infra/compose/tenant.tmpl.yml`, rendered per tenant)
 
 ```yaml
-# rendered as infra/compose/tenants/<slug>.yml — project name: sme-<slug>
+# rendered as infra/compose/tenants/<slug>.yml — project name: <project>-<slug>
 services:
+  meili-${SLUG}:                                                 # one per tenant, see below
+    image: getmeili/meilisearch:${MEILI_VERSION}
+    env_file: [ "../../env/tenants/${SLUG}.meili.env" ]
+    volumes: [ "meili-${SLUG}:/meili_data" ]
+    networks: [ tenant ]
   lc-${SLUG}:
     image: ghcr.io/danny-avila/librechat:${LIBRECHAT_VERSION}   # official image (verify registry path)
     restart: unless-stopped
@@ -78,21 +82,23 @@ services:
     volumes:
       - ../../librechat/rendered/${SLUG}.librechat.yaml:/app/librechat.yaml:ro
       - lc-uploads-${SLUG}:/app/uploads
-    networks: [ edge, backend ]
+    networks: [ tenant ]
     deploy: { resources: { limits: { memory: 1g, cpus: "1.0" } } }
     labels:
       - traefik.enable=true
+      - traefik.docker.network=${PROJECT}_t_${SLUG}
       - traefik.http.routers.${SLUG}.rule=Host(`${SLUG}.${BASE_DOMAIN}`)${CUSTOM_DOMAIN_RULE}
       - traefik.http.routers.${SLUG}.tls=true
       - traefik.http.routers.${SLUG}.middlewares=${SLUG}-ipallow@file,ratelimit-user@file,secure-headers@file
       - traefik.http.services.${SLUG}.loadbalancer.server.port=3080
 volumes:
   lc-uploads-${SLUG}: {}
+  meili-${SLUG}: {}
 networks:
-  edge: { external: true }
-  backend: { external: true }
+  tenant: { name: "${PROJECT}_t_${SLUG}", external: true }
 ```
 
+- **Why a Meilisearch per tenant:** LibreChat's index names are fixed (`convos`, `messages`) with no prefix setting, and its sync deletes documents missing from its own Mongo database, so a shared instance would lose other tenants' search data. It costs about 45 MB idle.
 - The `${SLUG}-ipallow` middleware is written to Traefik's file provider by the provisioner.
 - When the tenant has no allowlist, the middleware is a pass-through (`0.0.0.0/0`) (LLD-02 §6).
 
@@ -100,15 +106,18 @@ networks:
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | traefik, console, LibreChat instances, keycloak | Reachable from Traefik only |
-| `backend` | everything except traefik | DBs, gateway, LiteLLM, Presidio; no published ports |
+| `edge` | traefik, console, keycloak, mailpit | Public entry through Traefik |
+| `backend` | platform services, not traefik or LibreChat | DBs, gateway, LiteLLM, Presidio, Valkey; no published ports |
+| `<project>_t_<slug>` | one tenant's LibreChat and Meilisearch, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, Postgres, Valkey, LiteLLM and Presidio aren't on it |
 | `egress-llm` | litellm only | Outbound to LLM providers; firewall egress allowlist (optional, phase 2) |
+
+Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, derived from the slug: Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.
 
 ## 3. Environments
 
 | Env | Host | Contents | Data |
 | --- | --- | --- | --- |
-| `local` | laptop | `pnpm dev:up` = platform + 1 tenant `demo`; mailpit; fake provider (`mock-llm`) optional | throwaway |
+| `local` | laptop | `pnpm dev:up` = platform + the tenants in `katip.config.yaml` (`demo` and `acme`); mailpit; fake provider (`mock-llm`) optional | throwaway |
 | `dev` | AX42 (shared), compose project `sme-dev` | latest `main` | synthetic |
 | `test` | AX42 (same host), project `sme-test` | release candidates; e2e + load tests | synthetic |
 | `pilot` / `prod-eu` | Hetzner (EU) | tagged releases | real; daily backups |

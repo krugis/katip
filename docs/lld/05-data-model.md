@@ -9,10 +9,19 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
 - **Row-level security** on every tenant-owned table:
 
   ```sql
-  using (tenant_id = current_setting('app.tenant_id')::uuid)
+  using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   ```
 
-  The provider-admin role uses a separate DB role with `BYPASSRLS`, used only by provider endpoints and jobs.
+  No tenant context means no rows, rather than an error. `NULLIF` is there because a setting made with `SET LOCAL` reads as `''` once its transaction ends, on a pooled connection.
+- **Database roles.** RLS only works for a role that doesn't bypass it, so each role is deliberate:
+
+  | Role | Used by | RLS | Notes |
+  | --- | --- | --- | --- |
+  | `katip` | Migrations and seeds only | Bypassed (superuser) | Never used by a running service |
+  | `katip_gateway` | Policy gateway | **Applies** | `SELECT` on what it reads, `INSERT` on `usage_events`. Runs each tenant query in a transaction with `set_config('app.tenant_id', …, true)`. `gateway_keys` alone is readable with no tenant context, because a key lookup is how the tenant is found |
+  | `katip_provider` | Provider endpoints and jobs | Bypassed by design (`BYPASSRLS`) | Not used yet |
+
+  Tests of tenant isolation must connect as the role the service uses, as an admin role passes them regardless.
 - Money is stored as `bigint` micro-USD; tokens as `bigint`.
 
 ## 2. Tables

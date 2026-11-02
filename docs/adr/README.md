@@ -13,5 +13,6 @@
 | [ADR-009](adr-009-expose-company-knowledge-deep-research-and-studio-.md) | Expose company knowledge, deep research and Studio flows to LibreChat as MCP servers | Accepted (phase 2) |
 | [ADR-010](adr-010-usage-metering-in-our-own-postgres-ledger-valkey-c.md) | Usage metering in our own Postgres ledger (+ Valkey counters); Lago only for invoicing | Accepted |
 | [ADR-011](adr-011-default-model-deepseek-v4-flash-via-zero-retention.md) | Default model DeepSeek V4 Flash via zero-retention providers (DeepInfra); the DeepSeek first-party endpoint is blocked | Accepted |
+| [ADR-012: The policy gateway is the one control point for LLM calls](adr-012-policy-gateway-is-the-one-control-point-for-llm-calls.md) | Default model DeepSeek V4 Flash via zero-retention providers (DeepInfra); the DeepSeek first-party endpoint is blocked | Accepted |
 
 New ADRs: copy the format, next free number, status `Proposed` until accepted by the product owner.

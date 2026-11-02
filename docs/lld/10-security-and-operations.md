@@ -117,3 +117,20 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 - A restore test succeeds on schedule, and the alert fires when it is disabled.
 - Gitleaks and Trivy block a PR that adds a test secret or a known-critical CVE image.
 - The incident runbook has been rehearsed once (tabletop) before the pilot.
+
+## Tenant isolation checks
+
+`pnpm dev:up` runs these against two real tenants on every install, and fails if any boundary can be crossed (`scripts/setup/isolation.mjs`). Each uses one tenant's own credentials, in both directions.
+
+| Layer | What is tried | Must happen |
+| --- | --- | --- |
+| Network | From a tenant's LibreChat: Valkey, Postgres, LiteLLM, Presidio, Keycloak's internal port, Mailpit, the other tenant's LibreChat and search | Closed. The gateway, Mongo and its own search stay open |
+| Mongo | The tenant's login reads the other tenant's database | Refused |
+| Search | The tenant's key on the other tenant's Meilisearch; restarting one tenant's LibreChat, which syncs search | Key refused; the other tenant's search data unchanged |
+| Gateway | The tenant's key with the other tenant's user | 403 |
+| Postgres | As `katip_gateway`, in one tenant's context, with no tenant filter; and with no context at all | No rows of the other tenant; no rows at all. The role doesn't bypass RLS |
+| Valkey | A connection with no password | `NOAUTH` |
+| Login | A member of another tenant logs in, with correct password and MFA | LibreChat refuses |
+| Secrets | Comparing the tenants' keys | None shared |
+
+**What this doesn't cover:** a compromise of a platform service both tenants use (Traefik, the gateway, Mongo), and Docker itself.

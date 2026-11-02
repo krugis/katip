@@ -266,6 +266,7 @@ export function seedInput(config) {
 /** Input for scripts/setup/keycloak.mjs and oidc-smoke.mjs. Users match the DB seed. */
 export function identityInput(config, t) {
   const { slug, name } = t;
+  const others = config.tenants.filter((o) => o.slug !== slug);
   const origin = `https://${slug}.${config.project.base_domain}`;
   const demoUser = (local, firstName, realmRole) => ({
     email: `${local}@${slug}.localhost`,
@@ -281,6 +282,7 @@ export function identityInput(config, t) {
     tenant: { slug, name },
     smokeEmail: smokeEmail(config, t),
     chatEndpoint: CHAT_ENDPOINT,
+    otherClientId: others.length > 0 ? `lc-${others[0].slug}` : null,
     client: { id: `lc-${slug}`, origin, redirectUri: `${origin}/oauth/openid/callback` },
     users: [
       demoUser('admin', 'Admin', 'tenant_admin'),

@@ -14,6 +14,7 @@ import {
   tenantSubnet,
   validateConfig,
 } from '../config.mjs';
+import { tenantPairs } from '../isolation.mjs';
 import { totp } from '../kc-lib.mjs';
 import { INFRA, generatorFor, parseEnvFile, parseYaml, redact, run } from '../util.mjs';
 
@@ -172,6 +173,16 @@ describe('identity', () => {
 });
 
 describe('tenants', () => {
+  it('checks each tenant against another, in both directions', () => {
+    const [a, b] = config.tenants;
+    expect(tenantPairs([a, b])).toEqual([
+      [a, b],
+      [b, a],
+    ]);
+    expect(tenantPairs([a])).toEqual([]);
+    expect(identityInput(config, a).otherClientId).toBe(`lc-${b.slug}`);
+  });
+
   it('runs at least two in dev, so isolation is tested on every install', () => {
     expect(new Set(config.tenants.map((t) => t.slug)).size).toBeGreaterThanOrEqual(2);
   });

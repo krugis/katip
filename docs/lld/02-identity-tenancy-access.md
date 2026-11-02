@@ -75,7 +75,7 @@ Rules are enforced in `console-api` middleware from the token roles + tenant cla
 - LibreChat → gateway:
   - `Authorization: Bearer <tenant gateway key>`, where the key is `sk-sme-<slug>-<random>`, stored hashed (argon2id) in `gateway_keys`.
   - Headers: `X-User-Id`, `X-User-Email`, `X-Conversation-Id`.
-- The gateway trusts user headers **only** when the key is a tenant key and the request comes from the `backend` network. Phase 2 hardening: per-tenant mTLS or a signed header.
+- The gateway trusts user headers **only** when the key is a tenant key and the request comes from a tenant's own network. Phase 2 hardening: per-tenant mTLS or a signed header.
 - The gateway maps `X-User-Email` → `users` row in the same tenant. Unknown email → 403 with code `user_not_provisioned`.
 - API keys for customers (phase 2 public API): `sk-sme-u-...`, bound to user + scopes; same table.
 
