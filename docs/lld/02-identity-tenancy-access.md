@@ -6,7 +6,7 @@
 | --- | --- |
 | Realm | `identity.realm` in `katip.config.yaml`, default `katip` (single realm) |
 | Organizations | one per tenant (`alias = tenant slug`), plus `provider` for our staff |
-| Clients | `console` (public, PKCE; its tokens carry audience `console-api`); `lc-<slug>` per tenant LibreChat instance (confidential); `gateway-admin` (service account, provisioner only) |
+| Clients | `console` (public, PKCE; its tokens carry audience `console-api`); `lc-<slug>` per tenant LibreChat instance (confidential); `katip-provisioner` (service account, with `realm-admin` on this realm only) |
 | Realm roles | `provider_admin`, `tenant_admin`, `dept_manager`, `user` |
 | Client roles (per `lc-<slug>`) | `member`: required to log in to that tenant's LibreChat |
 | Identity providers | Per tenant (optional): the customer's Entra ID (OIDC) or Google Workspace, linked to the tenant organization (Keycloak 26 organizations support IdP linking; verify behaviour for the pinned version) |

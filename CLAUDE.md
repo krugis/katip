@@ -51,7 +51,7 @@ pnpm test:e2e          # Playwright against dev stack
 pnpm lint && pnpm typecheck
 pnpm db:generate       # drizzle migration from schema changes
 pnpm db:migrate
-pnpm tenant:create --slug demo --plan business --seats 10   # provisioner CLI
+pnpm tenant:create --slug acme --name "ACME A.Ş." --plan business --seats 10 --admin-email it@acme.com.tr   # provisioner CLI
 ```
 
 ## Conventions

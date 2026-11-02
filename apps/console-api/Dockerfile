@@ -7,6 +7,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY apps/console-api/package.json apps/console-api/
 COPY apps/mock-llm/package.json apps/mock-llm/
 COPY apps/policy-gateway/package.json apps/policy-gateway/
+COPY apps/provisioner/package.json apps/provisioner/
 COPY packages/shared/package.json packages/shared/
 COPY packages/pii/package.json packages/pii/
 COPY packages/policy-engine/package.json packages/policy-engine/

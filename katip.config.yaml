@@ -157,12 +157,15 @@ models:
 # ------------------------------------------------------------------------------
 # Tenants (rendered by the bootstrap; the provisioner CLI lands in P1-21). Each one
 # gets its own LibreChat, Meilisearch, Mongo user and secrets (LLD-07). Dev runs two,
-# so isolation between tenants is tested on every install.
-# Secrets are generated into katip.env as KATIP_T_<SLUG>_*.
+# so isolation between tenants is tested on every install. dev:up creates these through
+# the provisioner; `pnpm tenant:create` adds more, which don't need to be listed here.
+# Secrets are generated into infra/env/tenants/<slug>.secrets.env.
 # ------------------------------------------------------------------------------
 tenants:
   - slug: demo
     name: Demo A.Ş.
+    # The first tenant admin, invited by email: see Mailpit in dev.
+    admin_email: owner@demo.localhost
     plan: business
     seats: 10
     kvkk_addon: false
@@ -176,6 +179,7 @@ tenants:
       on_detector_failure: allow
   - slug: acme
     name: Acme Ltd.
+    admin_email: owner@acme.localhost
     plan: starter
     seats: 5
     kvkk_addon: false

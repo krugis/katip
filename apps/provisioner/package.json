@@ -1,0 +1,24 @@
+{
+  "name": "@katip/provisioner",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/provision.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@katip/db": "workspace:*",
+    "@katip/shared": "workspace:*",
+    "drizzle-orm": "0.44.6",
+    "mongodb": "7.8.0",
+    "postgres": "3.4.7",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "11.5.1"
+  }
+}

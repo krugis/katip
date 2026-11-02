@@ -1,11 +1,17 @@
 # LLD-07 — Tenant provisioning (instance per tenant)
 
-`apps/provisioner` is a TypeScript CLI with an internal HTTP API used by console-api. It makes tenant lifecycle operations repeatable and idempotent.
+`apps/provisioner` makes tenant lifecycle operations repeatable and idempotent. It's a TypeScript CLI today; the internal HTTP API for console-api comes when the console needs it, and needs the Docker socket proxy (P1-35) first.
+
+**How it runs.** `pnpm tenant:create` runs on the host and does the Docker work. It then starts the provisioner in a container on the `backend` network, for Postgres (as `katip_provider`), Keycloak (as the `katip-provisioner` service account, limited to our realm) and Mongo. So that container needs no Docker socket. `pnpm dev:up` uses the same path for the tenants in `katip.config.yaml`, so every install tests it.
+
+**Where tenants live.** The database is the source of truth. The config only lists which tenants dev should create. On a host, `infra/env/tenants/<slug>.secrets.env` marks a tenant as known, so tenants made by the CLI keep their network across `dev:up` re-runs and are removed by rollback.
+
+**Secrets.** You edit `infra/env/katip.env` for the platform. Each tenant's secrets are generated into `infra/env/tenants/<slug>.secrets.env`, gitignored and readable only by its owner, and never edited by hand. Production will encrypt these with SOPS (P0-22).
 
 ## 1. Commands
 
 ```bash
-pnpm tenant:create  --slug acme --name "ACME A.Ş." --plan business --seats 10 --region eu [--kvkk] [--domain ai.acme.com.tr]
+pnpm tenant:create  --slug acme --name "ACME A.Ş." --plan business --seats 10 --admin-email it@acme.com.tr [--region eu] [--kvkk] [--domain ai.acme.com.tr]
 pnpm tenant:suspend --slug acme
 pnpm tenant:resume  --slug acme
 pnpm tenant:delete  --slug acme --confirm acme      # soft delete; data purge after 30 days via job
@@ -15,20 +21,19 @@ pnpm tenant:render  --slug acme                     # re-render config only (dry
 
 ## 2. `tenant:create` steps
 
-Each step is idempotent, checks for existing state, and records progress in the `jobs` table.
+Each step is idempotent, checks for existing state, and records progress in the `jobs` table. A re-run finishes a failed attempt. On a complete tenant it changes nothing and says "already exists". **Built so far (P1-21):** steps 1 to 4 and 6. A tenant made by the CLI exists but isn't running until P1-22. Rollback on failure also comes with P1-22.
 
 1. Validate the slug (unique, `^[a-z0-9-]{3,32}$`) and plan; insert `tenants`, `subscriptions`, `seats`, a default `tenant_policies`, and `access_rules` (MFA required, countries TR + EU).
 2. **Keycloak:**
    - create organization `<slug>`;
    - create client `lc-<slug>` (redirect URIs, web origins) and client role `member`;
-   - create the first tenant admin user and send the invite email.
+   - create the first tenant admin user (`--admin-email`) and send the invite email: set a password and enrol MFA. The DB row is written after the email goes out, so a re-run resends a failed invite, and only then.
+
+   A tenant's limits start as the plan's quotas × seats, pooled across the company.
 3. **MongoDB:** create database `lc_<slug>` and a user with `readWrite` on that database only.
 4. **Network and search:** create the network `<project>_t_<slug>` with a subnet from the tenant's slug, and attach Traefik, the gateway and Mongo to it. Generate a key for the tenant's own Meilisearch, which starts with its compose project: LibreChat has no index prefix setting (LLD-01 §2.2).
-5. **LiteLLM:**
-   - create a team `<slug>` with a max budget (backstop = 150% of the plan's expected monthly cost);
-   - create a virtual key for the gateway's calls on behalf of this tenant;
-   - store it.
-6. **Gateway key:** generate `sk-sme-<slug>-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant env only.
+5. **LiteLLM (deferred, P1-64):** a team `<slug>` with a max budget (backstop = 150% of the plan's expected monthly cost) and a virtual key for the gateway. LiteLLM has no database today, so it has no teams or keys. The gateway enforces quotas, and LibreChat can't reach LiteLLM. What's missing is a second, independent spending limit.
+6. **Gateway key:** generate `sk-sme-t-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant's secrets file only. If the two ever disagree, the secrets file wins: the old key is revoked, and the new hash stored.
 7. **Lago:** create the customer and subscription (from milestone M3).
 8. **Render files:**
    - `infra/env/tenants/<slug>.env` (SOPS-encrypted), containing Mongo URI, OIDC client, gateway key, `CREDS_KEY`/`CREDS_IV`/`JWT_SECRET` (random per tenant, never shared), and `RAG_API_URL`;
@@ -44,8 +49,6 @@ Each step is idempotent, checks for existing state, and records progress in the 
 12. Write an audit entry and mark the job done.
 
 **Never delete and recreate a Keycloak user.** A new user gets a new id, and LibreChat refuses a known email arriving with a new id, which locks that person out. Disable users instead.
-
-**Today:** `pnpm dev:up` does these steps for the tenants in `katip.config.yaml`, and the provisioner is not built yet (P1-21).
 
 Rollback: if any step fails after step 3, run the compensating steps in reverse (delete client, drop database, revoke keys). The job ends `failed` with the step name.
 

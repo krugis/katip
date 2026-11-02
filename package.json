@@ -25,7 +25,8 @@
     "dev:up": "node scripts/setup/main.mjs up",
     "dev:down": "node scripts/setup/main.mjs down",
     "dev:status": "node scripts/setup/main.mjs status",
-    "dev:rollback": "node scripts/setup/main.mjs rollback"
+    "dev:rollback": "node scripts/setup/main.mjs rollback",
+    "tenant:create": "node scripts/setup/tenant-cli.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

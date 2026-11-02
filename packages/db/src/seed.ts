@@ -11,13 +11,14 @@ import * as schema from './schema.js';
 export interface SeedOptions {
   /** Replaces the default catalog; models not listed get disabled. */
   models?: (typeof schema.modelCatalog.$inferInsert)[];
+  /** null seeds the platform data only: plans, catalog and rules. */
   tenant?: {
     slug: string;
     name: string;
     planCode: string;
     seats: number;
     kvkkAddon: boolean;
-  };
+  } | null;
 }
 
 export interface SeedResult {
@@ -264,7 +265,7 @@ export async function seed(
   opts: SeedOptions = {},
 ): Promise<SeedResult> {
   const models = opts.models ?? MODELS;
-  const tenant = opts.tenant ?? DEMO_TENANT;
+  const tenant = opts.tenant === undefined ? DEMO_TENANT : opts.tenant;
 
   // Fail before writing: a bad config must not leave a half-applied catalog.
   const modelIds = models.map((m) => m.id);
@@ -275,7 +276,7 @@ export async function seed(
       }
     }
   }
-  if (!PLANS.some((p) => p.code === tenant.planCode)) {
+  if (tenant && !PLANS.some((p) => p.code === tenant.planCode)) {
     throw new Error(`unknown plan ${tenant.planCode}`);
   }
 
@@ -298,6 +299,16 @@ export async function seed(
       .insert(schema.routerRules)
       .values(r)
       .onConflictDoUpdate({ target: schema.routerRules.id, set: r });
+  }
+
+  if (!tenant) {
+    return {
+      tenants: 0,
+      users: 0,
+      plans: PLANS.length,
+      models: models.length,
+      rules: ROUTER_RULES.length,
+    };
   }
 
   // Demo tenant with admin/manager/user (local dev only).
