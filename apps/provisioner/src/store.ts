@@ -19,10 +19,12 @@ export interface ProvisionerStore {
   liveGatewayKeys(tenantId: string): Promise<{ keyHash: string }[]>;
   replaceGatewayKey(tenantId: string, keyHash: string, prefix: string): Promise<void>;
   audit(tenantId: string, slug: string, steps: string[]): Promise<void>;
-  startJob(slug: string): Promise<string>;
+  tenantId(slug: string): Promise<string | null>;
+  tenantHasUsers(slug: string): Promise<boolean>;
+  startJob(slug: string, type: string): Promise<string>;
   jobStep(jobId: string, step: string): Promise<void>;
   jobTenant(jobId: string, tenantId: string): Promise<void>;
-  finishJob(jobId: string, result: { steps: string[] }): Promise<void>;
+  finishJob(jobId: string, result: Record<string, unknown>): Promise<void>;
   failJob(jobId: string, step: string): Promise<void>;
 }
 
@@ -158,10 +160,29 @@ export class DbProvisionerStore implements ProvisionerStore {
     });
   }
 
-  async startJob(slug: string): Promise<string> {
+  async tenantId(slug: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: schema.tenants.id })
+      .from(schema.tenants)
+      .where(eq(schema.tenants.slug, slug));
+    return rows[0]?.id ?? null;
+  }
+
+  async tenantHasUsers(slug: string): Promise<boolean> {
+    const id = await this.tenantId(slug);
+    if (!id) return false;
+    const rows = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.tenantId, id))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async startJob(slug: string, type: string): Promise<string> {
     const [job] = await this.db
       .insert(schema.jobs)
-      .values({ type: 'tenant.create', status: 'running', payload: { slug } })
+      .values({ type, status: 'running', payload: { slug } })
       .returning({ id: schema.jobs.id });
     return job!.id;
   }
@@ -177,7 +198,7 @@ export class DbProvisionerStore implements ProvisionerStore {
     await this.db.update(schema.jobs).set({ tenantId }).where(eq(schema.jobs.id, jobId));
   }
 
-  async finishJob(jobId: string, result: { steps: string[] }): Promise<void> {
+  async finishJob(jobId: string, result: Record<string, unknown>): Promise<void> {
     await this.db
       .update(schema.jobs)
       .set({ status: 'done', result, updatedAt: this.now() })

@@ -21,7 +21,7 @@ pnpm tenant:render  --slug acme                     # re-render config only (dry
 
 ## 2. `tenant:create` steps
 
-Each step is idempotent, checks for existing state, and records progress in the `jobs` table. A re-run finishes a failed attempt. On a complete tenant it changes nothing and says "already exists". **Built so far (P1-21):** steps 1 to 4 and 6. A tenant made by the CLI exists but isn't running until P1-22. Rollback on failure also comes with P1-22.
+Each step is idempotent, checks for existing state, and records progress in the `jobs` table. A re-run finishes a failed attempt. On a complete tenant it changes nothing and says "already exists". **Built so far (P1-21, P1-22):** steps 1 to 4, 6, 8 and 10 to 12. Lago (7) and Cloudflare (9) come with their own milestones. The admin's invite goes out last, after the smoke test, so nobody gets a link to something that isn't running.
 
 1. Validate the slug (unique, `^[a-z0-9-]{3,32}$`) and plan; insert `tenants`, `subscriptions`, `seats`, a default `tenant_policies`, and `access_rules` (MFA required, countries TR + EU).
 2. **Keycloak:**
@@ -45,12 +45,12 @@ Each step is idempotent, checks for existing state, and records progress in the 
 10. **Start:** `docker compose -p <project>-<slug> -f tenants/<slug>.yml up -d`. Wait for `GET /health` (verify the LibreChat health route), timeout 180 s.
 11. **Smoke test:**
     - OIDC discovery reachable;
-    - a gateway call with the tenant key on `fast` returns 200 (counted as a system event, not billed).
+    - the gateway accepts the tenant's key, and once the admin exists serves them `/v1/models`. A real chat call waits until the gateway can count a system event without billing it. `dev:up` runs a full login and chat for its own tenants.
 12. Write an audit entry and mark the job done.
 
 **Never delete and recreate a Keycloak user.** A new user gets a new id, and LibreChat refuses a known email arriving with a new id, which locks that person out. Disable users instead.
 
-Rollback: if any step fails after step 3, run the compensating steps in reverse (delete client, drop database, revoke keys). The job ends `failed` with the step name.
+Rollback: if a tenant's first attempt fails before the invite, everything it made is removed in reverse: containers and volumes, Mongo database and login, Keycloak client and organization, governance rows, network, files. The job ends `failed` with the step name, and a `tenant.rollback` job records why. The rows go through the admin role from the host, because the provisioner's role can't delete anything. Failure on a tenant that already existed changes nothing, and a tenant with users is never rolled back, whatever the caller believes. If an undo step fails too, for instance with Keycloak down, the secrets file stays, and running the same command again finishes the tenant.
 
 ## 3. librechat.tmpl.yaml (key parts)
 

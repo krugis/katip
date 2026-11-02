@@ -423,7 +423,7 @@ function renderTenantFiles(ctx, t) {
 function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
   renderPlatformOverlay(ctx);
-  for (const t of ctx.config.tenants) renderTenantFiles(ctx, t);
+  for (const t of allTenants(ctx)) renderTenantFiles(ctx, t);
 }
 
 /** A new tenant's network gets a subnet no other network here uses. Docker remembers it. */
@@ -452,8 +452,9 @@ async function connectPlatformToTenant(ctx, t) {
   const network = tenantNetworkName(ctx.config, t);
   const services = [
     ['traefik', [`auth.${base}`, `console.${base}`, `${t.slug}.${base}`]],
-    ['policy-gateway', []],
-    ['mongodb', []],
+    // Compose only names a service on networks it attached itself.
+    ['policy-gateway', ['policy-gateway']],
+    ['mongodb', ['mongodb']],
   ];
   for (const [service, aliases] of services) {
     const container = `${ctx.config.project.name}-${service}-1`;
@@ -472,16 +473,8 @@ async function connectPlatformToTenant(ctx, t) {
   }
 }
 
-/**
- * Creates a tenant: the one path for `dev:up` and `pnpm tenant:create`. The Docker work
- * happens here, on the host, so the provisioner's container needs no Docker socket.
- */
-export async function provisionTenant(ctx, t) {
-  const errors = tenantInputErrors(t);
-  if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
-  const isNew = !existsSync(tenantSecretsFile(ctx.infra, t.slug));
-  Object.assign(ctx.env, ensureTenantSecrets(ctx.infra, t.slug));
-
+/** Runs one stage of the provisioner. The Docker work stays here, on the host. */
+async function runProvisioner(ctx, t, action, extra = {}) {
   const env = {
     DATABASE_URL: `postgres://katip_provider:${ctx.env.KATIP_PROVIDER_DB_PASSWORD}@postgres:5432/governance`,
     KEYCLOAK_URL: 'http://keycloak:8080',
@@ -489,42 +482,186 @@ export async function provisionTenant(ctx, t) {
     KEYCLOAK_CLIENT_ID: 'katip-provisioner',
     KEYCLOAK_CLIENT_SECRET: ctx.env.KATIP_PROVISIONER_KC_SECRET,
     MONGO_ROOT_URI: `mongodb://${ctx.env.MONGO_USER}:${ctx.env.MONGO_PASSWORD}@mongodb:27017/?authSource=admin`,
+    TENANT_ACTION: action,
     TENANT_INPUT: JSON.stringify(provisionInput(ctx.config, t)),
     TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
     TENANT_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
     TENANT_MONGO_PASSWORD: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+    ...extra,
   };
-  let out;
-  try {
-    ({ out } = await dockerRun(
-      [
-        '--network',
-        backendNetwork(ctx.config),
-        ...Object.keys(env).flatMap((k) => ['-e', k]),
-        'ghcr.io/krugis/provisioner:dev',
-      ],
-      env,
-      { timeoutMs: 180_000 },
-    ));
-  } catch (e) {
-    // Nothing exists yet, for instance after a mistyped plan, so leave no trace of it.
-    if (isNew && e.message.includes('step governance-db')) {
-      rmSync(tenantSecretsFile(ctx.infra, t.slug), { force: true });
-    }
-    throw e;
-  }
+  const { out } = await dockerRun(
+    [
+      '--network',
+      backendNetwork(ctx.config),
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      'ghcr.io/krugis/provisioner:dev',
+    ],
+    env,
+    { timeoutMs: 180_000 },
+  );
   const line = out.split('\n').find((l) => l.startsWith('provision-result='));
   if (!line) throw new Error(`the provisioner reported no result: ${out.slice(0, 300)}`);
+  return JSON.parse(line.slice('provision-result='.length));
+}
 
+/** The tenant's data, login client, network and gateway key. Its LibreChat comes next. */
+export async function provisionTenant(ctx, t) {
+  const errors = tenantInputErrors(t);
+  if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
+  Object.assign(ctx.env, ensureTenantSecrets(ctx.infra, t.slug));
+  const result = await runProvisioner(ctx, t, 'create');
   // After the provisioner, so a refused tenant leaves no network behind.
   await ensureTenantNetwork(ctx, t);
   renderPlatformOverlay(ctx);
   await connectPlatformToTenant(ctx, t);
-  return JSON.parse(line.slice('provision-result='.length));
+  return result;
+}
+
+/** Renders the tenant's files and starts its search and LibreChat, behind Traefik. */
+async function startTenant(ctx, t, { recreate = false } = {}) {
+  const base = ctx.config.project.base_domain;
+  renderTenantFiles(ctx, t);
+  await tenantCompose(
+    ['up', '-d', '--wait', '--wait-timeout', '180', ...(recreate ? ['--force-recreate'] : [])],
+    ctx,
+    t,
+  );
+  await waitUntil(
+    async () => (await curlEdge(ctx, `${t.slug}.${base}`, '/health')).trim() === '200',
+    {
+      timeoutMs: 180_000,
+      onTick: () => ctx.tui?.setDetail?.(`waiting for LibreChat ${t.slug} behind traefik`),
+    },
+  );
+  ctx.log(`tenant healthy at https://${t.slug}.${base}`);
+}
+
+const gatewayStatus = async (ctx, t, headers = []) =>
+  (
+    await curlBackend(ctx, '/v1/models', [
+      '-o',
+      '/dev/null',
+      '-w',
+      '%{http_code}',
+      '-H',
+      `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
+      ...headers,
+    ])
+  ).trim();
+
+/** What the tenant depends on: login can be discovered, and the gateway knows its key. */
+async function smokeTenant(ctx, t) {
+  const { base_domain: base } = ctx.config.project;
+  const discovery = (
+    await curlEdge(
+      ctx,
+      `auth.${base}`,
+      `/realms/${ctx.config.identity.realm}/.well-known/openid-configuration`,
+    )
+  ).trim();
+  if (discovery !== '200') throw new Error(`login discovery answered ${discovery}`);
+  // No user yet, so the answer is "unknown user": only a key it doesn't know gets a 401.
+  const status = await gatewayStatus(ctx, t);
+  if (!status.startsWith('4') || status === '401') {
+    throw new Error(`the gateway answered ${status} for the tenant's key`);
+  }
+}
+
+/** Invites the tenant admin, then checks the gateway serves them. */
+async function finishTenantSetup(ctx, t, priorSteps = []) {
+  const result = await runProvisioner(ctx, t, 'finish', {
+    TENANT_PRIOR_STEPS: JSON.stringify(priorSteps),
+  });
+  const status = await gatewayStatus(ctx, t, ['-H', `x-user-email: ${t.admin_email}`]);
+  if (status !== '200') throw new Error(`the gateway answered ${status} for the tenant admin`);
+  return result;
+}
+
+/**
+ * Removes what a failed first attempt made, in reverse. Returns what it couldn't undo; the
+ * secrets file stays in that case, so a re-run can finish the tenant instead.
+ */
+async function undoNewTenant(ctx, t, failedStep) {
+  const problems = [];
+  const attempt = async (name, fn) => {
+    try {
+      await fn();
+    } catch (e) {
+      problems.push(`${name}: ${e.message.trim().split('\n').at(-1)}`);
+    }
+  };
+  await attempt('containers', () =>
+    tryRun('docker', [
+      'compose',
+      '-p',
+      tenantProject(ctx.config, t),
+      'down',
+      '-v',
+      '--remove-orphans',
+    ]),
+  );
+  await attempt('login and database', () =>
+    runProvisioner(ctx, t, 'rollback', { TENANT_FAILED_STEP: failedStep }),
+  );
+  await attempt('governance rows', () => runDbSeed(ctx, 'forget', t.slug));
+  if (problems.length > 0) return problems;
+
+  const network = tenantNetworkName(ctx.config, t);
+  for (const service of ['traefik', 'policy-gateway', 'mongodb']) {
+    const container = `${ctx.config.project.name}-${service}-1`;
+    await run('docker', ['network', 'disconnect', '-f', network, container]);
+  }
+  await run('docker', ['network', 'rm', network]);
+  const envDir = join(ctx.infra, 'env', 'tenants');
+  for (const file of [
+    join(envDir, `${t.slug}.env`),
+    join(envDir, `${t.slug}.meili.env`),
+    join(ctx.infra, 'librechat', 'rendered', `${t.slug}.librechat.yaml`),
+    join(ctx.infra, 'compose', 'tenants', `${t.slug}.yml`),
+    ipallowFile(ctx, t),
+    tenantSecretsFile(ctx.infra, t.slug),
+  ]) {
+    rmSync(file, { force: true });
+  }
+  renderPlatformOverlay(ctx);
+  return problems;
+}
+
+/**
+ * `pnpm tenant:create`: all the stages. A first attempt that fails leaves nothing behind. A
+ * tenant that already existed is left as it was: it may be in use.
+ */
+export async function createAndStartTenant(ctx, t) {
+  const errors = tenantInputErrors(t);
+  if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
+  const isNew = !existsSync(tenantSecretsFile(ctx.infra, t.slug));
+  let step = 'provision';
+  try {
+    const created = await provisionTenant(ctx, t);
+    step = 'start';
+    await startTenant(ctx, t);
+    step = 'smoke';
+    await smokeTenant(ctx, t);
+    step = 'finish';
+    const finished = await finishTenantSetup(ctx, t, created.changedSteps);
+    const changedSteps = [...created.changedSteps, ...finished.changedSteps];
+    return { alreadyExists: changedSteps.length === 0, changedSteps };
+  } catch (e) {
+    // The invite may be out once finish starts, so the tenant stays for a re-run.
+    if (!isNew || step === 'finish') throw e;
+    const failedStep = /step (\S+) failed/.exec(e.message)?.[1] ?? step;
+    const problems = await undoNewTenant(ctx, t, failedStep);
+    if (problems.length > 0) {
+      throw new Error(
+        `${e.message}\nCould not undo everything, so run the same command again to finish it:\n  ${problems.join('\n  ')}`,
+      );
+    }
+    throw new Error(`${e.message}\nEverything this attempt made has been removed.`);
+  }
 }
 
 /** Runs a stage of scripts/setup/db-seed.mjs in the gateway image, as the admin role. */
-function runDbSeed(ctx, stage) {
+function runDbSeed(ctx, stage, ...args) {
   const env = {
     DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
     KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
@@ -546,6 +683,7 @@ function runDbSeed(ctx, stage) {
       'ghcr.io/krugis/policy-gateway:dev',
       'db-seed.mjs',
       stage,
+      ...args,
     ],
     env,
   );
@@ -553,48 +691,12 @@ function runDbSeed(ctx, stage) {
 
 /** LibreChat rejects these when encrypting, and katip.env values are never overwritten. */
 function checkCredentialFormats(ctx) {
-  for (const t of ctx.config.tenants) {
+  for (const t of allTenants(ctx)) {
     const key = tenantSecretName(t.slug, 'LC_CREDS_KEY');
     const iv = tenantSecretName(t.slug, 'LC_CREDS_IV');
     if (!/^[0-9a-f]{64}$/.test(ctx.env[key])) throw new Error(`${key} must be 64 hex characters`);
     if (!/^[0-9a-f]{32}$/.test(ctx.env[iv])) throw new Error(`${iv} must be 32 hex characters`);
   }
-}
-
-/** The tenant's own Mongo login, with access to its own database only (LLD-07). */
-async function ensureTenantMongoUser(ctx, t) {
-  const db = `lc_${t.slug}`;
-  const script =
-    'const d = db.getSiblingDB(process.env.DB);' +
-    'const spec = { pwd: process.env.TP, roles: [{ role: "readWrite", db: process.env.DB }] };' +
-    'if (d.getUser(process.env.DB)) d.updateUser(process.env.DB, spec);' +
-    'else d.createUser({ user: process.env.DB, ...spec });';
-  await tryRun(
-    'docker',
-    [
-      'exec',
-      '-e',
-      'MU',
-      '-e',
-      'MP',
-      '-e',
-      'TP',
-      '-e',
-      'DB',
-      `${ctx.config.project.name}-mongodb-1`,
-      'sh',
-      '-c',
-      `mongosh --quiet -u "$MU" -p "$MP" --authenticationDatabase admin --eval '${script}'`,
-    ],
-    {
-      env: {
-        MU: ctx.env.MONGO_USER,
-        MP: ctx.env.MONGO_PASSWORD,
-        TP: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
-        DB: db,
-      },
-    },
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +964,7 @@ export const steps = [
     async run(ctx) {
       for (const t of ctx.config.tenants) {
         const r = await provisionTenant(ctx, t);
+        (ctx.provisioned ??= {})[t.slug] = r.changedSteps;
         ctx.log(`${t.slug}: ${r.alreadyExists ? 'already exists' : r.changedSteps.join(', ')}`);
         await runOnEdge(ctx, t, 'keycloak-dev-users.mjs', {
           DEMO_USER_PASSWORD: tenantSecret(ctx, t, 'DEMO_USER_PASSWORD'),
@@ -912,32 +1015,18 @@ export const steps = [
   },
   {
     id: 'tenant',
-    title: 'Tenants (Mongo user, Meilisearch, LibreChat, traefik route)',
+    title: 'Tenants (LibreChat, Meilisearch, traefik route, smoke, invite)',
     async run(ctx) {
-      const base = ctx.config.project.base_domain;
-      for (const t of ctx.config.tenants) {
-        renderTenantFiles(ctx, t);
-        await ensureTenantMongoUser(ctx, t);
-        await tenantCompose(
-          ['up', '-d', '--wait', ...(ctx.configChanged ? ['--force-recreate'] : [])],
-          ctx,
-          t,
-        );
-        await waitUntil(
-          async () => {
-            const code = await curlEdge(ctx, `${t.slug}.${base}`, '/');
-            return ['200', '301', '302', '307', '308'].includes(code.trim());
-          },
-          {
-            timeoutMs: 180_000,
-            onTick: () => ctx.tui?.setDetail?.(`waiting for LibreChat ${t.slug} behind traefik`),
-          },
-        );
-        ctx.log(`tenant healthy at https://${t.slug}.${base}`);
+      for (const t of allTenants(ctx)) {
+        await startTenant(ctx, t, { recreate: ctx.configChanged });
+        await smokeTenant(ctx, t);
+        // A tenant made with `pnpm tenant:create` has done this already.
+        const listed = ctx.config.tenants.find((c) => c.slug === t.slug);
+        if (listed) await finishTenantSetup(ctx, listed, ctx.provisioned?.[t.slug] ?? []);
       }
     },
     async rollback(ctx) {
-      for (const t of ctx.config.tenants) {
+      for (const t of allTenants(ctx)) {
         await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch(() => {});
       }
     },

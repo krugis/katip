@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // tenant:create on real Postgres, as the role it really connects with. Keycloak and Mongo
 // are stand-ins here; dev:up runs the same steps against the real ones on every install.
-import { migrateWithClient, seed } from '@katip/db';
+import { forgetUnfinishedTenant, migrateWithClient, seed } from '@katip/db';
 import * as schema from '@katip/db';
 import { generateGatewayKey, verifyKey } from '@katip/shared';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createTenant, type IdentityAdmin, type TenantSecrets } from '../src/provision.js';
+import {
+  createTenant,
+  finishTenant,
+  rollbackTenant,
+  type IdentityAdmin,
+  type ProvisionDeps,
+  type TenantSecrets,
+} from '../src/provision.js';
 import { DbProvisionerStore } from '../src/store.js';
 
 let container: Awaited<ReturnType<PostgreSqlContainer['start']>>;
@@ -36,6 +43,9 @@ class FakeIdentity implements IdentityAdmin {
     this.admins += 1;
     return { id: `kc-${this.admins}-${Math.random().toString(16).slice(2)}` };
   }
+  async removeTenantIdentity(input: { slug: string }): Promise<void> {
+    this.orgs.delete(input.slug);
+  }
   async sendInvite(): Promise<void> {
     if (this.failOnce === 'invite') {
       this.failOnce = null;
@@ -55,7 +65,17 @@ const deps = () => ({
     mongo.set(db, password);
     return created;
   },
+  dropMongoDatabase: async (db: string) => {
+    mongo.delete(db);
+  },
 });
+/** The stages in order, with the host's start of LibreChat between them left out. */
+const provision = async (d: ProvisionDeps, raw: unknown, s: TenantSecrets) => {
+  const a = await createTenant(d, raw, s);
+  const b = await finishTenant(d, raw, a.changedSteps);
+  const changedSteps = [...a.changedSteps, ...b.changedSteps];
+  return { alreadyExists: changedSteps.length === 0, changedSteps };
+};
 const input = (slug: string, over: object = {}) => ({
   slug,
   name: 'Acme A.Ş.',
@@ -101,14 +121,14 @@ beforeEach(() => {
 
 describe('tenant:create', () => {
   it('creates the tenant with everything it needs', async () => {
-    const r = await createTenant(deps(), input('acme-one'), secrets);
+    const r = await provision(deps(), input('acme-one'), secrets);
     expect(r.alreadyExists).toBe(false);
     expect(r.changedSteps).toEqual([
       'governance-db',
       'keycloak',
-      'tenant-admin',
       'mongodb',
       'gateway-key',
+      'tenant-admin',
     ]);
     for (const table of [
       'subscriptions',
@@ -125,8 +145,50 @@ describe('tenant:create', () => {
     expect(mongo.get('lc_acme-one')).toBe('mongo');
   });
 
+  it('invites nobody until the last stage', async () => {
+    const d = deps();
+    await createTenant(d, input('acme-order'), secrets);
+    expect(identity.invites).toBe(0);
+    expect(await count('users', 'acme-order')).toBe(0);
+    expect(await count('audit_log', 'acme-order')).toBe(0);
+    await finishTenant(d, input('acme-order'), ['governance-db']);
+    expect(identity.invites).toBe(1);
+    expect(await count('audit_log', 'acme-order')).toBe(1);
+  });
+
+  it('a failed first attempt leaves nothing, and a re-run starts clean', async () => {
+    const d = deps();
+    await createTenant(d, input('acme-undo'), secrets);
+    await rollbackTenant(d, input('acme-undo'), 'start');
+    expect(mongo.has('lc_acme-undo')).toBe(false);
+    expect(identity.orgs.has('acme-undo')).toBe(false);
+    await forgetUnfinishedTenant(admin, 'acme-undo');
+    expect(await admin`select id from tenants where slug = 'acme-undo'`).toHaveLength(0);
+    const jobs = await admin`select type, status, result, tenant_id from jobs
+      where payload->>'slug' = 'acme-undo' order by created_at`;
+    expect(jobs.map((j) => j['type'])).toEqual(['tenant.create', 'tenant.rollback']);
+    expect(jobs[1]!['result']).toEqual({ failedStep: 'start' });
+    expect(jobs.every((j) => j['tenant_id'] === null)).toBe(true);
+
+    const again = await provision(d, input('acme-undo', { seats: 7 }), secrets);
+    expect(again.changedSteps).toContain('governance-db');
+    const [seats] = await admin`select s.quantity from seats s join tenants t on t.id = s.tenant_id
+      where t.slug = 'acme-undo'`;
+    expect(seats!['quantity']).toBe(7);
+  });
+
+  it('never rolls back a tenant that has users', async () => {
+    const d = deps();
+    await provision(d, input('acme-live'), secrets);
+    await expect(rollbackTenant(d, input('acme-live'), 'start')).rejects.toThrow(/has users/);
+    expect(mongo.has('lc_acme-live')).toBe(true);
+    expect(identity.orgs.has('acme-live')).toBe(true);
+    await expect(forgetUnfinishedTenant(admin, 'acme-live')).rejects.toThrow(/has users/);
+    expect(await admin`select id from tenants where slug = 'acme-live'`).toHaveLength(1);
+  });
+
   it('pools the plan quota across the seats', async () => {
-    await createTenant(deps(), input('acme-limits', { seats: 3 }), secrets);
+    await provision(deps(), input('acme-limits', { seats: 3 }), secrets);
     const [row] = await admin`select l.std_tokens::bigint as std, p.std_tokens::bigint as per_seat
       from tenant_limits l join tenants t on t.id = l.tenant_id
       join plans p on p.code = 'business'
@@ -135,7 +197,7 @@ describe('tenant:create', () => {
   });
 
   it('applies MFA and the default countries', async () => {
-    await createTenant(deps(), input('acme-rules'), secrets);
+    await provision(deps(), input('acme-rules'), secrets);
     const [row] = await admin`select r.mfa_required, r.countries from access_rules r
       join tenants t on t.id = r.tenant_id where t.slug = 'acme-rules'`;
     expect(row!['mfa_required']).toBe(true);
@@ -144,7 +206,7 @@ describe('tenant:create', () => {
   });
 
   it('stores only the hash of the gateway key', async () => {
-    await createTenant(deps(), input('acme-key'), secrets);
+    await provision(deps(), input('acme-key'), secrets);
     const [row] =
       await admin`select k.key_hash from gateway_keys k join tenants t on t.id = k.tenant_id
       where t.slug = 'acme-key'`;
@@ -154,9 +216,9 @@ describe('tenant:create', () => {
 
   it('a second run changes nothing and says so', async () => {
     const first = deps();
-    await createTenant(first, input('acme-twice'), secrets);
+    await provision(first, input('acme-twice'), secrets);
     const invites = identity.invites;
-    const again = await createTenant(first, input('acme-twice'), secrets);
+    const again = await provision(first, input('acme-twice'), secrets);
     expect(again.alreadyExists).toBe(true);
     expect(again.changedSteps).toEqual([]);
     expect(identity.invites).toBe(invites);
@@ -169,12 +231,8 @@ describe('tenant:create', () => {
 
   it('a re-run with another email adds no second admin', async () => {
     const d = deps();
-    await createTenant(d, input('acme-email'), secrets);
-    const r = await createTenant(
-      d,
-      input('acme-email', { adminEmail: 'someone@else.test' }),
-      secrets,
-    );
+    await provision(d, input('acme-email'), secrets);
+    const r = await provision(d, input('acme-email', { adminEmail: 'someone@else.test' }), secrets);
     expect(r.alreadyExists).toBe(true);
     expect(identity.invites).toBe(1);
     expect(await count('users', 'acme-email')).toBe(1);
@@ -183,13 +241,13 @@ describe('tenant:create', () => {
   it('a re-run finishes an attempt that failed at Keycloak', async () => {
     identity.failOnce = 'identity';
     const d = deps();
-    await expect(createTenant(d, input('acme-resume'), secrets)).rejects.toThrow(/step keycloak/);
+    await expect(provision(d, input('acme-resume'), secrets)).rejects.toThrow(/step keycloak/);
     const [failed] = await admin`select status, result from jobs
       where payload->>'slug' = 'acme-resume' order by created_at desc limit 1`;
     expect(failed!['status']).toBe('failed');
     expect(failed!['result']).toEqual({ step: 'keycloak' });
 
-    const r = await createTenant(d, input('acme-resume'), secrets);
+    const r = await provision(d, input('acme-resume'), secrets);
     expect(r.alreadyExists).toBe(false);
     expect(r.changedSteps).not.toContain('governance-db');
     expect(identity.invites).toBe(1);
@@ -199,29 +257,27 @@ describe('tenant:create', () => {
   it('a re-run sends the invite if it failed the first time, and only once', async () => {
     identity.failOnce = 'invite';
     const d = deps();
-    await expect(createTenant(d, input('acme-invite'), secrets)).rejects.toThrow(
-      /step tenant-admin/,
-    );
+    await expect(provision(d, input('acme-invite'), secrets)).rejects.toThrow(/step tenant-admin/);
     expect(await count('users', 'acme-invite')).toBe(0);
-    await createTenant(d, input('acme-invite'), secrets);
+    await provision(d, input('acme-invite'), secrets);
     expect(identity.invites).toBe(1);
     expect(await count('users', 'acme-invite')).toBe(1);
-    await createTenant(d, input('acme-invite'), secrets);
+    await provision(d, input('acme-invite'), secrets);
     expect(identity.invites).toBe(1);
   });
 
   it("does not keep a failed call's message in the job", async () => {
     identity.failOnce = 'identity';
-    await expect(createTenant(deps(), input('acme-secret'), secrets)).rejects.toThrow();
+    await expect(provision(deps(), input('acme-secret'), secrets)).rejects.toThrow();
     const rows = await admin`select result from jobs where payload->>'slug' = 'acme-secret'`;
     expect(JSON.stringify(rows)).not.toContain('secret-value');
   });
 
   it('replaces a gateway key that no longer matches the secrets file', async () => {
     const d = deps();
-    await createTenant(d, input('acme-rotate'), secrets);
+    await provision(d, input('acme-rotate'), secrets);
     const next = await generateGatewayKey('tenant');
-    const r = await createTenant(d, input('acme-rotate'), { ...secrets, gatewayKey: next.key });
+    const r = await provision(d, input('acme-rotate'), { ...secrets, gatewayKey: next.key });
     expect(r.changedSteps).toEqual(['gateway-key']);
     const rows =
       await admin`select revoked_at from gateway_keys k join tenants t on t.id = k.tenant_id
@@ -232,8 +288,8 @@ describe('tenant:create', () => {
 
   it('keeps tenants apart', async () => {
     const d = deps();
-    await createTenant(d, input('acme-a'), secrets);
-    await createTenant(d, input('acme-b'), secrets);
+    await provision(d, input('acme-a'), secrets);
+    await provision(d, input('acme-b'), secrets);
     expect(mongo.has('lc_acme-a')).toBe(true);
     expect(mongo.has('lc_acme-b')).toBe(true);
     expect(await count('users', 'acme-a')).toBe(1);
@@ -247,13 +303,13 @@ describe('tenant:create', () => {
     ['no seats', { seats: 0 }],
     ['a bad admin email', { adminEmail: 'not-an-email' }],
   ])('refuses %s, without creating anything', async (_label, over) => {
-    await expect(createTenant(deps(), input('acme-bad', over), secrets)).rejects.toThrow();
+    await expect(provision(deps(), input('acme-bad', over), secrets)).rejects.toThrow();
     expect(await admin`select id from tenants where slug = 'acme-bad'`).toHaveLength(0);
   });
 
   it('refuses an unknown plan, and leaves no tenant behind', async () => {
     await expect(
-      createTenant(deps(), input('acme-plan', { planCode: 'nope' }), secrets),
+      provision(deps(), input('acme-plan', { planCode: 'nope' }), secrets),
     ).rejects.toThrow(/step governance-db.*unknown plan/);
     expect(await admin`select id from tenants where slug = 'acme-plan'`).toHaveLength(0);
   });

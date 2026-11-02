@@ -3,12 +3,13 @@
 /**
  * pnpm tenant:create --slug acme --name "ACME A.Ş." --plan business --seats 10 --admin-email it@acme.com.tr [--region eu] [--kvkk]
  *
- * Creates a tenant on the running stack. Starting its LibreChat comes with P1-22.
+ * Creates a tenant on the running stack and starts its LibreChat. If a first attempt fails,
+ * everything it made is removed. Re-running on an existing tenant changes nothing.
  */
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
-import { AUTO_KEYS, deriveEnv, loadAllTenantSecrets, provisionTenant } from './steps.mjs';
+import { AUTO_KEYS, createAndStartTenant, deriveEnv, loadAllTenantSecrets } from './steps.mjs';
 import { adoptTenantSecretsFromEnvFile } from './tenants.mjs';
 import { ensureEnvFile, INFRA } from './util.mjs';
 
@@ -54,15 +55,18 @@ try {
     log: () => {},
   };
   loadAllTenantSecrets(ctx);
-  const result = await provisionTenant(ctx, tenant);
+  const started = Date.now();
+  const result = await createAndStartTenant(ctx, tenant);
+  const url = `https://${tenant.slug}.${config.project.base_domain}`;
   if (result.alreadyExists) {
-    console.log(`Tenant ${tenant.slug} already exists. Nothing changed.`);
+    console.log(`Tenant ${tenant.slug} already exists, and is running at ${url}. Nothing changed.`);
   } else {
-    console.log(`Tenant ${tenant.slug} created (${result.changedSteps.join(', ')}).`);
+    const seconds = Math.round((Date.now() - started) / 1000);
+    console.log(`Tenant ${tenant.slug} is running at ${url} (${seconds} s).`);
+    console.log(`Steps: ${result.changedSteps.join(', ')}.`);
     if (result.changedSteps.includes('tenant-admin')) {
       console.log('The tenant admin has been invited by email.');
     }
-    console.log('Its LibreChat is not started yet: that comes with P1-22.');
   }
 } catch (e) {
   console.error(e.message);

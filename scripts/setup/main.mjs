@@ -27,6 +27,7 @@ import {
   AUTO_KEYS,
   KEEP_ON_CONFIG_CHANGE,
   SERVICE_STEPS,
+  allTenants,
   deriveEnv,
   loadAllTenantSecrets,
   platformComposeArgs,
@@ -279,7 +280,7 @@ function printSummary(ctx) {
   console.log('');
   console.log(ok(bold('  Kâtip dev stack is up.')));
   console.log('');
-  for (const t of ctx.config.tenants) {
+  for (const t of allTenants(ctx)) {
     console.log(
       `    ${bold('Chat UI')}          https://${t.slug}.${base}  (LibreChat, ${t.slug} tenant)`,
     );
@@ -340,7 +341,7 @@ async function cmdStatus() {
   } catch {
     console.log(dim('  (platform not running)'));
   }
-  for (const t of ctx.config.tenants) {
+  for (const t of allTenants(ctx)) {
     try {
       const r = await tryRun(
         'docker',
@@ -361,7 +362,7 @@ async function cmdDown() {
   ctx.ensureEnv();
   const ce = composeEnv(ctx.config);
   console.log(dim('stopping tenants…'));
-  for (const t of ctx.config.tenants) {
+  for (const t of allTenants(ctx)) {
     await tryRun('docker', [...tenantComposeArgs(ctx.config, t), 'down', '--remove-orphans'], {
       env: { ...process.env, ...ce },
     }).catch(() => {});
