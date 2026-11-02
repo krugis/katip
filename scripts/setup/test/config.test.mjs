@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,10 +11,15 @@ import {
   renderLiteLLMModels,
   seedInput,
   tenantSecretName,
-  tenantSecretNames,
-  tenantSubnet,
+  pickTenantSubnet,
   validateConfig,
 } from '../config.mjs';
+import {
+  adoptTenantSecretsFromEnvFile,
+  ensureTenantSecrets,
+  knownTenantSlugs,
+  tenantSecretsFile,
+} from '../tenants.mjs';
 import { tenantPairs } from '../isolation.mjs';
 import { totp } from '../kc-lib.mjs';
 import { INFRA, generatorFor, parseEnvFile, parseYaml, redact, run } from '../util.mjs';
@@ -194,11 +200,74 @@ describe('tenants', () => {
   });
 
   it('names secrets per tenant, so tenants never share one', () => {
-    const names = tenantSecretNames(config);
-    expect(new Set(names).size).toBe(names.length);
-    expect(names).toContain('KATIP_T_DEMO_LC_CREDS_KEY');
-    expect(names).toContain('KATIP_T_ACME_LC_CREDS_KEY');
+    expect(tenantSecretName('demo', 'LC_CREDS_KEY')).toBe('KATIP_T_DEMO_LC_CREDS_KEY');
     expect(tenantSecretName('a-b', 'MEILI_KEY')).toBe('KATIP_T_A_B_MEILI_KEY');
+  });
+
+  it('refuses a slug the platform uses, and a missing admin email', () => {
+    const c = clone();
+    c.tenants[0].slug = 'console';
+    c.tenants[1].admin_email = 'nope';
+    const errors = validateConfig(c);
+    expect(errors).toContain('tenants[console].slug: is reserved for the platform');
+    expect(errors).toContain('tenants[acme].admin_email: must be an email address');
+  });
+
+  it('keeps tenant secrets in a private file, stable across calls', () => {
+    const infra = mkdtempSync(join(tmpdir(), 'katip-secrets-'));
+    try {
+      const first = ensureTenantSecrets(infra, 'acme');
+      expect(first.KATIP_T_ACME_LC_CREDS_KEY).toMatch(/^[0-9a-f]{64}$/);
+      expect(first.KATIP_T_ACME_GATEWAY_KEY).toMatch(/^sk-sme-t-/);
+      expect(ensureTenantSecrets(infra, 'acme')).toEqual(first);
+      expect(knownTenantSlugs(infra)).toEqual(['acme']);
+      const file = tenantSecretsFile(infra, 'acme');
+      expect(statSync(file).mode & 0o077).toBe(0);
+      const other = ensureTenantSecrets(infra, 'beta');
+      expect(other.KATIP_T_BETA_GATEWAY_KEY).not.toBe(first.KATIP_T_ACME_GATEWAY_KEY);
+      expect(knownTenantSlugs(infra)).toEqual(['acme', 'beta']);
+    } finally {
+      rmSync(infra, { recursive: true, force: true });
+    }
+  });
+
+  it('moves secrets out of katip.env with their values, once', () => {
+    const infra = mkdtempSync(join(tmpdir(), 'katip-secrets-'));
+    try {
+      mkdirSync(join(infra, 'env'));
+      writeFileSync(
+        join(infra, 'env', 'katip.env'),
+        'POSTGRES_PASSWORD=x\nKATIP_T_A_B_DEMO_USER_PASSWORD=kept\nKATIP_T_DEMO_DEMO_USER_PASSWORD=also\n',
+      );
+      adoptTenantSecretsFromEnvFile(infra);
+      expect(knownTenantSlugs(infra)).toEqual(['a-b', 'demo']);
+      expect(ensureTenantSecrets(infra, 'a-b').KATIP_T_A_B_DEMO_USER_PASSWORD).toBe('kept');
+      expect(ensureTenantSecrets(infra, 'demo').KATIP_T_DEMO_DEMO_USER_PASSWORD).toBe('also');
+      expect(statSync(tenantSecretsFile(infra, 'a-b')).mode & 0o077).toBe(0);
+      const generated = ensureTenantSecrets(infra, 'a-b').KATIP_T_A_B_MEILI_KEY;
+      adoptTenantSecretsFromEnvFile(infra);
+      expect(ensureTenantSecrets(infra, 'a-b').KATIP_T_A_B_MEILI_KEY).toBe(generated);
+    } finally {
+      rmSync(infra, { recursive: true, force: true });
+    }
+  });
+
+  it('adds a secret that is missing, without touching the others', () => {
+    const infra = mkdtempSync(join(tmpdir(), 'katip-secrets-'));
+    try {
+      const first = ensureTenantSecrets(infra, 'acme');
+      const file = tenantSecretsFile(infra, 'acme');
+      const kept = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((l) => !l.startsWith('KATIP_T_ACME_MEILI_KEY='))
+        .join('\n');
+      writeFileSync(file, kept);
+      const second = ensureTenantSecrets(infra, 'acme');
+      expect(second.KATIP_T_ACME_GATEWAY_KEY).toBe(first.KATIP_T_ACME_GATEWAY_KEY);
+      expect(second.KATIP_T_ACME_MEILI_KEY).toBeTruthy();
+    } finally {
+      rmSync(infra, { recursive: true, force: true });
+    }
   });
 
   it('generates each secret in the format it needs', () => {
@@ -207,14 +276,16 @@ describe('tenants', () => {
     expect(generatorFor('KATIP_T_ACME_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
   });
 
-  it('derives each subnet from the slug, not the list order, and rejects clashes', () => {
-    const [a, b] = config.tenants;
-    expect(tenantSubnet(config, a)).toMatch(/^10\.77\.\d+\.0\/24$/);
-    expect(tenantSubnet(config, a)).not.toBe(tenantSubnet(config, b));
-    const c = clone();
-    c.tenants.reverse();
-    expect(tenantSubnet(c, a)).toBe(tenantSubnet(config, a));
-    expect(validateConfig(config)).toEqual([]);
+  it('starts each subnet from the slug, and steps past ones in use', () => {
+    const [a] = config.tenants;
+    const first = pickTenantSubnet(config, a, []);
+    expect(first).toMatch(/^10\.77\.\d+\.0\/24$/);
+    const second = pickTenantSubnet(config, a, [first]);
+    expect(second).not.toBe(first);
+    expect(pickTenantSubnet(config, a, [])).toBe(first);
+    const all = Array.from({ length: 254 }, (_, i) => `10.77.${i + 1}.0/24`);
+    expect(() => pickTenantSubnet(config, a, all)).toThrow(/no free tenant network/);
+    expect(pickTenantSubnet(config, a, all.slice(1))).toBe('10.77.1.0/24');
   });
 
   it('keeps LibreChat off the shared networks', () => {

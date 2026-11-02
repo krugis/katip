@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Applies the realm from katip.config.yaml through the Keycloak Admin API
 // (P1-19, LLD-02 §1). Idempotent: a re-run updates settings and never touches
-// the password or MFA of an existing user. Input comes from identityInput in
-// config.mjs through KATIP_IDENTITY; secrets come as separate env variables.
-import { adminClient, findClient, findUser, grantClientRole } from './kc-lib.mjs';
+// the password or MFA of an existing user. Only what the whole platform shares: each
+// tenant's organization, client and users come from the provisioner. Input comes from
+// platformIdentityInput in config.mjs; secrets come as separate env variables.
+import { adminClient, findClient } from './kc-lib.mjs';
 
-const { realm, locales, defaultLocale, baseDomain, consoleOrigin, tenant, client, users } =
-  JSON.parse(process.env.KATIP_IDENTITY);
+const { realm, locales, defaultLocale, baseDomain, consoleOrigin } = JSON.parse(
+  process.env.KATIP_IDENTITY,
+);
 const api = await adminClient(
   process.env.KC_URL,
   process.env.KC_ADMIN_USER,
@@ -85,32 +87,7 @@ async function ensureOrganization(alias, name) {
   });
   return find();
 }
-const org = await ensureOrganization(tenant.slug, tenant.name);
 await ensureOrganization('provider', 'Kâtip');
-
-// ---- the tenant's LibreChat client, with the role that gates login -----------
-const clientRep = {
-  clientId: client.id,
-  name: `LibreChat (${tenant.slug})`,
-  protocol: 'openid-connect',
-  publicClient: false,
-  secret: process.env.LC_CLIENT_SECRET,
-  standardFlowEnabled: true,
-  directAccessGrantsEnabled: false,
-  redirectUris: [client.redirectUri],
-  webOrigins: [client.origin],
-  attributes: { 'post.logout.redirect.uris': `${client.origin}/*` },
-};
-let lc = await findClient(api, realm, client.id);
-if (lc) {
-  await api('PUT', `${R}/clients/${lc.id}`, { ...lc, ...clientRep });
-} else {
-  await api('POST', `${R}/clients`, clientRep);
-  lc = await findClient(api, realm, client.id);
-}
-if (!(await api('GET', `${R}/clients/${lc.id}/roles/member`))) {
-  await api('POST', `${R}/clients/${lc.id}/roles`, { name: 'member' });
-}
 
 // ---- the console: a browser app, so a public client with PKCE (LLD-02 §1) ------
 const CONSOLE_CLIENT = 'console';
@@ -152,29 +129,30 @@ const organizationScope = scopes.find((s) => s.name === 'organization');
 if (!organizationScope) throw new Error('the organization client scope is missing');
 await api('PUT', `${R}/clients/${consoleClient.id}/optional-client-scopes/${organizationScope.id}`);
 
-// ---- demo users, matching the governance DB seed ----------------------------
-for (const u of users) {
-  let user = await findUser(api, realm, u.email);
-  if (!user) {
-    await api('POST', `${R}/users`, {
-      username: u.email,
-      email: u.email,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      enabled: true,
-      emailVerified: true,
-      requiredActions: ['CONFIGURE_TOTP'],
-      credentials: [{ type: 'password', value: process.env.DEMO_USER_PASSWORD, temporary: false }],
-    });
-    user = await findUser(api, realm, u.email);
-  }
-  const role = await api('GET', `${R}/roles/${u.realmRole}`);
-  await api('POST', `${R}/users/${user.id}/role-mappings/realm`, [role]);
-  await grantClientRole(api, realm, lc, user.id, 'member');
-  const members = await api('GET', `${R}/organizations/${org.id}/members?max=1000`);
-  if (!members.some((m) => m.id === user.id)) {
-    await api('POST', `${R}/organizations/${org.id}/members`, user.id);
-  }
+// ---- the provisioner: can manage this realm, and no other ------------------------
+const PROVISIONER_CLIENT = 'katip-provisioner';
+const provisionerRep = {
+  clientId: PROVISIONER_CLIENT,
+  name: 'Kâtip provisioner',
+  protocol: 'openid-connect',
+  publicClient: false,
+  secret: process.env.PROVISIONER_CLIENT_SECRET,
+  serviceAccountsEnabled: true,
+  standardFlowEnabled: false,
+  directAccessGrantsEnabled: false,
+};
+let provisioner = await findClient(api, realm, PROVISIONER_CLIENT);
+if (provisioner) {
+  await api('PUT', `${R}/clients/${provisioner.id}`, { ...provisioner, ...provisionerRep });
+} else {
+  await api('POST', `${R}/clients`, provisionerRep);
+  provisioner = await findClient(api, realm, PROVISIONER_CLIENT);
 }
+const serviceUser = await api('GET', `${R}/clients/${provisioner.id}/service-account-user`);
+const realmManagement = await findClient(api, realm, 'realm-management');
+const realmAdmin = await api('GET', `${R}/clients/${realmManagement.id}/roles/realm-admin`);
+await api('POST', `${R}/users/${serviceUser.id}/role-mappings/clients/${realmManagement.id}`, [
+  realmAdmin,
+]);
 
-console.log(`realm ${realm} applied: client ${client.id}, ${users.length} users`);
+console.log(`realm ${realm} applied`);

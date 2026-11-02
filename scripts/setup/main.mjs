@@ -12,6 +12,7 @@
  */
 import { join } from 'node:path';
 import process from 'node:process';
+import { adoptTenantSecretsFromEnvFile } from './tenants.mjs';
 import {
   ROOT,
   STATE_DIR,
@@ -21,12 +22,13 @@ import {
   tryRun,
   requestInterrupt,
 } from './util.mjs';
-import { composeEnv, configHash, identityOf, loadConfig, tenantSecretNames } from './config.mjs';
+import { composeEnv, configHash, identityOf, loadConfig } from './config.mjs';
 import {
   AUTO_KEYS,
   KEEP_ON_CONFIG_CHANGE,
   SERVICE_STEPS,
   deriveEnv,
+  loadAllTenantSecrets,
   platformComposeArgs,
   steps,
   tenantComposeArgs,
@@ -62,7 +64,9 @@ function makeCtx() {
       if (currentLog) currentLog.push(line);
     },
     ensureEnv: () => {
-      const r = ensureEnvFile(AUTO_KEYS, deriveEnv, tenantSecretNames(config));
+      adoptTenantSecretsFromEnvFile(join(ROOT, 'infra'));
+      const r = ensureEnvFile(AUTO_KEYS, deriveEnv);
+      loadAllTenantSecrets({ config, infra: join(ROOT, 'infra'), env: r.env });
       if (!ctx.env) ctx.env = r.env;
       currentLog = null;
       return r;
@@ -289,10 +293,12 @@ function printSummary(ctx) {
   console.log(dim('    Gateway smoke passed: chat through policy-gateway → LiteLLM → mock.'));
   console.log(
     dim(
-      `    Demo login: user@<tenant>.localhost, password KATIP_T_<TENANT>_DEMO_USER_PASSWORD in katip.env; MFA enrolment at first login.`,
+      `    Demo login: user@<tenant>.localhost, password KATIP_T_<TENANT>_DEMO_USER_PASSWORD in infra/env/tenants/<tenant>.secrets.env; MFA enrolment at first login.`,
     ),
   );
-  console.log(dim(`    Secrets: infra/env/katip.env  ·  state: .katip/setup-state.json`));
+  console.log(
+    dim(`    Secrets: infra/env/katip.env, infra/env/tenants/  ·  state: .katip/setup-state.json`),
+  );
   console.log(
     dim('    Stop: pnpm dev:down  ·  Remove: pnpm dev:rollback  ·  Status: pnpm dev:status'),
   );

@@ -111,7 +111,7 @@ networks:
 | `<project>_t_<slug>` | one tenant's LibreChat and Meilisearch, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, Postgres, Valkey, LiteLLM and Presidio aren't on it |
 | `egress-llm` | litellm only | Outbound to LLM providers; firewall egress allowlist (optional, phase 2) |
 
-Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, derived from the slug: Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.
+Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, starting from a hash of the slug and stepping to the next free one, and Docker keeps what was chosen. They're set explicitly because Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.
 
 ## 3. Environments
 

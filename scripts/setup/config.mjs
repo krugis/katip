@@ -38,9 +38,24 @@ const MODEL_FIELDS = [
 export const tenantNetworkName = (config, t) => `${config.project.name}_t_${t.slug}`;
 
 /** Derived from the slug, so it doesn't depend on the order of the tenant list. */
-export function tenantSubnet(config, t) {
-  const n = createHash('sha256').update(t.slug).digest().readUInt16BE(0) % 254;
-  return `${config.project?.tenant_network_prefix}.${n + 1}.0/24`;
+export function pickTenantSubnet(config, t, used) {
+  const start = createHash('sha256').update(t.slug).digest().readUInt16BE(0) % 254;
+  for (let i = 0; i < 254; i += 1) {
+    const subnet = `${config.project?.tenant_network_prefix}.${((start + i) % 254) + 1}.0/24`;
+    if (!used.includes(subnet)) return subnet;
+  }
+  throw new Error(`no free tenant network left in ${config.project?.tenant_network_prefix}.0.0/16`);
+}
+
+/** What's wrong with a tenant's slug and admin email, wherever they came from. */
+export function tenantInputErrors(t) {
+  const errors = [];
+  if (RESERVED_SLUGS.includes(t?.slug)) errors.push('slug: is reserved for the platform');
+  if (!/^[a-z0-9-]{3,32}$/.test(t?.slug ?? '')) errors.push('slug: must match ^[a-z0-9-]{3,32}$');
+  if (!/^[^@\s]+@[^@\s]+$/.test(t?.admin_email ?? '')) {
+    errors.push('admin_email: must be an email address');
+  }
+  return errors;
 }
 
 export function validateConfig(c) {
@@ -129,20 +144,16 @@ export function validateConfig(c) {
     errors.push('tenants: at least one tenant is required');
   }
   const slugs = new Set();
-  const subnets = new Map();
   for (const [i, t] of (Array.isArray(c.tenants) ? c.tenants : []).entries()) {
     const where = `tenants[${t?.slug ?? i}]`;
-    unknown(t, ['slug', 'name', 'plan', 'seats', 'kvkk_addon', 'limits', 'pii'], where);
-    if (!/^[a-z0-9-]{3,32}$/.test(t?.slug ?? '')) {
-      errors.push(`${where}.slug: must match ^[a-z0-9-]{3,32}$`);
-    }
+    unknown(
+      t,
+      ['slug', 'name', 'plan', 'seats', 'kvkk_addon', 'admin_email', 'limits', 'pii'],
+      where,
+    );
+    for (const e of tenantInputErrors(t)) errors.push(`${where}.${e}`);
     if (slugs.has(t?.slug)) errors.push(`${where}: duplicate slug`);
     slugs.add(t?.slug);
-    const subnet = typeof t?.slug === 'string' ? tenantSubnet(c, t) : null;
-    if (subnet && subnets.has(subnet)) {
-      errors.push(`${where}: its network subnet clashes with tenant ${subnets.get(subnet)}`);
-    }
-    if (subnet) subnets.set(subnet, t.slug);
     if (!t?.name) errors.push(`${where}.name: required`);
     if (!t?.plan) errors.push(`${where}.plan: required`);
     if (!Number.isInteger(t?.seats) || t.seats < 1) {
@@ -216,7 +227,7 @@ export const CHAT_ENDPOINT = 'SME AI';
 const smokeEmail = (config, t) => `smoke-member@${t.slug}.${config.project.base_domain}`;
 
 /** Per-tenant secrets, generated once into katip.env. */
-const TENANT_SECRETS = [
+export const TENANT_SECRETS = [
   'GATEWAY_KEY',
   'LC_CREDS_KEY',
   'LC_CREDS_IV',
@@ -232,8 +243,29 @@ const TENANT_SECRETS = [
 export const tenantSecretName = (slug, name) =>
   `KATIP_T_${slug.toUpperCase().replace(/-/g, '_')}_${name}`;
 
-export const tenantSecretNames = (config) =>
-  config.tenants.flatMap((t) => TENANT_SECRETS.map((name) => tenantSecretName(t.slug, name)));
+/** Hostnames the platform uses: a tenant called this would take over its route. */
+export const RESERVED_SLUGS = ['auth', 'console', 'mailpit', 'provider', 'www', 'api', 'admin'];
+
+/** Input for the provisioner. `t` may come from the config or from `pnpm tenant:create`. */
+export const provisionInput = (config, t) => ({
+  slug: t.slug,
+  name: t.name,
+  planCode: t.plan,
+  seats: t.seats,
+  region: t.region ?? 'eu',
+  kvkkAddon: t.kvkk_addon,
+  adminEmail: t.admin_email,
+  baseDomain: config.project.base_domain,
+});
+
+/** Input for scripts/setup/keycloak.mjs: what all tenants share. */
+export const platformIdentityInput = (config) => ({
+  realm: config.identity.realm,
+  locales: config.identity.locales,
+  defaultLocale: config.identity.default_locale,
+  baseDomain: config.project.base_domain,
+  consoleOrigin: `https://console.${config.project.base_domain}`,
+});
 
 /** Input for scripts/setup/db-seed.mjs, which runs inside the gateway image. */
 export function seedInput(config) {
@@ -277,8 +309,6 @@ export function identityInput(config, t) {
   });
   return {
     realm: config.identity.realm,
-    locales: config.identity.locales,
-    defaultLocale: config.identity.default_locale,
     baseDomain: config.project.base_domain,
     consoleOrigin: `https://console.${config.project.base_domain}`,
     tenant: { slug, name },

@@ -243,12 +243,13 @@ Changes from the unified setup and tenant isolation work (November 2026). PR num
 | Building block | What changed | Tracker | PR | LLD |
 | --- | --- | --- | --- | --- |
 | **Setup script** (`pnpm dev:up`) | One script installs everything, including from a fresh `git clone`. Re-running applies config changes. Time limits on throwaway containers | P0-14…21 | #2, #6, #7 | 01 |
-| **Config and env files** | `katip.config.yaml` and `katip.env` drive all images, names, models and tenants. Unknown settings are rejected. A list of tenants, with two in dev | P0-12, P0-17, P0-19, P1-59 | #2, #6, #11 | 01 |
+| **Config and env files** | `katip.config.yaml` and `katip.env` drive all images, names, models and tenants. Unknown settings are rejected. A list of tenants, with two in dev. Each tenant's secrets are now generated into their own file, and the database is the source of truth for tenants | P0-12, P0-17, P0-19, P1-59, P1-21 | #2, #6, #11, #18 | 01, 07 |
 | **Policy gateway** | Tenants, keys, catalog and policy from Postgres. Quotas, usage metering. Request allow list; every text field scanned; tool arguments stay masked. `/readyz` | P1-02, P1-04, P1-09, P1-10, P1-14, P0-21, P1-57 | #4, #5, #6, #9 | 03 |
 | **Tool-call log** (gateway, `usage_events`) | The tools a model asks to call are recorded by name, never with arguments. `dev:up` follows a tool call through LiteLLM and checks its arguments stay masked | P1-63 | #15 | 03, 05 |
 | **PII masking** (`packages/pii`) | Presidio name detection, with a per-tenant rule for when it fails. Placeholders hold for a whole conversation, with nothing stored | P1-11, P1-58 | #5, #10 | 03 |
 | **Presidio** | Built by the script, with its language model pinned and checksum-verified | P1-11, P0-18 | #5, #6 | 03 |
 | **Governance DB** (Postgres) | Schema, migrations, seeds. **The gateway runs as `katip_gateway`, so row-level security now applies**; it previously connected as a superuser, which bypasses it | P1-17, P1-18, P1-61 | #3, #13 | 05 |
+| **Provisioner** (`apps/provisioner`, new) | `pnpm tenant:create` adds a company: rows, Keycloak organization, client and invited admin, Mongo login, network, gateway key. Re-runs finish a failed attempt. `dev:up` uses the same path. Needs no Docker socket. Starting a new tenant's LibreChat comes with P1-22 | P1-21 | #18 | 07 |
 | **Console API** (`apps/console-api`, new) | Skeleton: Keycloak token check, role and tenant checks, problem+json, OpenAPI from Zod. Deny by default. Runs as `katip_console`, bound by row-level security. No screens or business endpoints yet | P1-20 | #17 | 04, 02, 05 |
 | **Keycloak** | Realm, roles, organizations and login flow applied from config, with forced MFA and a Turkish theme | P1-19 | #7 | 02 |
 | **LibreChat** | Keycloak login only. Upgraded from v0.7.8 to v0.8.7 so chat knows the user. Waits for Keycloak at startup. Login rate limit raised, as a shared office IP would be locked out | P1-19, P1-05 | #7, #8 | 02, 03 |

@@ -9,13 +9,17 @@ import { join } from 'node:path';
 import {
   composeEnv,
   identityInput,
+  platformIdentityInput,
+  provisionInput,
   renderLiteLLMModels,
   seedInput,
   tenantNetworkName,
   tenantSecretName,
-  tenantSubnet,
+  pickTenantSubnet,
+  tenantInputErrors,
 } from './config.mjs';
 import { checkIsolation } from './isolation.mjs';
+import { ensureTenantSecrets, knownTenantSlugs, tenantSecretsFile } from './tenants.mjs';
 import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const AUTO_KEYS = new Set([
@@ -30,6 +34,8 @@ export const AUTO_KEYS = new Set([
   'VALKEY_PASSWORD',
   'KATIP_GATEWAY_DB_PASSWORD',
   'KATIP_CONSOLE_DB_PASSWORD',
+  'KATIP_PROVIDER_DB_PASSWORD',
+  'KATIP_PROVISIONER_KC_SECRET',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -194,12 +200,19 @@ async function curlEdge(ctx, host, path, extra = []) {
  * Runs a scripts/setup/*.mjs file on a network with Traefik on it (default: edge), reaching
  * Keycloak and the tenant as a browser would. Uses the gateway image as a node runtime.
  */
-function runOnEdge(ctx, t, script, extraEnv = {}, network = edgeNetwork(ctx.config)) {
+function runOnEdge(
+  ctx,
+  t,
+  script,
+  extraEnv = {},
+  network = edgeNetwork(ctx.config),
+  identity = identityInput(ctx.config, t),
+) {
   const env = {
     KC_URL: `https://auth.${ctx.config.project.base_domain}`,
     KC_ADMIN_USER: ctx.env.KC_BOOTSTRAP_ADMIN_USER,
     KC_ADMIN_PASSWORD: ctx.env.KC_BOOTSTRAP_ADMIN_PASSWORD,
-    KATIP_IDENTITY: JSON.stringify(identityInput(ctx.config, t)),
+    KATIP_IDENTITY: JSON.stringify(identity),
     ...extraEnv,
   };
   return dockerRun(
@@ -309,6 +322,17 @@ function renderLiteLLMConfig(ctx) {
   writeFileSync(join(ctx.infra, 'litellm', 'rendered', 'config.dev.yaml'), out);
 }
 
+/** Every tenant on this host: the ones in the config, and any made by `pnpm tenant:create`. */
+export const allTenants = (ctx) => {
+  const slugs = new Set([...ctx.config.tenants.map((t) => t.slug), ...knownTenantSlugs(ctx.infra)]);
+  return [...slugs].sort().map((slug) => ({ slug }));
+};
+
+/** Makes the tenant secrets available to everything that renders or runs. */
+export function loadAllTenantSecrets(ctx) {
+  for (const t of allTenants(ctx)) Object.assign(ctx.env, ensureTenantSecrets(ctx.infra, t.slug));
+}
+
 const ipallowFile = (ctx, t) => join(ctx.infra, 'traefik', 'dynamic', `${t.slug}-ipallow.yml`);
 
 /**
@@ -328,7 +352,7 @@ function renderPlatformOverlay(ctx) {
   };
   // Each tenant's network holds its LibreChat and search, plus only the platform
   // services a tenant may use. Postgres, Valkey, LiteLLM and other tenants aren't on it.
-  for (const t of ctx.config.tenants) {
+  for (const t of allTenants(ctx)) {
     const key = `t_${t.slug}`;
     overlay.networks[key] = { name: tenantNetworkName(ctx.config, t), external: true };
     overlay.services.traefik.networks[key] = {
@@ -400,6 +424,131 @@ function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
   renderPlatformOverlay(ctx);
   for (const t of ctx.config.tenants) renderTenantFiles(ctx, t);
+}
+
+/** A new tenant's network gets a subnet no other network here uses. Docker remembers it. */
+async function ensureTenantNetwork(ctx, t) {
+  const name = tenantNetworkName(ctx.config, t);
+  const exists = await run('docker', ['network', 'inspect', name]);
+  if (exists.code === 0) return;
+  const { out: ids } = await tryRun('docker', ['network', 'ls', '-q']);
+  const { out } = await tryRun('docker', [
+    'network',
+    'inspect',
+    '-f',
+    '{{range .IPAM.Config}}{{.Subnet}} {{end}}',
+    ...ids.split(/\s+/).filter(Boolean),
+  ]);
+  const subnet = pickTenantSubnet(ctx.config, t, out.split(/\s+/).filter(Boolean));
+  await tryRun('docker', ['network', 'create', '--subnet', subnet, name]);
+}
+
+/**
+ * Attaches the platform services a tenant may use, with no restart. The generated compose
+ * file keeps this on a recreate; this is for when the stack is already running.
+ */
+async function connectPlatformToTenant(ctx, t) {
+  const base = ctx.config.project.base_domain;
+  const network = tenantNetworkName(ctx.config, t);
+  const services = [
+    ['traefik', [`auth.${base}`, `console.${base}`, `${t.slug}.${base}`]],
+    ['policy-gateway', []],
+    ['mongodb', []],
+  ];
+  for (const [service, aliases] of services) {
+    const container = `${ctx.config.project.name}-${service}-1`;
+    const running = await run('docker', ['inspect', '-f', '{{.State.Running}}', container]);
+    if (running.out.trim() !== 'true') continue;
+    const connected = await run('docker', [
+      'inspect',
+      '-f',
+      `{{if index .NetworkSettings.Networks "${network}"}}yes{{end}}`,
+      container,
+    ]);
+    if (connected.out.trim() !== 'yes') {
+      const flags = aliases.flatMap((a) => ['--alias', a]);
+      await tryRun('docker', ['network', 'connect', ...flags, network, container]);
+    }
+  }
+}
+
+/**
+ * Creates a tenant: the one path for `dev:up` and `pnpm tenant:create`. The Docker work
+ * happens here, on the host, so the provisioner's container needs no Docker socket.
+ */
+export async function provisionTenant(ctx, t) {
+  const errors = tenantInputErrors(t);
+  if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
+  const isNew = !existsSync(tenantSecretsFile(ctx.infra, t.slug));
+  Object.assign(ctx.env, ensureTenantSecrets(ctx.infra, t.slug));
+
+  const env = {
+    DATABASE_URL: `postgres://katip_provider:${ctx.env.KATIP_PROVIDER_DB_PASSWORD}@postgres:5432/governance`,
+    KEYCLOAK_URL: 'http://keycloak:8080',
+    KEYCLOAK_REALM: ctx.config.identity.realm,
+    KEYCLOAK_CLIENT_ID: 'katip-provisioner',
+    KEYCLOAK_CLIENT_SECRET: ctx.env.KATIP_PROVISIONER_KC_SECRET,
+    MONGO_ROOT_URI: `mongodb://${ctx.env.MONGO_USER}:${ctx.env.MONGO_PASSWORD}@mongodb:27017/?authSource=admin`,
+    TENANT_INPUT: JSON.stringify(provisionInput(ctx.config, t)),
+    TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
+    TENANT_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
+    TENANT_MONGO_PASSWORD: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+  };
+  let out;
+  try {
+    ({ out } = await dockerRun(
+      [
+        '--network',
+        backendNetwork(ctx.config),
+        ...Object.keys(env).flatMap((k) => ['-e', k]),
+        'ghcr.io/krugis/provisioner:dev',
+      ],
+      env,
+      { timeoutMs: 180_000 },
+    ));
+  } catch (e) {
+    // Nothing exists yet, for instance after a mistyped plan, so leave no trace of it.
+    if (isNew && e.message.includes('step governance-db')) {
+      rmSync(tenantSecretsFile(ctx.infra, t.slug), { force: true });
+    }
+    throw e;
+  }
+  const line = out.split('\n').find((l) => l.startsWith('provision-result='));
+  if (!line) throw new Error(`the provisioner reported no result: ${out.slice(0, 300)}`);
+
+  // After the provisioner, so a refused tenant leaves no network behind.
+  await ensureTenantNetwork(ctx, t);
+  renderPlatformOverlay(ctx);
+  await connectPlatformToTenant(ctx, t);
+  return JSON.parse(line.slice('provision-result='.length));
+}
+
+/** Runs a stage of scripts/setup/db-seed.mjs in the gateway image, as the admin role. */
+function runDbSeed(ctx, stage) {
+  const env = {
+    DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
+    KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
+    KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
+    KATIP_PROVIDER_DB_PASSWORD: ctx.env.KATIP_PROVIDER_DB_PASSWORD,
+    KATIP_SEED: JSON.stringify(seedInput(ctx.config)),
+  };
+  return dockerRun(
+    [
+      '--network',
+      backendNetwork(ctx.config),
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      '--entrypoint',
+      'node',
+      '-w',
+      '/app/policy-gateway',
+      '-v',
+      `${join(ROOT, 'scripts', 'setup', 'db-seed.mjs')}:/app/policy-gateway/db-seed.mjs:ro`,
+      'ghcr.io/krugis/policy-gateway:dev',
+      'db-seed.mjs',
+      stage,
+    ],
+    env,
+  );
 }
 
 /** LibreChat rejects these when encrypting, and katip.env values are never overwritten. */
@@ -478,6 +627,7 @@ export const steps = [
       const { env, changed } = ctx.ensureEnv();
       ctx.env = env;
       ctx.log(`katip.env ${changed ? 'generated' : 'present'}`);
+      loadAllTenantSecrets(ctx);
       checkCredentialFormats(ctx);
 
       // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
@@ -528,9 +678,10 @@ export const steps = [
       rmSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'librechat', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'compose', 'tenants'), { recursive: true, force: true });
-      for (const t of ctx.config.tenants) {
+      for (const t of allTenants(ctx)) {
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.env`), { force: true });
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.meili.env`), { force: true });
+        rmSync(tenantSecretsFile(ctx.infra, t.slug), { force: true });
         rmSync(ipallowFile(ctx, t), { force: true });
       }
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
@@ -540,33 +691,25 @@ export const steps = [
     id: 'networks',
     title: 'Networks (edge, backend, one per tenant)',
     async run(ctx) {
-      const wanted = [
-        [edgeNetwork(ctx.config)],
-        [backendNetwork(ctx.config)],
-        ...ctx.config.tenants.map((t) => [
-          tenantNetworkName(ctx.config, t),
-          '--subnet',
-          tenantSubnet(ctx.config, t),
-        ]),
-      ];
-      for (const [name, ...options] of wanted) {
+      for (const name of [edgeNetwork(ctx.config), backendNetwork(ctx.config)]) {
         const exists = await tryRun('docker', ['network', 'inspect', name], {}).then(
           () => true,
           () => false,
         );
         if (!exists) {
-          await tryRun('docker', ['network', 'create', ...options, name], {});
+          await tryRun('docker', ['network', 'create', name], {});
           ctx.log(`created network ${name}`);
         } else {
           ctx.log(`network ${name} present`);
         }
       }
+      for (const t of allTenants(ctx)) await ensureTenantNetwork(ctx, t);
     },
     async rollback(ctx) {
       const names = [
         edgeNetwork(ctx.config),
         backendNetwork(ctx.config),
-        ...ctx.config.tenants.map((t) => tenantNetworkName(ctx.config, t)),
+        ...allTenants(ctx).map((t) => tenantNetworkName(ctx.config, t)),
       ];
       for (const name of names) {
         await tryRun('docker', ['network', 'rm', name], {}).catch(() => {});
@@ -588,7 +731,8 @@ export const steps = [
   },
   {
     id: 'build',
-    title: 'Build images (litellm + presidio checksum-verified, gateway, console-api, mock)',
+    title:
+      'Build images (litellm + presidio checksum-verified, gateway, console-api, provisioner, mock)',
     async run(ctx) {
       const { version, sha256 } = ctx.config.images.litellm;
       ctx.tui?.setDetail?.(`litellm ${version} (sha256 verified)`);
@@ -645,6 +789,14 @@ export const steps = [
       );
       ctx.log('built ghcr.io/krugis/policy-gateway:dev');
 
+      ctx.tui?.setDetail?.('provisioner');
+      await tryRun(
+        'docker',
+        ['build', '-t', 'ghcr.io/krugis/provisioner:dev', '-f', 'apps/provisioner/Dockerfile', '.'],
+        {},
+      );
+      ctx.log('built ghcr.io/krugis/provisioner:dev');
+
       ctx.tui?.setDetail?.('console-api');
       await tryRun(
         'docker',
@@ -683,60 +835,41 @@ export const steps = [
   },
   {
     id: 'identity',
-    title: 'Identity (Keycloak realm, login flow, tenant client, demo users)',
+    title: 'Identity (Keycloak realm, login flow, console and provisioner clients)',
     async run(ctx) {
-      for (const t of ctx.config.tenants) {
-        await runOnEdge(ctx, t, 'keycloak.mjs', {
-          LC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
-          DEMO_USER_PASSWORD: tenantSecret(ctx, t, 'DEMO_USER_PASSWORD'),
-        });
-      }
+      await runOnEdge(
+        ctx,
+        ctx.config.tenants[0],
+        'keycloak.mjs',
+        { PROVISIONER_CLIENT_SECRET: ctx.env.KATIP_PROVISIONER_KC_SECRET },
+        edgeNetwork(ctx.config),
+        platformIdentityInput(ctx.config),
+      );
       ctx.log(`realm ${ctx.config.identity.realm} applied`);
     },
   },
   {
     id: 'governance-db',
-    title: 'Governance DB (migrate, seed, tenant gateway keys)',
+    title: 'Governance DB (migrate, roles, plans, catalog)',
     async run(ctx) {
-      // Runs the repo's migrate + seed + demo-key upsert inside the gateway
-      // image (node + our built packages) on the backend network.
-      const env = {
-        DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
-        KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
-        KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
-        KATIP_TENANT_KEYS: JSON.stringify(
-          Object.fromEntries(
-            ctx.config.tenants.map((t) => [t.slug, tenantSecret(ctx, t, 'GATEWAY_KEY')]),
-          ),
-        ),
-        KATIP_SEED: JSON.stringify(seedInput(ctx.config)),
-      };
-      await dockerRun(
-        [
-          '--network',
-          backendNetwork(ctx.config),
-          '-e',
-          'DATABASE_URL',
-          '-e',
-          'KATIP_GATEWAY_DB_PASSWORD',
-          '-e',
-          'KATIP_CONSOLE_DB_PASSWORD',
-          '-e',
-          'KATIP_TENANT_KEYS',
-          '-e',
-          'KATIP_SEED',
-          '--entrypoint',
-          'node',
-          '-w',
-          '/app/policy-gateway',
-          '-v',
-          `${join(ROOT, 'scripts', 'setup', 'db-seed.mjs')}:/app/policy-gateway/db-seed.mjs:ro`,
-          'ghcr.io/krugis/policy-gateway:dev',
-          'db-seed.mjs',
-        ],
-        env,
-      );
-      ctx.log('migrations + seed applied; tenant gateway keys stored (argon2id)');
+      await runDbSeed(ctx, 'platform');
+      ctx.log('migrations + platform seed applied');
+    },
+  },
+  {
+    id: 'provision',
+    title: 'Tenants (through the provisioner: rows, Keycloak, Mongo, network, gateway key)',
+    async run(ctx) {
+      for (const t of ctx.config.tenants) {
+        const r = await provisionTenant(ctx, t);
+        ctx.log(`${t.slug}: ${r.alreadyExists ? 'already exists' : r.changedSteps.join(', ')}`);
+        await runOnEdge(ctx, t, 'keycloak-dev-users.mjs', {
+          DEMO_USER_PASSWORD: tenantSecret(ctx, t, 'DEMO_USER_PASSWORD'),
+        });
+      }
+      // Dev only: demo users, and the settings from katip.config.yaml.
+      await runDbSeed(ctx, 'tenants');
+      ctx.log('dev tenants ready');
     },
   },
   {

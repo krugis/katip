@@ -47,6 +47,7 @@ The full design is in [docs/DESIGN.md](docs/DESIGN.md), and per-component design
 apps/
   policy-gateway/   OpenAI-compatible gateway: policy, PII masking, routing, metering
   console-api/      API for the governance console: login, roles, tenant checks (skeleton)
+  provisioner/      Creates tenants: pnpm tenant:create
   mock-llm/         OpenAI-compatible mock provider for tests and local dev
 packages/
   shared/           env validation, logger (PII-safe), problem+json errors
@@ -90,7 +91,7 @@ pnpm dev:rollback  # remove everything the bootstrap created
 - All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, names, domain, models, tenant). `pnpm dev:up` rejects unknown settings, and re-running it applies your edits. To change `project.name` or `tenant.slug`, run `pnpm dev:rollback` first.
 - All keys live in **infra/env/katip.env** — generated once from `katip.example.env` on first run; secrets are random and never overwritten. Real provider API keys (DeepInfra, OpenRouter, Anthropic) are optional: without them, everything routes to the mock provider.
 - An interrupted run keeps finished layers working; re-running resumes from where it stopped.
-- Login goes through Keycloak, with MFA enrolment at first login. Demo users are `admin@`, `manager@` and `user@demo.localhost`, with the password `KATIP_T_DEMO_DEMO_USER_PASSWORD` from `infra/env/katip.env`. The dev certificate is self-signed, so your browser will warn about it.
+- Login goes through Keycloak, with MFA enrolment at first login. Demo users are `admin@`, `manager@` and `user@demo.localhost`, with the password `KATIP_T_DEMO_DEMO_USER_PASSWORD` from `infra/env/tenants/demo.secrets.env`. The dev certificate is self-signed, so your browser will warn about it.
 - It installs two tenants, `demo` and `acme`, and checks that neither can cross into the other. The same names work for acme.
 - After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.
 

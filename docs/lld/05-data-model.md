@@ -20,7 +20,7 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
   | `katip` | Migrations and seeds only | Bypassed (superuser) | Never used by a running service |
   | `katip_gateway` | Policy gateway | **Applies** | `SELECT` on what it reads, `INSERT` on `usage_events`. Runs each tenant query in a transaction with `set_config('app.tenant_id', …, true)`. `gateway_keys` alone is readable with no tenant context, because a key lookup is how the tenant is found |
   | `katip_console` | Console API | **Applies** | `SELECT` on `tenants` and `users` so far; each new endpoint adds only what it needs. No exception for lookups: `tenants` has no RLS, and the tenant comes from the verified token |
-  | `katip_provider` | Provider endpoints and jobs | Bypassed by design (`BYPASSRLS`) | Not used yet |
+  | `katip_provider` | Provisioner; later, provider endpoints and jobs | Bypassed by design (`BYPASSRLS`): a tenant being created has no context yet | Not a superuser. Can add tenants and read what it needs, and can't read usage or invoices, change plans or the catalog, or delete tenants or users |
 
   Tests of tenant isolation must connect as the role the service uses, as an admin role passes them regardless.
 - Money is stored as `bigint` micro-USD; tokens as `bigint`.
