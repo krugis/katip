@@ -2,7 +2,7 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
-**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), and the department manager's area (P1-31). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), the department manager's area (P1-31), and each person's account (P1-32). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
 
 **How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
 
@@ -66,9 +66,12 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | Method | Path | Role | Notes |
 | --- | --- | --- | --- |
 | GET | `/api/v1/me` | any | User, tenant, roles, seat, quotas |
-| GET | `/api/v1/me/usage?month=2026-11` | any | |
-| POST | `/api/v1/me/requests` | any | `{type: premium_access/budget/model, reason}` |
-| POST | `/api/v1/me/privacy/export` | any | Async job; returns job id |
+| GET | `/api/v1/me/usage?groupBy=model\|day&from&to` | any | The caller's own tokens, up to date at once |
+| GET/POST | `/api/v1/me/requests` | any | `{type: premium_access/budget/model, reason}`. Up to 10 waiting per person |
+| GET/PATCH | `/api/v1/tenants/:tid/requests`, `/requests/:rid`, `/privacy-requests/:pid` | tenant_admin | Everyone's requests, including people with no department, and privacy requests |
+| GET | `/api/v1/me/privacy` | any | The caller's own privacy requests |
+| POST | `/api/v1/me/privacy/export` | any | What the governance database holds about the caller. **Not chats**, which LibreChat holds: the file says where they are (P1-68). Recorded and audited |
+| POST | `/api/v1/me/privacy/delete` | any | Creates a request for the company admin, once. Deletes nothing itself |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/users` | tenant_admin | Invite, change tier/department/role, disable |
 | POST | `/api/v1/tenants/:tid/users/:uid/invite` | tenant_admin | Send the invite again |
 | POST | `/api/v1/tenants/:tid/users/import` | tenant_admin | CSV (email, name, department, tier); comma or semicolon. Up to 1000 rows. Runs in the background and answers 202 with a job id |

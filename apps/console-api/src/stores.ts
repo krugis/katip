@@ -141,23 +141,72 @@ export interface RequestView {
   decidedAt: string | null;
 }
 
+export interface OwnRequestView {
+  id: string;
+  type: string;
+  reason: string;
+  status: string;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface PrivacyRequestView {
+  id: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+/** Enough open requests from one person for anyone to get through. */
+const MAX_OPEN_REQUESTS = 10;
+
 export interface ConsoleStore {
-  /** Inclusive UTC days. With a department, only what's counted to it. */
+  /** Inclusive UTC days. With a department or person, only what's counted to them. */
   usage(
     tenantId: string,
     group: UsageGroup,
     from: string,
     to: string,
     departmentId?: string,
+    userId?: string,
   ): Promise<UsageRow[]>;
+  ownRequests(tenantId: string, userId: string): Promise<OwnRequestView[]>;
+  createRequest(
+    tenantId: string,
+    userId: string,
+    type: string,
+    reason: string,
+  ): Promise<OwnRequestView>;
+  allRequests(tenantId: string): Promise<RequestView[]>;
+  ownPrivacyRequests(tenantId: string, userId: string): Promise<PrivacyRequestView[]>;
+  allPrivacyRequests(
+    tenantId: string,
+  ): Promise<(PrivacyRequestView & { userName: string; userEmail: string })[]>;
+  /** Everything held about this person in the governance database. Records that it happened. */
+  exportOwnData(
+    tenantId: string,
+    userId: string,
+    from: string,
+    to: string,
+  ): Promise<Record<string, unknown>>;
+  requestDeletion(tenantId: string, userId: string): Promise<PrivacyRequestView>;
+  completePrivacyRequest(
+    tenantId: string,
+    id: string,
+    actor: Actor,
+  ): Promise<PrivacyRequestView | null>;
   /** With a manager, whether they manage it. Without, whether it exists in this company. */
   canSeeDepartment(tenantId: string, id: string, managerId: string | null): Promise<boolean>;
   departmentUsers(tenantId: string, id: string): Promise<DepartmentPerson[]>;
   departmentRequests(tenantId: string, id: string): Promise<RequestView[]>;
-  /** null: not a request from this department. Throws if decided, or if it's the decider's own. */
+  /**
+   * With a department, only a request from it. null: no such request. Throws if decided, or
+   * if it's the decider's own.
+   */
   decideRequest(
     tenantId: string,
-    departmentId: string,
+    departmentId: string | null,
     id: string,
     status: 'approved' | 'rejected',
     actor: Actor,
@@ -707,6 +756,7 @@ export class DbConsoleStore implements ConsoleStore {
     from: string,
     to: string,
     departmentId?: string,
+    userId?: string,
   ): Promise<UsageRow[]> {
     return this.inTenant(tenantId, async (tx) => {
       await tx.execute(
@@ -730,6 +780,7 @@ export class DbConsoleStore implements ConsoleStore {
           and(
             eq(d.tenantId, tenantId),
             departmentId ? eq(d.departmentId, departmentId) : undefined,
+            userId ? eq(d.userId, userId) : undefined,
             sql`${d.day} >= ${from}::date`,
             sql`${d.day} <= ${to}::date`,
           ),
@@ -816,7 +867,7 @@ export class DbConsoleStore implements ConsoleStore {
     );
   }
 
-  private async requestRows(tx: Tx, tenantId: string, departmentId: string, only?: string) {
+  private async requestRows(tx: Tx, tenantId: string, departmentId: string | null, only?: string) {
     const rows = await tx
       .select({
         id: schema.requests.id,
@@ -834,7 +885,7 @@ export class DbConsoleStore implements ConsoleStore {
       .where(
         and(
           eq(schema.requests.tenantId, tenantId),
-          eq(schema.users.departmentId, departmentId),
+          departmentId ? eq(schema.users.departmentId, departmentId) : undefined,
           only ? eq(schema.requests.id, only) : undefined,
         ),
       )
@@ -854,6 +905,246 @@ export class DbConsoleStore implements ConsoleStore {
     }));
   }
 
+  async allRequests(tenantId: string): Promise<RequestView[]> {
+    const rows = await this.inTenant(tenantId, (tx) => this.requestRows(tx, tenantId, null));
+    return rows.map((r) => r.view);
+  }
+
+  async ownRequests(tenantId: string, userId: string): Promise<OwnRequestView[]> {
+    const rows = await this.inTenant(tenantId, (tx) =>
+      tx
+        .select({
+          id: schema.requests.id,
+          type: schema.requests.type,
+          payload: schema.requests.payload,
+          status: schema.requests.status,
+          createdAt: schema.requests.createdAt,
+          decidedAt: schema.requests.decidedAt,
+        })
+        .from(schema.requests)
+        .where(and(eq(schema.requests.tenantId, tenantId), eq(schema.requests.userId, userId)))
+        .orderBy(desc(schema.requests.createdAt)),
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      reason: String((r.payload as { reason?: unknown } | null)?.reason ?? ''),
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+      decidedAt: r.decidedAt?.toISOString() ?? null,
+    }));
+  }
+
+  async createRequest(
+    tenantId: string,
+    userId: string,
+    type: string,
+    reason: string,
+  ): Promise<OwnRequestView> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [open] = await tx
+        .select({ n: count() })
+        .from(schema.requests)
+        .where(
+          and(
+            eq(schema.requests.tenantId, tenantId),
+            eq(schema.requests.userId, userId),
+            eq(schema.requests.status, 'pending'),
+          ),
+        );
+      if ((open?.n ?? 0) >= MAX_OPEN_REQUESTS) {
+        throw Errors.conflict('too_many_requests', 'You have many requests waiting already');
+      }
+      const [row] = await tx
+        .insert(schema.requests)
+        .values({ tenantId, userId, type, payload: { reason } })
+        .returning({
+          id: schema.requests.id,
+          status: schema.requests.status,
+          createdAt: schema.requests.createdAt,
+        });
+      return {
+        id: row!.id,
+        type,
+        reason,
+        status: row!.status,
+        createdAt: row!.createdAt.toISOString(),
+        decidedAt: null,
+      };
+    });
+  }
+
+  private privacyView(row: {
+    id: string;
+    type: string;
+    status: string;
+    createdAt: Date;
+    completedAt: Date | null;
+  }): PrivacyRequestView {
+    return {
+      id: row.id,
+      type: row.type,
+      status: row.status,
+      createdAt: row.createdAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null,
+    };
+  }
+
+  async ownPrivacyRequests(tenantId: string, userId: string): Promise<PrivacyRequestView[]> {
+    const rows = await this.inTenant(tenantId, (tx) =>
+      tx
+        .select()
+        .from(schema.privacyRequests)
+        .where(
+          and(
+            eq(schema.privacyRequests.tenantId, tenantId),
+            eq(schema.privacyRequests.userId, userId),
+          ),
+        )
+        .orderBy(desc(schema.privacyRequests.createdAt)),
+    );
+    return rows.map((r) => this.privacyView(r));
+  }
+
+  async allPrivacyRequests(tenantId: string) {
+    const rows = await this.inTenant(tenantId, (tx) =>
+      tx
+        .select({
+          request: schema.privacyRequests,
+          userName: schema.users.name,
+          userEmail: schema.users.email,
+        })
+        .from(schema.privacyRequests)
+        .innerJoin(schema.users, eq(schema.users.id, schema.privacyRequests.userId))
+        .where(eq(schema.privacyRequests.tenantId, tenantId))
+        .orderBy(desc(schema.privacyRequests.createdAt)),
+    );
+    return rows.map((r) => ({
+      ...this.privacyView(r.request),
+      userName: r.userName,
+      userEmail: r.userEmail,
+    }));
+  }
+
+  async exportOwnData(
+    tenantId: string,
+    userId: string,
+    from: string,
+    to: string,
+  ): Promise<Record<string, unknown>> {
+    const usage = await this.usage(tenantId, 'day', from, to, undefined, userId);
+    const requests = await this.ownRequests(tenantId, userId);
+    return this.inTenant(tenantId, async (tx) => {
+      const [account] = await tx
+        .select({
+          email: schema.users.email,
+          name: schema.users.name,
+          role: schema.users.role,
+          status: schema.users.status,
+          seatPlanCode: schema.users.seatPlanCode,
+          department: schema.departments.name,
+          createdAt: schema.users.createdAt,
+          lastSeenAt: schema.users.lastSeenAt,
+        })
+        .from(schema.users)
+        .leftJoin(schema.departments, eq(schema.departments.id, schema.users.departmentId))
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.id, userId)));
+      const [recorded] = await tx
+        .insert(schema.privacyRequests)
+        .values({ tenantId, userId, type: 'export', status: 'completed', completedAt: new Date() })
+        .returning({ id: schema.privacyRequests.id });
+      await this.audit(
+        tx,
+        tenantId,
+        { type: 'user', id: userId },
+        'privacy.export',
+        recorded!.id,
+        {},
+        'privacy_request',
+      );
+      const privacy = await tx
+        .select()
+        .from(schema.privacyRequests)
+        .where(
+          and(
+            eq(schema.privacyRequests.tenantId, tenantId),
+            eq(schema.privacyRequests.userId, userId),
+          ),
+        );
+      return {
+        account,
+        usageByDay: usage.map(({ key, standard, premium, total }) => ({
+          day: key,
+          standard,
+          premium,
+          total,
+        })),
+        requests,
+        privacyRequests: privacy.map((p) => this.privacyView(p)),
+      };
+    });
+  }
+
+  async requestDeletion(tenantId: string, userId: string): Promise<PrivacyRequestView> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [waiting] = await tx
+        .select()
+        .from(schema.privacyRequests)
+        .where(
+          and(
+            eq(schema.privacyRequests.tenantId, tenantId),
+            eq(schema.privacyRequests.userId, userId),
+            eq(schema.privacyRequests.type, 'delete'),
+            eq(schema.privacyRequests.status, 'pending'),
+          ),
+        );
+      if (waiting) return this.privacyView(waiting);
+      const [row] = await tx
+        .insert(schema.privacyRequests)
+        .values({ tenantId, userId, type: 'delete' })
+        .returning();
+      await this.audit(
+        tx,
+        tenantId,
+        { type: 'user', id: userId },
+        'privacy.delete_request',
+        row!.id,
+        {},
+        'privacy_request',
+      );
+      return this.privacyView(row!);
+    });
+  }
+
+  async completePrivacyRequest(
+    tenantId: string,
+    id: string,
+    actor: Actor,
+  ): Promise<PrivacyRequestView | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .update(schema.privacyRequests)
+        .set({ status: 'completed', completedAt: new Date() })
+        .where(
+          and(eq(schema.privacyRequests.tenantId, tenantId), eq(schema.privacyRequests.id, id)),
+        )
+        .returning();
+      if (!row) return null;
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'privacy.complete',
+        id,
+        { type: row.type },
+        'privacy_request',
+      );
+      return this.privacyView(row);
+    });
+  }
+
   async departmentRequests(tenantId: string, id: string): Promise<RequestView[]> {
     const rows = await this.inTenant(tenantId, (tx) => this.requestRows(tx, tenantId, id));
     return rows.map((r) => r.view);
@@ -861,7 +1152,7 @@ export class DbConsoleStore implements ConsoleStore {
 
   async decideRequest(
     tenantId: string,
-    departmentId: string,
+    departmentId: string | null,
     id: string,
     status: 'approved' | 'rejected',
     actor: Actor,

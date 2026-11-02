@@ -36,6 +36,7 @@ const ALL: Area[] = [
       'overview',
       'users',
       'departments',
+      'requests',
       'policies',
       'access',
       'identity',

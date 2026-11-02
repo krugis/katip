@@ -32,7 +32,8 @@
       "identity": "Kimlik",
       "usage": "Kullanım ve raporlar",
       "billing": "Faturalama",
-      "audit": "Denetim"
+      "audit": "Denetim",
+      "requests": "İstekler"
     },
     "department": {
       "overview": "Genel bakış",
@@ -156,7 +157,8 @@
     "unknown_department": "Departman bulunamadı",
     "policy_changed": "Bu politikayı az önce başka biri değiştirdi. Sayfayı yenileyip tekrar deneyin.",
     "already_decided": "Bu istek için zaten karar verildi.",
-    "own_request": "Kendi isteğiniz için karar veremezsiniz."
+    "own_request": "Kendi isteğiniz için karar veremezsiniz.",
+    "too_many_requests": "Bekleyen çok fazla isteğiniz var."
   },
   "policy": {
     "aliases": "Model seçenekleri",
@@ -250,5 +252,36 @@
       "rejected": "Reddedildi",
       "pending": "Bekliyor"
     }
+  },
+  "account": {
+    "requestType": "İstek türü",
+    "reason": "Neden gerekiyor?",
+    "reasonHelp": "Departman yöneticiniz ve şirket yöneticiniz bunu görür. Kişisel veya gizli bilgi yazmayın.",
+    "send": "Gönder",
+    "sent": "İsteğiniz gönderildi.",
+    "noRequests": "Henüz bir istek göndermediniz.",
+    "sessionsHelp": "Oturumlarınızı, parolanızı ve çok faktörlü doğrulamanızı hesap sayfanızdan yönetirsiniz.",
+    "openAccount": "Hesap sayfasını aç",
+    "exportTitle": "Verilerimi indir",
+    "exportHelp": "Hesap bilgileriniz, kullanımınız ve istekleriniz. Sohbetleriniz bu dosyada yer almaz: onları LibreChat’ten dışa aktarabilir veya şirket yöneticinizden isteyebilirsiniz.",
+    "exportButton": "Verilerimi indir",
+    "deleteTitle": "Hesabımın silinmesini iste",
+    "deleteHelp": "İsteğiniz şirket yöneticinize gider. Hesabınız hemen silinmez.",
+    "deleteButton": "Silinmesini iste",
+    "confirmDelete": "Hesabınızın silinmesi için şirket yöneticinize istek gönderilsin mi?",
+    "privacyType": {
+      "export": "Veri indirme",
+      "delete": "Silme isteği"
+    },
+    "privacyStatus": {
+      "pending": "Bekliyor",
+      "completed": "Tamamlandı"
+    },
+    "preferencesHelp": "Dil seçiminiz bu tarayıcıda saklanır.",
+    "privacyRequests": "Kişisel veri istekleri (KVKK)",
+    "privacyRequestsHelp": "KVKK başvuruları için yasal bir yanıt süresi olabilir. Silme işlemini yaptıktan sonra tamamlandı olarak işaretleyin.",
+    "noPrivacyRequests": "Bekleyen kişisel veri isteği yok.",
+    "markDone": "Tamamlandı olarak işaretle",
+    "otherRequests": "Diğer istekler"
   }
 }

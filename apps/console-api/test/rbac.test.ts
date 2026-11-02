@@ -45,6 +45,21 @@ const policyDocument = {
   residency: 'ANY_APPROVED' as const,
   pii: { mode: 'mask' as const },
 };
+const ownRequest = {
+  id: USER_ID,
+  type: 'model',
+  reason: 'r',
+  status: 'pending',
+  createdAt: new Date(0).toISOString(),
+  decidedAt: null,
+};
+const privacyRequest = {
+  id: USER_ID,
+  type: 'delete',
+  status: 'pending',
+  createdAt: new Date(0).toISOString(),
+  completedAt: null,
+};
 const accessView = {
   ipAllowlist: [],
   countries: ['TR'],
@@ -76,6 +91,14 @@ const store: ConsoleStore = {
   }),
   listDepartments: async () => [],
   usage: async () => [],
+  ownRequests: async () => [],
+  createRequest: async () => ownRequest,
+  allRequests: async () => [],
+  ownPrivacyRequests: async () => [],
+  allPrivacyRequests: async () => [],
+  exportOwnData: async () => ({}),
+  requestDeletion: async () => privacyRequest,
+  completePrivacyRequest: async () => privacyRequest,
   canSeeDepartment: async () => true,
   departmentUsers: async () => [],
   departmentRequests: async () => [],
@@ -196,6 +219,7 @@ const asRole = (role: Who): TokenOptions =>
 
 /** Expected status for each role, on own tenant and another tenant's. */
 const ADMIN_ONLY = { dept_manager: 403, user: 403, none: 403 };
+const EVERYONE = { tenant_admin: 200, dept_manager: 200, user: 200, none: 200 };
 const MANAGERS = { tenant_admin: 200, dept_manager: 200, user: 403, none: 403 };
 const OTHER_TENANT = { tenant_admin: 404, dept_manager: 404, user: 404, none: 404 };
 const MATRIX: {
@@ -331,6 +355,74 @@ const MATRIX: {
     body: { status: 'approved' },
     url: (t) => `/api/v1/tenants/${t}/departments/${USER_ID}/requests/${USER_ID}`,
     own: { provider_admin: 200, ...MANAGERS },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/me/usage',
+    url: () => '/api/v1/me/usage',
+    own: { provider_admin: 403, ...EVERYONE },
+  },
+  {
+    route: '/api/v1/me/requests',
+    url: () => '/api/v1/me/requests',
+    own: { provider_admin: 403, ...EVERYONE },
+  },
+  {
+    route: '/api/v1/me/requests',
+    method: 'POST',
+    body: { type: 'model', reason: 'r' },
+    url: () => '/api/v1/me/requests',
+    own: {
+      provider_admin: 403,
+      tenant_admin: 201,
+      dept_manager: 201,
+      user: 201,
+      none: 201,
+    },
+  },
+  {
+    route: '/api/v1/me/privacy',
+    url: () => '/api/v1/me/privacy',
+    own: { provider_admin: 403, ...EVERYONE },
+  },
+  {
+    route: '/api/v1/me/privacy/export',
+    method: 'POST',
+    url: () => '/api/v1/me/privacy/export',
+    own: { provider_admin: 403, ...EVERYONE },
+  },
+  {
+    route: '/api/v1/me/privacy/delete',
+    method: 'POST',
+    url: () => '/api/v1/me/privacy/delete',
+    own: {
+      provider_admin: 403,
+      tenant_admin: 201,
+      dept_manager: 201,
+      user: 201,
+      none: 201,
+    },
+  },
+  {
+    route: '/api/v1/tenants/:tid/requests',
+    url: (t) => `/api/v1/tenants/${t}/requests`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/requests/:rid',
+    method: 'PATCH',
+    body: { status: 'approved' },
+    url: (t) => `/api/v1/tenants/${t}/requests/${USER_ID}`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/privacy-requests/:pid',
+    method: 'PATCH',
+    body: { status: 'completed' },
+    url: (t) => `/api/v1/tenants/${t}/privacy-requests/${USER_ID}`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
     other: { provider_admin: 200, ...OTHER_TENANT },
   },
   {
