@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { migrate as drizzleMigrate } from 'drizzle-orm/postgres-js/migrator';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { isCliEntry } from './cli-entry.js';
 import { PROVIDER_ROLE_SQL, TENANT_OWNED_TABLES, tenantRlsSql } from './rls.js';
 import * as schema from './schema.js';
 
@@ -37,7 +38,7 @@ export async function migrate(databaseUrl: string): Promise<string[]> {
 }
 
 // CLI entry (pnpm db:migrate). DATABASE_URL or GOVERNANCE_DATABASE_URL.
-if (process.argv[1] && /migrate\.(ts|js|mjs)$/.test(process.argv[1])) {
+if (isCliEntry(process.argv[1], 'migrate')) {
   const url = process.env['DATABASE_URL'] ?? process.env['GOVERNANCE_DATABASE_URL'];
   if (!url) {
     console.error('DATABASE_URL is required');

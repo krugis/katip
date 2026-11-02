@@ -41,6 +41,8 @@ export interface GatewayDeps {
   usage: UsageSink;
   catalog?: ModelEntry[];
   rules?: RouterRule[];
+  /** Dynamic catalog/rules source (DB); takes precedence over static arrays. */
+  catalogStore?: { getCatalog(): Promise<ModelEntry[]>; getRules(): Promise<RouterRule[]> };
   upstreamTimeoutMs?: number;
   logger?: Logger;
   fetchImpl?: typeof fetch;
@@ -88,8 +90,12 @@ function textOf(messages: ChatMessage[]): string {
 
 export function buildGateway(deps: GatewayDeps): FastifyInstance {
   const log = deps.logger ?? createLogger('policy-gateway');
-  const catalog = deps.catalog ?? DEFAULT_CATALOG;
-  const rules = deps.rules ?? DEFAULT_RULES;
+  const staticCatalog = deps.catalog ?? DEFAULT_CATALOG;
+  const staticRules = deps.rules ?? DEFAULT_RULES;
+  const getCatalog = async (): Promise<ModelEntry[]> =>
+    deps.catalogStore ? await deps.catalogStore.getCatalog() : staticCatalog;
+  const getRules = async (): Promise<RouterRule[]> =>
+    deps.catalogStore ? await deps.catalogStore.getRules() : staticRules;
   const doFetch = deps.fetchImpl ?? fetch;
   const base = deps.litellmBaseUrl.replace(/\/$/, '');
 
@@ -164,8 +170,8 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
           reasoningHint: false,
           premiumQuotaAvailable: false,
         },
-        rules,
-        catalog,
+        await getRules(),
+        await getCatalog(),
         ctx.tenant.policy,
       );
       q = await deps.quota.reserve(ctx.tenant, quotaClassOf(routed.class), estimate);
@@ -277,13 +283,13 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
             reasoningHint: header(req, 'x-reasoning') === 'high',
             premiumQuotaAvailable: await deps.quota.available(ctx.tenant, 'premium'),
           },
-          rules,
-          catalog,
+          await getRules(),
+          await getCatalog(),
           ctx.tenant.policy,
         );
       }
       // Explicit model ids only when the tenant allows user model choice.
-      const m = catalog.find((c) => c.id === requested);
+      const m = (await getCatalog()).find((c) => c.id === requested);
       const allowed =
         m &&
         m.enabled &&

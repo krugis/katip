@@ -3,6 +3,7 @@
 // from LLD-03 §4, and a `demo` tenant with 3 users for local dev.
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import { isCliEntry } from './cli-entry.js';
 import * as schema from './schema.js';
 
 export interface SeedResult {
@@ -314,7 +315,7 @@ export async function seedFromUrl(databaseUrl: string): Promise<SeedResult> {
 }
 
 // CLI entry (pnpm db:seed).
-if (process.argv[1] && /seed\.(ts|js|mjs)$/.test(process.argv[1])) {
+if (isCliEntry(process.argv[1], 'seed')) {
   const url = process.env['DATABASE_URL'] ?? process.env['GOVERNANCE_DATABASE_URL'];
   if (!url) {
     console.error('DATABASE_URL is required');

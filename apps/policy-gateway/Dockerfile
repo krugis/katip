@@ -10,6 +10,7 @@ COPY apps/policy-gateway/package.json apps/policy-gateway/
 COPY packages/shared/package.json packages/shared/
 COPY packages/pii/package.json packages/pii/
 COPY packages/policy-engine/package.json packages/policy-engine/
+COPY packages/db/package.json packages/db/
 RUN pnpm install --frozen-lockfile
 COPY packages packages
 COPY apps apps

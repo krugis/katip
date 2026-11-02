@@ -145,6 +145,9 @@ export function parseEnvFile(text) {
 
 export const genSecret = (bytes = 32) => randomBytes(bytes).toString('base64url');
 
+/** Gateway key format (LLD-02 §5): sk-sme-t-<secret>; secret's first 8 chars = lookup prefix. */
+export const genGatewayKey = () => `sk-sme-t-${randomBytes(24).toString('base64url')}`;
+
 /**
  * Ensure infra/env/katip.env exists with every key from the template.
  * Existing values are NEVER overwritten. AUTO values are filled once.
@@ -158,7 +161,7 @@ export function ensureEnvFile(autoKeys, derive) {
   let changed = false;
   for (const k of Object.keys(out)) {
     if (autoKeys.has(k) && (!out[k] || out[k] === 'AUTO')) {
-      out[k] = genSecret(32);
+      out[k] = k === 'KATIP_DEMO_GATEWAY_KEY' ? genGatewayKey() : genSecret(32);
       changed = true;
     }
   }
