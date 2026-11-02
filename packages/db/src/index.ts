@@ -2,4 +2,4 @@
 export * from './schema.js';
 export { migrate, migrateWithClient } from './migrate.js';
 export { seed, type SeedOptions } from './seed.js';
-export { TENANT_OWNED_TABLES, tenantRlsSql, PROVIDER_ROLE_SQL } from './rls.js';
+export { GATEWAY_ROLE_SQL, TENANT_OWNED_TABLES, tenantRlsSql, PROVIDER_ROLE_SQL } from './rls.js';

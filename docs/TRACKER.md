@@ -74,6 +74,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-58 | Conversation placeholders: the same value gets the same placeholder across requests, with nothing stored | 03 | P0 | review | P1-57 | A placeholder from earlier tool arguments still resolves on a later request | Keyed hash of tenant, conversation and value (`PII_TOKEN_KEY`); no personal data in Valkey (#10) |
 | P1-59 | Tenant stores and secrets: tenant list in config, own Mongo login, own Meilisearch, own secrets | 01, 07 | P0 | review | P1-19 | Two tenants install from one config; each Mongo login is limited to its own database | LibreChat has no index prefix setting and its sync deletes documents missing from its own database, so one shared Meilisearch would lose other tenants' search data |
 | P1-60 | Per-tenant networks and a Valkey password | 01, 10 | P0 | review | P1-59 | A tenant's LibreChat reaches only Traefik, the gateway, Mongo and its own search | Subnets derived from the slug under `project.tenant_network_prefix`; internet stays open because users can add MCP tools |
+| P1-61 | Gateway runs as a limited role, so row-level security applies | 03, 05 | P0 | review | P1-18 | A query with no tenant filter can't cross tenants on the gateway's own connection | Was connecting as a superuser, which bypasses RLS; tests now connect as `katip_gateway` |
 
 ### M2 Governance console and portal (S4–S5)
 

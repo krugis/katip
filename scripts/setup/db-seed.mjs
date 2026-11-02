@@ -20,6 +20,13 @@ await migrate(url);
 const client = postgres(url, { max: 1 });
 const d = drizzle(client, { schema: dbPkg });
 
+// The role the gateway runs as: bound by RLS, unlike the admin role used here.
+const gatewayPassword = process.env.KATIP_GATEWAY_DB_PASSWORD ?? '';
+if (!/^[\w-]{32,}$/.test(gatewayPassword)) {
+  throw new Error('KATIP_GATEWAY_DB_PASSWORD is missing or has the wrong format');
+}
+await client.unsafe(`ALTER ROLE katip_gateway PASSWORD '${gatewayPassword}'`);
+
 for (const { tenant, limits, pii, smokeEmail } of tenants) {
   await seed(d, { models, tenant });
 

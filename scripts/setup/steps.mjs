@@ -27,6 +27,7 @@ export const AUTO_KEYS = new Set([
   'MOCK_LLM_KEY',
   'KATIP_PII_TOKEN_KEY',
   'VALKEY_PASSWORD',
+  'KATIP_GATEWAY_DB_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -639,6 +640,7 @@ export const steps = [
       // image (node + our built packages) on the backend network.
       const env = {
         DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
+        KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
         KATIP_TENANT_KEYS: JSON.stringify(
           Object.fromEntries(
             ctx.config.tenants.map((t) => [t.slug, tenantSecret(ctx, t, 'GATEWAY_KEY')]),
@@ -652,6 +654,8 @@ export const steps = [
           backendNetwork(ctx.config),
           '-e',
           'DATABASE_URL',
+          '-e',
+          'KATIP_GATEWAY_DB_PASSWORD',
           '-e',
           'KATIP_TENANT_KEYS',
           '-e',
