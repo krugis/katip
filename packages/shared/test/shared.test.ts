@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { keyPrefix } from '../src/gateway-key.js';
 import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { pino } from 'pino';
@@ -73,5 +74,16 @@ describe('AppError', () => {
       quotaClass: 'premium',
     });
     expect(e.toOpenAIError().error.type).toBe('rate_limit_error');
+  });
+});
+
+describe('keyPrefix', () => {
+  it('takes the first 8 characters of the secret, even when it contains a dash', () => {
+    expect(keyPrefix('sk-sme-t-ab-cd_efghijkl')).toBe('ab-cd_ef');
+    expect(keyPrefix('sk-sme-t--abcdefghij')).toBe('-abcdefg');
+  });
+
+  it('rejects other formats', () => {
+    expect(keyPrefix('sk-other-t-abc')).toBeNull();
   });
 });
