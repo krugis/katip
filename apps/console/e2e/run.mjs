@@ -188,6 +188,15 @@ const within = async (seconds, condition) => {
   return null;
 };
 
+const withinAsync = async (seconds, condition) => {
+  const started = Date.now();
+  while (Date.now() - started < seconds * 1000) {
+    if (await condition()) return Math.round((Date.now() - started) / 1000);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return null;
+};
+
 /** The link in the one invite this person should have. */
 const inviteLink = (email) => {
   const found = mailpit(`/api/v1/search?query=to:${email}`);
@@ -489,6 +498,57 @@ try {
   await admin.getByTestId('policy-saved').waitFor();
   check((await within(30, () => chat().status === 200)) !== null, 'masking comes back');
   await shot(admin, 'policies');
+
+  console.log('access rules, through to real Traefik');
+  // In a real tab, which is what the rule has to stop, and which trusts the dev certificate.
+  const probe = await adminContext.newPage();
+  const chatStatus = async () =>
+    (await probe.goto(`https://${slug}.${base}/health`))?.status() ?? 0;
+  await admin.getByTestId('nav-tenant-access').click();
+  await admin.getByTestId('access-form').waitFor();
+  const myIp = (await admin.getByTestId('caller-ip').textContent()).trim();
+  check(myIp.length > 0, `the screen shows the caller's address (${myIp})`);
+  check((await admin.getByTestId('mfa-note').count()) === 1, 'MFA is shown as always on');
+  check((await chatStatus()) === 200, 'chat is open at first');
+  await admin.getByTestId('ip-allowlist').fill('not an address');
+  await admin.getByTestId('access-save').click();
+  await admin.getByTestId('form-error').waitFor();
+  check(true, 'a bad address is refused');
+  const outside = '203.0.113.0/24';
+  await admin.getByTestId('ip-allowlist').fill(outside);
+  admin.once('dialog', (d) => void d.dismiss());
+  await admin.getByTestId('access-save').click();
+  await admin.waitForTimeout(1000);
+  check(
+    (await chatStatus()) === 200,
+    'leaving out your own address asks first, and "no" keeps it open',
+  );
+  admin.once('dialog', (d) => void d.accept());
+  await admin.getByTestId('access-save').click();
+  await admin.getByTestId('access-saved').waitFor();
+  const closed = await withinAsync(60, async () => (await chatStatus()) === 403);
+  check(closed !== null, `an address not on the list is blocked within 60 s (took ${closed} s)`);
+  check(await admin.getByTestId('access-form').isVisible(), 'the console still works, to undo it');
+  await shot(admin, 'access-rules');
+  const auditRow = sql(
+    `select a.actor_type, a.details->>'ipRanges' from audit_log a join tenants t on t.id = a.tenant_id where t.slug = '${slug}' and a.action = 'access_rules.update' order by a.ts desc limit 1`,
+  );
+  check(auditRow === 'user|1', 'the audit log records who changed it');
+  await admin.getByTestId('ip-allowlist').fill(myIp);
+  await admin.getByTestId('access-save').click();
+  await admin.getByTestId('access-saved').waitFor();
+  const reopened = await withinAsync(60, async () => (await chatStatus()) === 200);
+  check(reopened !== null, `an address on the list gets in within 60 s (took ${reopened} s)`);
+  await admin.getByTestId('session-idle').fill('15');
+  await admin.getByTestId('session-max').fill('8');
+  await admin.getByTestId('ip-allowlist').fill('');
+  await admin.getByTestId('access-save').click();
+  await admin.getByTestId('access-saved').waitFor();
+  const lcClient = (await api('GET', `${R}/clients?clientId=lc-${slug}`))[0];
+  check(
+    lcClient.attributes['client.session.idle.timeout'] === '900',
+    'session limits reach Keycloak',
+  );
 
   const token = await tokenOf(admin);
   const tid = sql(`select id from tenants where slug = '${slug}'`);

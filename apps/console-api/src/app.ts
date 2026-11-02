@@ -23,6 +23,7 @@ import type { ConsoleStore } from './stores.js';
 import { registerUserRoutes } from './users.js';
 import { registerCompanyRoutes } from './company.js';
 import { registerPolicyRoutes } from './policy.js';
+import { registerAccessRoutes } from './access.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -198,6 +199,13 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
 
   registerUserRoutes(app as unknown as FastifyInstance, deps, API_PREFIX, callerOf);
   registerCompanyRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
+  registerAccessRoutes(
+    app as unknown as FastifyInstance,
+    deps.store,
+    deps.identity,
+    API_PREFIX,
+    callerOf,
+  );
   registerPolicyRoutes(
     app as unknown as FastifyInstance,
     deps.store,

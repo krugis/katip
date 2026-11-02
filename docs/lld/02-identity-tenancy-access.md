@@ -86,18 +86,18 @@ Rules are enforced in `console-api` from the token's roles and organization. `pr
 
 | Rule | Storage (`access_rules`) | Enforcement |
 | --- | --- | --- |
-| IP allowlist (CIDRs) | `ip_allowlist cidr[]` | Traefik `ipAllowList` middleware `<slug>-ipallow` in the file provider (written by console-api through the provisioner); source IP from Cloudflare `CF-Connecting-IP` via Traefik `forwardedHeaders.trustedIPs` = Cloudflare ranges |
+| IP allowlist (CIDRs) | `ip_allowlist text[]` | Traefik `ipAllowList` middleware `<slug>-ipallow`, which Traefik polls every 5 s from `console-api` (`/internal/traefik`, not routed publicly). No files or Docker access are needed. If Traefik can't load it when it starts, the company's route answers 404: it fails closed. Source IP from Cloudflare `CF-Connecting-IP` via Traefik `forwardedHeaders.trustedIPs` = Cloudflare ranges (P1-44) |
 | Allowed countries | `countries char(2)[]` (default `{TR}` + EU) | Cloudflare WAF custom rule per hostname (Cloudflare API from provisioner); the gateway also checks `CF-IPCountry` as defence in depth |
-| Require MFA | `mfa_required bool` (default true) | Keycloak flow (local accounts); for IdP users, a policy check of `amr`/`acr` claims (best effort) |
-| Session idle / max | `session_idle_min`, `session_max_h` | Keycloak client session settings for `lc-<slug>` |
+| Require MFA | `mfa_required bool` (always true) | Keycloak flow (local accounts), for the whole realm. The console shows it as always on, and nothing can turn it off per company. For IdP users, a policy check of `amr`/`acr` claims (best effort, not built) |
+| Session idle / max | `session_idle_min`, `session_max_h` | Keycloak client session settings for `lc-<slug>`, through the identity service. Up to the realm's 30 minutes and 10 hours, because a client can only shorten them |
 | Trusted devices (phase 2) | `device_trust enum(off, cf_access, mtls)` | Cloudflare Access application per tenant, or Traefik mTLS |
 
 Change flow:
 
-1. console-api validates the change (CIDR syntax; the admin must not lock themselves out, so the caller's IP must match unless `force`).
-2. console-api writes the change to the DB and the audit log.
-3. It enqueues the job `access.apply`; the provisioner applies the Traefik file and the Cloudflare rule.
-4. The new rule is live in under 60 seconds.
+1. console-api validates the change: CIDR syntax, and the caller's own address must be on a non-empty list, unless `force` says they've been warned.
+2. In one transaction, it sets Keycloak's session limits, writes the rules and the audit log, which holds counts rather than addresses. If Keycloak fails, nothing changes.
+3. Traefik picks up the list within 5 seconds, so the new rule is live in well under 60. The allowlist covers the company's LibreChat. The console stays reachable, so an admin can undo a mistake.
+4. Countries are stored, and apply once Cloudflare is connected (P1-29).
 
 ## 7. Admin plane access (our staff)
 

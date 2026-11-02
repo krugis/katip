@@ -12,6 +12,7 @@ export interface IdentityClient {
   sendInvite(slug: string, email: string): Promise<void>;
   setRole(slug: string, email: string, role: TenantRole): Promise<void>;
   setEnabled(slug: string, email: string, enabled: boolean): Promise<void>;
+  setSessionLimits(slug: string, idleSeconds: number, maxSeconds: number): Promise<void>;
 }
 
 export class HttpIdentityClient implements IdentityClient {
@@ -55,6 +56,10 @@ export class HttpIdentityClient implements IdentityClient {
 
   async setRole(slug: string, email: string, role: TenantRole): Promise<void> {
     await this.call('PUT', `/v1/tenants/${slug}/users/role`, { email, role });
+  }
+
+  async setSessionLimits(slug: string, idleSeconds: number, maxSeconds: number): Promise<void> {
+    await this.call('PUT', `/v1/tenants/${slug}/session-limits`, { idleSeconds, maxSeconds });
   }
 
   async setEnabled(slug: string, email: string, enabled: boolean): Promise<void> {

@@ -198,5 +198,19 @@
     "residencyAddon": "Choosing a data location comes with the KVKK add-on.",
     "save": "Save",
     "saved": "Saved. It takes effect within 30 seconds."
+  },
+  "access": {
+    "ipAllowlist": "Allowed IP addresses",
+    "ipHelp": "One address or range per line. Left empty, access is open from anywhere. This limits access to chat, and takes effect within seconds.",
+    "yourAddress": "Your address:",
+    "countries": "Allowed countries",
+    "countriesHelp": "Two-letter country codes. They are saved, but country limits only apply once Cloudflare is connected.",
+    "idle": "Idle time (minutes)",
+    "max": "Longest session (hours)",
+    "mfa": "Multi-factor sign-in is always on",
+    "mfaHelp": "Multi-factor sign-in is required on company accounts, and can’t be turned off.",
+    "save": "Save",
+    "saved": "Saved. It takes effect within seconds.",
+    "confirmLockOut": "This list leaves out your own address, so you may lose access to chat. Save it anyway?"
   }
 }

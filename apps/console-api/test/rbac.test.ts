@@ -45,6 +45,13 @@ const policyDocument = {
   residency: 'ANY_APPROVED' as const,
   pii: { mode: 'mask' as const },
 };
+const accessView = {
+  ipAllowlist: [],
+  countries: ['TR'],
+  mfaRequired: true,
+  sessionIdleMin: 30,
+  sessionMaxH: 10,
+};
 const policyView = { policy: policyDocument, version: 1, kvkkAddon: false, catalog: [] };
 const department = {
   id: USER_ID,
@@ -58,6 +65,7 @@ const identity: IdentityClient = {
   sendInvite: async () => undefined,
   setRole: async () => undefined,
   setEnabled: async () => undefined,
+  setSessionLimits: async () => undefined,
 };
 const store: ConsoleStore = {
   overview: async () => ({
@@ -68,6 +76,9 @@ const store: ConsoleStore = {
   }),
   listDepartments: async () => [],
   policy: async () => policyView,
+  accessRules: async () => accessView,
+  saveAccessRules: async () => accessView,
+  allIpAllowlists: async () => [],
   savePolicy: async () => policyView,
   createDepartment: async () => department,
   updateDepartment: async () => department,
@@ -250,6 +261,20 @@ const MATRIX: {
     method: 'PUT',
     body: { policy: policyDocument, version: 1 },
     url: (t) => `/api/v1/tenants/${t}/policy`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/access-rules',
+    url: (t) => `/api/v1/tenants/${t}/access-rules`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/access-rules',
+    method: 'PUT',
+    body: { ipAllowlist: [], countries: ['TR'], sessionIdleMin: 30, sessionMaxH: 10 },
+    url: (t) => `/api/v1/tenants/${t}/access-rules`,
     own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
     other: { provider_admin: 200, ...OTHER_TENANT },
   },

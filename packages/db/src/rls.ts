@@ -114,6 +114,8 @@ GRANT INSERT ON users, audit_log, departments, department_managers TO katip_cons
 GRANT UPDATE (name, budget_usd_micro) ON departments TO katip_console;
 GRANT DELETE ON department_managers TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
+GRANT SELECT, INSERT ON access_rules TO katip_console;
+GRANT UPDATE (ip_allowlist, countries, session_idle_min, session_max_h, updated_at) ON access_rules TO katip_console;
 GRANT SELECT, INSERT ON policy_history TO katip_console;
 -- Without prices: those are our cost.
 GRANT SELECT (id, display_name, class, region, data_policy, enabled) ON model_catalog TO katip_console;

@@ -1,6 +1,5 @@
-# Dynamic middlewares referenced by routers (LLD-01 §2.2, LLD-02 §6).
-# Per-tenant ipallow middlewares are written here by the provisioner; dev
-# default is pass-through 0.0.0.0/0 until access rules land (P1-28).
+# Dynamic middlewares referenced by routers (LLD-01 §2.2). Each company's IP allowlist
+# comes from console-api, over Traefik's HTTP provider (LLD-02 §6).
 
 http:
   middlewares:
