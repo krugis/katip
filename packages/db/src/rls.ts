@@ -53,6 +53,10 @@ GRANT USAGE ON SCHEMA public TO katip_provider;
 GRANT SELECT ON plans, tenants, users, gateway_keys TO katip_provider;
 GRANT INSERT ON tenants, subscriptions, seats, tenant_policies, access_rules, tenant_limits, users, gateway_keys, audit_log TO katip_provider;
 GRANT UPDATE (revoked_at) ON gateway_keys TO katip_provider;
+GRANT UPDATE (status) ON tenants TO katip_provider;
+GRANT UPDATE (email, name, keycloak_id, status) ON users TO katip_provider;
+GRANT SELECT (tenant_id), UPDATE (payload) ON requests TO katip_provider;
+GRANT SELECT (tenant_id), UPDATE (file_url) ON privacy_requests TO katip_provider;
 GRANT SELECT, INSERT, UPDATE ON jobs TO katip_provider;
 -- audit_log is append-only for app roles (LLD-05 §2): revoke UPDATE/DELETE from PUBLIC.
 REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC;`;

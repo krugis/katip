@@ -109,7 +109,8 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
   - chats: tenant-defined (default 12 months);
   - usage events: 24 months;
   - audit log: 5 years;
-  - backups: 30 days.
+  - backups: 30 days;
+  - a deleted tenant: purged after 30 days, when its chats and logins are destroyed and what must stay is anonymised (LLD-07 §2a).
 
 ## 9. Acceptance criteria
 

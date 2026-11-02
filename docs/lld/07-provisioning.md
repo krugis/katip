@@ -52,6 +52,23 @@ Each step is idempotent, checks for existing state, and records progress in the 
 
 Rollback: if a tenant's first attempt fails before the invite, everything it made is removed in reverse: containers and volumes, Mongo database and login, Keycloak client and organization, governance rows, network, files. The job ends `failed` with the step name, and a `tenant.rollback` job records why. The rows go through the admin role from the host, because the provisioner's role can't delete anything. Failure on a tenant that already existed changes nothing, and a tenant with users is never rolled back, whatever the caller believes. If an undo step fails too, for instance with Keycloak down, the secrets file stays, and running the same command again finishes the tenant.
 
+## 2a. Suspend, resume, delete and purge (P1-23)
+
+| Command | What happens | Data |
+| --- | --- | --- |
+| `tenant:suspend` | Status `suspended`, containers stopped. The gateway refuses it within a minute, its key cache being 60 s | Kept |
+| `tenant:resume` | Status `active`, containers started, smoke test. Also restores a deleted tenant until its purge starts | Kept |
+| `tenant:delete --confirm <slug>` | Status `deleted`, containers stopped, a `tenant.purge` job due in 30 days. Refuses a tenant listed in the config | Kept for the 30 days |
+| `tenant:purge-due` | Runs the purges whose wait is over | See below |
+
+**A purge destroys:** the tenant's containers and volumes (chats' search index, uploads), its Mongo database and login, its Keycloak organization and client, members who belong to no other company, its network, and its files and secrets.
+
+**A purge keeps**, for the periods in LLD-10 §8: `usage_events`, invoices and the audit log. So they stay usable but say nothing about who it was, the tenant's `users` rows are anonymised (email, name, Keycloak id), `requests.payload` is emptied and export links in `privacy_requests` are cleared. Its gateway keys are revoked. The owner decided this on 2 Nov 2026; counsel should confirm it's enough for KVKK (P1-49). IP addresses in the audit log stay for its 5 years, and backups age out after 30 days.
+
+**A slug is never reused.** The tenant's row stays with status `deleted`, so old links and audit entries can't appear to belong to a new company.
+
+The purge has two stages so a resume can't race it: once it starts, a tenant can't be restored. If it stops part-way, a re-run finishes it. Nothing runs `tenant:purge-due` on a schedule yet (P1-65).
+
 ## 3. librechat.tmpl.yaml (key parts)
 
 ```yaml
@@ -86,7 +103,7 @@ Verify the exact env names on the pinned version.
   - pulls the image;
   - recreates containers one tenant at a time;
   - health-checks each tenant and stops on the first failure.
-- A Mongo backup snapshot runs before every major LibreChat upgrade.
+- A Mongo backup snapshot runs before every major LibreChat upgrade. **Not yet:** backups come with P1-42, so do this by hand until then.
 
 ## 5. Resource notes
 
@@ -97,5 +114,5 @@ Verify the exact env names on the pinned version.
 
 - `tenant:create` on the dev stack completes in under 3 minutes and the tenant admin can log in.
 - Running `tenant:create` twice with the same slug is a no-op (idempotent), with exit code 0 and the message "already exists".
-- `tenant:delete` followed by the purge job removes the Mongo database, the Keycloak org and client, the LiteLLM team, DNS and the compose project. The audit trail remains.
+- `tenant:delete` followed by the purge job removes the Mongo database, the Keycloak org and client, and the compose project, and later the LiteLLM team (P1-64) and DNS. The audit trail remains.
 - A failed step 5 leaves no orphaned Keycloak client or Mongo database (compensation tested).

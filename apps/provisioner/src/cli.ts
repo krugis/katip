@@ -6,6 +6,14 @@ import { MongoClient } from 'mongodb';
 import { z } from 'zod';
 import { KeycloakAdmin } from './keycloak.js';
 import {
+  deleteTenant,
+  finishPurge,
+  purgesDue,
+  resumeTenant,
+  startPurge,
+  suspendTenant,
+} from './lifecycle.js';
+import {
   createTenant,
   finishTenant,
   ProvisionError,
@@ -22,11 +30,22 @@ const ConfigSchema = z.object({
   KEYCLOAK_CLIENT_ID: z.string().min(1),
   KEYCLOAK_CLIENT_SECRET: z.string().min(1),
   MONGO_ROOT_URI: z.string().min(1),
-  TENANT_ACTION: z.enum(['create', 'finish', 'rollback']),
+  TENANT_ACTION: z.enum([
+    'create',
+    'finish',
+    'rollback',
+    'suspend',
+    'resume',
+    'delete',
+    'purges-due',
+    'purge-start',
+    'purge-finish',
+  ]),
   TENANT_INPUT: z.string().min(1),
-  TENANT_GATEWAY_KEY: z.string().min(1),
-  TENANT_OIDC_CLIENT_SECRET: z.string().min(1),
-  TENANT_MONGO_PASSWORD: z.string().min(1),
+  /** Only for the stages that set a tenant up. */
+  TENANT_GATEWAY_KEY: z.string().default(''),
+  TENANT_OIDC_CLIENT_SECRET: z.string().default(''),
+  TENANT_MONGO_PASSWORD: z.string().default(''),
   /** finish: what the create stage changed, for the audit entry. */
   TENANT_PRIOR_STEPS: z.string().default('[]'),
   /** rollback: why it's happening, for the job. */
@@ -81,7 +100,19 @@ const deps: ProvisionDeps = {
 
 try {
   const input: unknown = JSON.parse(config.TENANT_INPUT);
-  if (config.TENANT_ACTION === 'rollback') {
+  const { slug } = z.object({ slug: z.string() }).parse(input);
+  const lifecycle: Record<string, () => Promise<unknown>> = {
+    suspend: () => suspendTenant(deps, slug),
+    resume: () => resumeTenant(deps, slug),
+    delete: () => deleteTenant(deps, slug),
+    'purges-due': async () => ({ slugs: await purgesDue(deps) }),
+    'purge-start': () => startPurge(deps, slug),
+    'purge-finish': () => finishPurge(deps, slug),
+  };
+  const action = lifecycle[config.TENANT_ACTION];
+  if (action) {
+    console.log(`provision-result=${JSON.stringify((await action()) ?? {})}`);
+  } else if (config.TENANT_ACTION === 'rollback') {
     await rollbackTenant(deps, input, config.TENANT_FAILED_STEP);
     console.log('provision-result={}');
   } else {

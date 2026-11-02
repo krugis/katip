@@ -26,7 +26,13 @@
     "dev:down": "node scripts/setup/main.mjs down",
     "dev:status": "node scripts/setup/main.mjs status",
     "dev:rollback": "node scripts/setup/main.mjs rollback",
-    "tenant:create": "node scripts/setup/tenant-cli.mjs"
+    "tenant:create": "node scripts/setup/tenant-cli.mjs create",
+    "tenant:suspend": "node scripts/setup/tenant-cli.mjs suspend",
+    "tenant:resume": "node scripts/setup/tenant-cli.mjs resume",
+    "tenant:delete": "node scripts/setup/tenant-cli.mjs delete",
+    "tenant:purge-due": "node scripts/setup/tenant-cli.mjs purge-due",
+    "tenant:upgrade": "node scripts/setup/tenant-cli.mjs upgrade",
+    "test:lifecycle": "node scripts/setup/lifecycle-e2e.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

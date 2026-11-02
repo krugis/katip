@@ -40,6 +40,8 @@ export interface IdentityAdmin {
   sendInvite(userId: string, input: TenantInput): Promise<void>;
   /** Undoes a failed first attempt. Leaves anyone who has already logged in. */
   removeTenantIdentity(input: TenantInput): Promise<void>;
+  /** The purge: organization, client, and members who belong nowhere else. */
+  purgeTenantIdentity(slug: string): Promise<void>;
 }
 
 /** MongoDB, as this needs it. True if the login was created. */

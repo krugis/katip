@@ -3,7 +3,7 @@
 // here, so no tenant context exists yet and it bypasses RLS by design (LLD-05 §1).
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { TenantInput } from './provision.js';
@@ -11,6 +11,14 @@ import type { TenantInput } from './provision.js';
 /** Turkey and the EU (LLD-07 step 1). */
 const DEFAULT_COUNTRIES =
   'TR AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE'.split(' ');
+
+export interface PurgeJob {
+  jobId: string;
+  status: string;
+  purgeAfter: string;
+}
+
+const PURGE_JOB = 'tenant.purge';
 
 export interface ProvisionerStore {
   ensureTenant(input: TenantInput): Promise<{ tenantId: string; created: boolean }>;
@@ -21,6 +29,20 @@ export interface ProvisionerStore {
   audit(tenantId: string, slug: string, steps: string[]): Promise<void>;
   tenantId(slug: string): Promise<string | null>;
   tenantHasUsers(slug: string): Promise<boolean>;
+  tenantState(slug: string): Promise<{ id: string; status: string } | null>;
+  setTenantStatus(id: string, status: string): Promise<void>;
+  auditAction(
+    tenantId: string,
+    action: string,
+    slug: string,
+    details?: Record<string, unknown>,
+  ): Promise<void>;
+  latestPurge(slug: string): Promise<PurgeJob | null>;
+  schedulePurge(tenantId: string, slug: string, purgeAfter: string): Promise<void>;
+  cancelPurge(jobId: string): Promise<void>;
+  markPurgeRunning(jobId: string): Promise<void>;
+  duePurges(now: Date): Promise<string[]>;
+  anonymiseTenant(tenantId: string): Promise<void>;
   startJob(slug: string, type: string): Promise<string>;
   jobStep(jobId: string, step: string): Promise<void>;
   jobTenant(jobId: string, tenantId: string): Promise<void>;
@@ -48,11 +70,13 @@ export class DbProvisionerStore implements ProvisionerStore {
   }
 
   async ensureTenant(input: TenantInput): Promise<{ tenantId: string; created: boolean }> {
-    const existing = await this.db
-      .select({ id: schema.tenants.id })
-      .from(schema.tenants)
-      .where(eq(schema.tenants.slug, input.slug));
-    if (existing[0]) return { tenantId: existing[0].id, created: false };
+    const existing = await this.tenantState(input.slug);
+    if (existing) {
+      if (existing.status !== 'active') {
+        throw new Error(`tenant ${input.slug} is ${existing.status}`);
+      }
+      return { tenantId: existing.id, created: false };
+    }
 
     const [plan] = await this.db
       .select()
@@ -177,6 +201,116 @@ export class DbProvisionerStore implements ProvisionerStore {
       .where(eq(schema.users.tenantId, id))
       .limit(1);
     return rows.length > 0;
+  }
+
+  async tenantState(slug: string): Promise<{ id: string; status: string } | null> {
+    const rows = await this.db
+      .select({ id: schema.tenants.id, status: schema.tenants.status })
+      .from(schema.tenants)
+      .where(eq(schema.tenants.slug, slug));
+    return rows[0] ?? null;
+  }
+
+  // Raw SQL from here on: this role may change only these columns, not updated_at.
+  async setTenantStatus(id: string, status: string): Promise<void> {
+    await this.db.execute(sql`update tenants set status = ${status} where id = ${id}`);
+  }
+
+  async auditAction(
+    tenantId: string,
+    action: string,
+    slug: string,
+    details: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.db.insert(schema.auditLog).values({
+      id: randomUUID(),
+      tenantId,
+      actorType: 'system',
+      actorId: 'provisioner',
+      action,
+      targetType: 'tenant',
+      targetId: slug,
+      details,
+    });
+  }
+
+  private async purgeJobs(slug?: string): Promise<(PurgeJob & { slug: string })[]> {
+    const rows = await this.db
+      .select({ id: schema.jobs.id, status: schema.jobs.status, payload: schema.jobs.payload })
+      .from(schema.jobs)
+      .where(
+        and(
+          eq(schema.jobs.type, PURGE_JOB),
+          slug ? sql`${schema.jobs.payload}->>'slug' = ${slug}` : undefined,
+        ),
+      )
+      .orderBy(desc(schema.jobs.createdAt));
+    return rows.map((r) => {
+      const payload = r.payload as { slug: string; purgeAfter: string };
+      return { jobId: r.id, status: r.status, slug: payload.slug, purgeAfter: payload.purgeAfter };
+    });
+  }
+
+  /** The tenant's purge, unless a restore cancelled it. */
+  async latestPurge(slug: string): Promise<PurgeJob | null> {
+    const [latest] = await this.purgeJobs(slug);
+    return latest && latest.status !== 'cancelled' ? latest : null;
+  }
+
+  async schedulePurge(tenantId: string, slug: string, purgeAfter: string): Promise<void> {
+    await this.db.insert(schema.jobs).values({
+      type: PURGE_JOB,
+      tenantId,
+      status: 'pending',
+      payload: { slug, purgeAfter },
+    });
+  }
+
+  private async setJobStatus(jobId: string, status: string): Promise<void> {
+    await this.db
+      .update(schema.jobs)
+      .set({ status, updatedAt: this.now() })
+      .where(eq(schema.jobs.id, jobId));
+  }
+
+  cancelPurge(jobId: string): Promise<void> {
+    return this.setJobStatus(jobId, 'cancelled');
+  }
+
+  markPurgeRunning(jobId: string): Promise<void> {
+    return this.setJobStatus(jobId, 'running');
+  }
+
+  /** Includes one that stopped part-way, so a re-run finishes it. */
+  async duePurges(now: Date): Promise<string[]> {
+    const jobs = await this.purgeJobs();
+    const unfinished = ['pending', 'running'];
+    return [...new Set(jobs.map((j) => j.slug))].filter((slug) => {
+      const latest = jobs.find((j) => j.slug === slug)!;
+      return unfinished.includes(latest.status) && new Date(latest.purgeAfter) <= now;
+    });
+  }
+
+  /** What stays after a purge says nothing about who it was (LLD-10 §8). */
+  async anonymiseTenant(tenantId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        update users set
+          email = 'deleted-' || id::text || '@deleted.invalid',
+          name = 'Deleted user',
+          keycloak_id = 'deleted-' || id::text,
+          status = 'disabled'
+        where tenant_id = ${tenantId}`);
+      await tx.execute(
+        sql`update requests set payload = '{}'::jsonb where tenant_id = ${tenantId}`,
+      );
+      await tx.execute(
+        sql`update privacy_requests set file_url = null where tenant_id = ${tenantId}`,
+      );
+      await tx.execute(sql`
+        update gateway_keys set revoked_at = now()
+        where tenant_id = ${tenantId} and revoked_at is null`);
+    });
   }
 
   async startJob(slug: string, type: string): Promise<string> {
