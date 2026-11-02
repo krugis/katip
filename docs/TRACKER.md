@@ -41,11 +41,11 @@ One script, one config file and one env file set up every building block. Each b
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P0-17 | Images, project name, domain and tenant slug all come from `katip.config.yaml`; unknown settings rejected; project renamed to `katip` | 01 | P0 | review | P0-12 | Changing a value in the config changes what runs | Compose reads images and names from the config; config validated at start; test fails if compose pins an image; `SME AI` label and `sk-sme-` key prefix unchanged (LLD-02) |
-| P0-18 | Presidio built by the bootstrap; spaCy model pinned and checksum-verified | 01, 03 | P0 | review | P1-11 | Clean install builds it with a verified model | Version and wheel sha256 in the config; image tagged by version, not `:dev` |
-| P0-19 | Models and tenant settings have one source | 01, 05 | P0 | review | P0-17 | Static LiteLLM config removed; DB catalog and tenant match the config | `models` feeds LiteLLM and `model_catalog`; seats, plan, KVKK add-on and PII policy applied; provider keys now reach LiteLLM; `seed.ts` and `DEFAULT_CATALOG` keep defaults for tests only |
-| P0-20 | Re-running `dev:up` applies config and env changes | 01 | P0 | review | P0-14 | Edit config, re-run, change is live | Hash of config + env; renaming a live project or slug is refused |
-| P0-21 | Gateway readiness and useful failure logs | 01, 03 | P0 | review | P1-04 | Gateway unhealthy until migrated; failed step's log has the error | `/readyz`; platform step no longer starts the AI plane; bearer tokens redacted from command errors |
+| P0-17 | Images, project name, domain and tenant slug all come from `katip.config.yaml`; unknown settings rejected; project renamed to `katip` | 01 | P0 | review | P0-12 | Changing a value in the config changes what runs | Compose reads images and names from the config; config validated at start; test fails if compose pins an image; `SME AI` label and `sk-sme-` key prefix unchanged (LLD-02) (#6) |
+| P0-18 | Presidio built by the bootstrap; spaCy model pinned and checksum-verified | 01, 03 | P0 | review | P1-11 | Clean install builds it with a verified model | Version and wheel sha256 in the config; image tagged by version, not `:dev` (#6) |
+| P0-19 | Models and tenant settings have one source | 01, 05 | P0 | review | P0-17 | Static LiteLLM config removed; DB catalog and tenant match the config | `models` feeds LiteLLM and `model_catalog`; seats, plan, KVKK add-on and PII policy applied; provider keys now reach LiteLLM; `seed.ts` and `DEFAULT_CATALOG` keep defaults for tests only (#6) |
+| P0-20 | Re-running `dev:up` applies config and env changes | 01 | P0 | review | P0-14 | Edit config, re-run, change is live | Hash of config + env; renaming a live project or slug is refused (#6) |
+| P0-21 | Gateway readiness and useful failure logs | 01, 03 | P0 | review | P1-04 | Gateway unhealthy until migrated; failed step's log has the error | `/readyz`; platform step no longer starts the AI plane; bearer tokens redacted from command errors (#6) |
 | P0-22 | `dev` / `prod` profiles, SOPS for production secrets | 01, 10 | P0 | todo | P0-06, P0-17…21 | One script installs either profile | Dev keeps the plaintext `katip.env`; design first |
 
 ## Phase 1 — Sellable core
