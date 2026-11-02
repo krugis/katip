@@ -16,6 +16,7 @@ import { setLanguage, type Language } from './i18n';
 import { AccountProblem, ComingSoon, NoAccess, ProviderTenants } from './pages';
 import { TenantAccessRules } from './access-page';
 import { TenantPolicies } from './policy-page';
+import { TenantUsage } from './usage-page';
 import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
 
 const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> = {
@@ -25,6 +26,7 @@ const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> =
   '/tenant/departments': (me) => <TenantDepartments me={me} />,
   '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
   '/tenant/access': (me, getToken) => <TenantAccessRules me={me} getToken={getToken} />,
+  '/tenant/usage': (me, getToken) => <TenantUsage me={me} getToken={getToken} />,
 };
 
 function Loading() {

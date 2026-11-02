@@ -212,5 +212,21 @@
     "save": "Save",
     "saved": "Saved. It takes effect within seconds.",
     "confirmLockOut": "This list leaves out your own address, so you may lose access to chat. Save it anyway?"
+  },
+  "usage": {
+    "from": "From",
+    "to": "To",
+    "groupBy": "Group by",
+    "group": {
+      "user": "Person",
+      "dept": "Department",
+      "model": "Model name",
+      "day": "Day"
+    },
+    "export": "Download CSV",
+    "total": "Total",
+    "none": "No department",
+    "empty": "No usage in this range.",
+    "badRange": "This date range can’t be used. Choose up to 400 days, with the start before the end."
   }
 }

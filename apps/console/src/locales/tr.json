@@ -212,5 +212,21 @@
     "save": "Kaydet",
     "saved": "Kaydedildi. Birkaç saniye içinde geçerli olur.",
     "confirmLockOut": "Bu liste sizin adresinizi içermiyor, bu yüzden sohbete erişemeyebilirsiniz. Yine de kaydedilsin mi?"
+  },
+  "usage": {
+    "from": "Başlangıç",
+    "to": "Bitiş",
+    "groupBy": "Gruplama",
+    "group": {
+      "user": "Kişi",
+      "dept": "Departman",
+      "model": "Model",
+      "day": "Gün"
+    },
+    "export": "CSV indir",
+    "total": "Toplam",
+    "none": "Departman yok",
+    "empty": "Bu aralıkta kullanım yok.",
+    "badRange": "Bu tarih aralığı kullanılamıyor. En fazla 400 gün seçin; başlangıç bitişten sonra olamaz."
   }
 }

@@ -321,9 +321,9 @@ try {
     await admin.getByTestId('no-access').waitFor();
     check(true, `going straight to ${path} says no access`);
   }
-  await admin.goto(`${consoleUrl}/tenant/usage`);
+  await admin.goto(`${consoleUrl}/tenant/billing`);
   await admin.getByTestId('coming-soon').waitFor();
-  check(new URL(admin.url()).pathname === '/tenant/usage', 'a deep link survives the redirects');
+  check(new URL(admin.url()).pathname === '/tenant/billing', 'a deep link survives the redirects');
 
   console.log('departments');
   await admin.getByTestId('nav-tenant-departments').click();
@@ -549,6 +549,41 @@ try {
     lcClient.attributes['client.session.idle.timeout'] === '900',
     'session limits reach Keycloak',
   );
+
+  console.log('usage, from the real chats above');
+  await admin.goto(`${consoleUrl}/tenant/usage`);
+  await admin.getByTestId('usage-table').waitFor();
+  const shownTotal = Number(await admin.getByTestId('usage-total').getAttribute('data-total'));
+  const realTotal = Number(
+    sql(
+      `select sum(u.input_tokens + u.output_tokens) from usage_events u join tenants t on t.id = u.tenant_id where t.slug = '${slug}'`,
+    ),
+  );
+  check(
+    shownTotal > 0 && shownTotal === realTotal,
+    `the total matches the events (${shownTotal} tokens)`,
+  );
+  check((await admin.getByTestId('usage-table').textContent()).includes(owner), 'by person');
+  check(!/\$|USD|maliyet/i.test(await admin.locator('main').textContent()), 'and no cost');
+  await shot(admin, 'usage');
+  for (const group of ['model', 'dept', 'day']) {
+    await admin.getByTestId('usage-group').selectOption(group);
+    await admin.waitForResponse((r) => r.url().includes(`groupBy=${group}`));
+    await admin.locator(`[data-testid=usage-total][data-total="${realTotal}"]`).waitFor();
+  }
+  check(true, 'every grouping adds up to the same total');
+  const [csvFile] = await Promise.all([
+    admin.waitForEvent('download'),
+    admin.getByTestId('usage-export').click(),
+  ]);
+  check(/^usage-.*\.csv$/.test(csvFile.suggestedFilename()), 'a CSV downloads');
+  await admin.getByTestId('usage-from').fill('2020-01-01');
+  await admin.getByTestId('usage-to').fill('2020-01-31');
+  await admin.getByTestId('usage-empty').waitFor();
+  check(true, 'a range with nothing in it says so');
+  await admin.getByTestId('usage-to').fill('2019-01-31');
+  await admin.getByTestId('usage-error').waitFor();
+  check(true, 'a backwards range says what is wrong');
 
   const token = await tokenOf(admin);
   const tid = sql(`select id from tenants where slug = '${slug}'`);

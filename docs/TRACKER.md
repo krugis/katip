@@ -99,7 +99,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-27 | Tenant admin: models and policies (TenantPolicy editor) | 04 | P0 | done | P1-10, P1-25 | Downgrade setting live in gateway within 30 s | Checked through to the real gateway in `pnpm test:console`. Department overrides and per-entity PII are P1-66; the overage cap in LLD-04 isn't in the gateway yet |
 | P1-28 | Access rules API + Traefik ipallow writer + lock-out protection | 02 | P0 | done | P1-22 | Non-listed IP blocked within 60 s; audit row | Traefik polls rules over HTTP instead of a file writer, so no Docker access is needed. Countries wait for Cloudflare (P1-29). MFA is always on, not a per-company switch |
 | P1-29 | Cloudflare country rules automation (per tenant hostname) | 02 | P1 | todo | P1-28 | Rule visible in Cloudflare; gateway double-check | |
-| P1-30 | `usage_daily` job + usage API + usage screens + CSV export | 04, 05 | P0 | todo | P1-14 | Numbers match `usage_events` sums | |
+| P1-30 | `usage_daily` job + usage API + usage screens + CSV export | 04, 05 | P0 | review | P1-14 | Numbers match `usage_events` sums | Rolled up per request rather than nightly. Tokens only. The monthly PDF and charts in LLD-04 aren't built |
 | P1-31 | Department manager area | 04 | P1 | todo | P1-30 | Other departments 404 | |
 | P1-32 | User portal: my usage, requests, sessions/MFA links, privacy export | 04 | P0 | todo | P1-30 | Usage visible within 1 min of a chat | |
 | P1-33 | Audit log API + screen (tenant + provider) | 04, 05 | P1 | todo | P1-20 | All mutations audited | |

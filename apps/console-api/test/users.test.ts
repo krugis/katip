@@ -409,6 +409,8 @@ describe('the console role', () => {
     ['change seats', `update seats set quantity = 100`],
     ['read provider cost', `select cost_usd_micro from usage_events`],
     ['read list price', `select price_usd_micro from usage_events`],
+    ['read daily cost', `select cost_usd_micro from usage_daily`],
+    ['write daily usage', `delete from usage_daily`],
     ['read model prices', `select price_in_usd_micro_per_m from model_catalog`],
     ['change the catalog', `update model_catalog set enabled = false`],
     ['rewrite policy history', `update policy_history set version = 0`],
@@ -912,6 +914,162 @@ describe('the Turkish model', () => {
     expect(classes(await read())).not.toContain('tr');
     await admin`update tenants set kvkk_addon = true where id = ${a}`;
     expect(classes(await read())).toContain('tr');
+  });
+});
+
+describe('usage reports', () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const report = (tenant: string, query: string) =>
+    send('GET', `/api/v1/tenants/${tenant}/usage?${query}`);
+  const model = async () =>
+    (await admin`select id, display_name from model_catalog order by id limit 1`)[0]!;
+  const add = async (
+    tenant: string,
+    user: string,
+    cls: string,
+    input: number,
+    output: number,
+    ts = 'now()',
+    department: string | null = null,
+  ) => {
+    const m = await model();
+    await admin.unsafe(
+      `insert into usage_events (id, tenant_id, user_id, department_id, ts, alias, model_id, class, input_tokens, output_tokens, cost_usd_micro, price_usd_micro, source)
+       values ('${randomUUID()}', '${tenant}', '${user}', ${department ? `'${department}'` : 'null'}, ${ts}, 'fast', '${m['id']}', '${cls}', ${input}, ${output}, 7777, 7777, 'chat')`,
+    );
+  };
+
+  it('matches the events, by person', async () => {
+    const other = await addUser(a, 'u@a.test');
+    await add(a, ownerId, 'standard', 10, 5);
+    await add(a, ownerId, 'standard', 1, 1);
+    await add(a, ownerId, 'premium', 100, 100);
+    await add(a, other, 'tr', 4, 4);
+    await add(b, otherId, 'standard', 9999, 9999);
+    const res = await report(a, 'groupBy=user');
+    expect(res.statusCode).toBe(200);
+    expect(res.json().rows).toEqual([
+      {
+        key: ownerId,
+        label: 'owner@a.test (owner@a.test)',
+        standard: 17,
+        premium: 200,
+        total: 217,
+      },
+      { key: other, label: 'u@a.test (u@a.test)', standard: 8, premium: 0, total: 8 },
+    ]);
+    const [sums] =
+      await admin`select sum(input_tokens + output_tokens)::int as n from usage_events where tenant_id = ${a}`;
+    const total = res.json().rows.reduce((n: number, r: { total: number }) => n + r.total, 0);
+    expect(total).toBe(sums!['n']);
+  });
+
+  it('stays right when asked again, and when more events arrive', async () => {
+    await add(a, ownerId, 'standard', 1, 1);
+    expect((await report(a, 'groupBy=day')).json().rows[0].total).toBe(2);
+    expect((await report(a, 'groupBy=day')).json().rows[0].total).toBe(2);
+    await add(a, ownerId, 'standard', 1, 1);
+    expect((await report(a, 'groupBy=day')).json().rows[0].total).toBe(4);
+  });
+
+  it('groups by department, with those in none together', async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${a}, 'Satış') returning id`;
+    await add(a, ownerId, 'standard', 10, 0, 'now()', d!['id'] as string);
+    const other = await addUser(a, 'none@a.test');
+    await add(a, other, 'standard', 1, 0);
+    const { rows } = (await report(a, 'groupBy=dept')).json();
+    expect(rows).toEqual([
+      { key: d!['id'], label: 'Satış', standard: 10, premium: 0, total: 10 },
+      { key: null, label: '', standard: 1, premium: 0, total: 1 },
+    ]);
+  });
+
+  it('counts a day under the department someone ended it in', async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${a}, 'Satış') returning id`;
+    await add(a, ownerId, 'standard', 1, 0, `now() - interval '1 minute'`);
+    await add(a, ownerId, 'standard', 2, 0, 'now()', d!['id'] as string);
+    const { rows } = (await report(a, 'groupBy=dept')).json();
+    expect(rows).toEqual([{ key: d!['id'], label: 'Satış', standard: 3, premium: 0, total: 3 }]);
+  });
+
+  it('groups by model, under its name', async () => {
+    await add(a, ownerId, 'standard', 1, 1);
+    const m = await model();
+    const { rows } = (await report(a, 'groupBy=model')).json();
+    expect(rows[0]).toMatchObject({ key: m['id'], label: m['display_name'], total: 2 });
+  });
+
+  it('keeps to the range, by UTC day', async () => {
+    await add(a, ownerId, 'standard', 1, 0, `'2026-03-10 23:59:00+00'`);
+    await add(a, ownerId, 'standard', 2, 0, `'2026-03-11 00:01:00+00'`);
+    await add(a, ownerId, 'standard', 4, 0, `'2026-03-12 12:00:00+00'`);
+    const { rows } = (await report(a, 'groupBy=day&from=2026-03-11&to=2026-03-11')).json();
+    expect(rows).toEqual([
+      { key: '2026-03-11', label: '2026-03-11', standard: 2, premium: 0, total: 2 },
+    ]);
+    const all = (await report(a, 'groupBy=day&from=2026-03-10&to=2026-03-12')).json().rows;
+    expect(all.map((r: { key: string }) => r.key)).toEqual([
+      '2026-03-10',
+      '2026-03-11',
+      '2026-03-12',
+    ]);
+  });
+
+  it('defaults to this month, and is empty when nothing happened', async () => {
+    const body = (await report(a, 'groupBy=user')).json();
+    expect(body.from).toBe(`${day.slice(0, 7)}-01`);
+    expect(body.to).toBe(day);
+    expect(body.rows).toEqual([]);
+  });
+
+  it.each([
+    ['a date that does not exist', 'from=2026-02-31&to=2026-03-01'],
+    ['words', 'from=yesterday'],
+    ['a start after the end', 'from=2026-03-02&to=2026-03-01'],
+    ['too long a range', 'from=2024-01-01&to=2026-01-01'],
+    ['an unknown grouping', 'groupBy=mood'],
+  ])('refuses %s', async (_label, query) => {
+    expect((await report(a, query)).statusCode).toBe(400);
+  });
+
+  it('never carries cost, though the daily table holds it', async () => {
+    await add(a, ownerId, 'standard', 1, 1);
+    const res = await report(a, 'groupBy=model');
+    expect(res.body).not.toContain('7777');
+    expect(res.body).not.toMatch(/cost|price/i);
+    const [row] =
+      await admin`select cost_usd_micro::int as c from usage_daily where tenant_id = ${a}`;
+    expect(row!['c']).toBe(7777);
+  });
+
+  it("can't reach another company's usage", async () => {
+    await add(b, otherId, 'standard', 5, 5);
+    expect((await report(b, 'groupBy=user')).statusCode).toBe(404);
+    expect((await send('GET', `/api/v1/tenants/${b}/usage/export`)).statusCode).toBe(404);
+    expect((await report(a, 'groupBy=user')).json().rows).toEqual([]);
+  });
+
+  describe('as a CSV', () => {
+    it('has what the report has, for Excel on a Turkish system', async () => {
+      await add(a, ownerId, 'standard', 3, 4);
+      const res = await send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=user`);
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.headers['content-disposition']).toContain('attachment');
+      expect(res.body.charCodeAt(0)).toBe(0xfeff);
+      expect(res.body).toContain('user;standard_tokens;premium_tokens;total_tokens');
+      expect(res.body).toContain('owner@a.test (owner@a.test);7;0;7');
+    });
+
+    it('stops a name running as a formula', async () => {
+      const id = await addUser(a, 'evil@a.test');
+      await admin`update users set name = '=HYPERLINK("http://evil.test")' where id = ${id}`;
+      await add(a, id, 'standard', 1, 0);
+      const res = await send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=user`);
+      expect(res.body).toContain(`"'=HYPERLINK(""http://evil.test"") (evil@a.test)"`);
+    });
   });
 });
 
