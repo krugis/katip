@@ -138,7 +138,15 @@ function People({ path, getToken }: { path: string; getToken: GetToken }) {
     queryFn: () => apiFetch<{ users: Person[] }>(path, getToken),
   });
   const rows = people.data?.users ?? [];
-  if (people.isSuccess && rows.length === 0) {
+  if (people.isLoading) return <p className="mt-4 text-sm text-muted">{t('app.loading')}</p>;
+  if (people.isError) {
+    return (
+      <p className="mt-4 text-sm text-danger" role="alert">
+        {t('errors.generic')}
+      </p>
+    );
+  }
+  if (rows.length === 0) {
     return <p className="mt-4 text-sm text-muted">{t('department.noPeople')}</p>;
   }
   return (
@@ -228,7 +236,15 @@ function Requests({
   };
 
   const rows = requests.data?.requests ?? [];
-  if (requests.isSuccess && rows.length === 0) {
+  if (requests.isLoading) return <p className="mt-4 text-sm text-muted">{t('app.loading')}</p>;
+  if (requests.isError) {
+    return (
+      <p className="mt-4 text-sm text-danger" role="alert">
+        {t('errors.generic')}
+      </p>
+    );
+  }
+  if (rows.length === 0) {
     return (
       <p className="mt-4 text-sm text-muted" data-testid="no-requests">
         {t('department.noRequests')}

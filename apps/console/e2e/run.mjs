@@ -432,11 +432,9 @@ try {
   await satis.getByTestId('department-edit').click();
   await admin.getByTestId(`manager-mehmet@${domain}`).check();
   await admin.getByTestId('department-save').click();
-  await admin.getByTestId('department-edit').waitFor();
-  check(
-    (await satis.getByTestId('department-managers').textContent()).includes('Mehmet'),
-    'a manager can be assigned',
-  );
+  // The row comes back a moment before its fresh data does.
+  await satis.getByTestId('department-managers').filter({ hasText: 'Mehmet' }).waitFor();
+  check(true, 'a manager can be assigned');
   await shot(admin, 'departments');
   await admin.getByTestId('nav-tenant-overview').click();
   await admin.getByTestId('seats-business').waitFor();
