@@ -2,12 +2,12 @@
 // Bootstrap steps (P0-12…P0-21). Each step: id, title, run(ctx), rollback?(ctx).
 // Steps are layers: a step is done only after its health checks pass, so
 // completed layers always work standalone after an interrupt.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeEnv, identityInput, renderLiteLLMModels, seedInput } from './config.mjs';
-import { tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
+import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const AUTO_KEYS = new Set([
   'POSTGRES_PASSWORD',
@@ -88,8 +88,22 @@ const tenantCompose = (args, ctx) =>
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
-export async function dockerRun(args, env = {}) {
-  return tryRun('docker', ['run', '--rm', ...args], { env });
+/**
+ * Runs a throwaway container. Docker can lose a container's exit event, and then
+ * `docker run` waits forever for a process that already ended, so every run has a
+ * time limit, and the container is removed if it hits it.
+ */
+export async function dockerRun(args, env = {}, { timeoutMs = 300_000, attempts = 1 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const name = `katip-tool-${randomBytes(6).toString('hex')}`;
+    try {
+      return await tryRun('docker', ['run', '--rm', '--name', name, ...args], { env, timeoutMs });
+    } catch (e) {
+      if (e.name !== 'TimedOut') throw e;
+      await run('docker', ['rm', '-f', name]).catch(() => {});
+      if (attempt >= attempts) throw e;
+    }
+  }
 }
 
 async function waitUntil(fn, { timeoutMs = 180_000, intervalMs = 3000, onTick } = {}) {
@@ -126,6 +140,9 @@ async function traefikEdgeIp(ctx) {
   return r.out.trim();
 }
 
+/** curl itself gives up after 10 s, so these limits only catch Docker losing track of it. */
+const CURL_LIMITS = { timeoutMs: 30_000, attempts: 3 };
+
 /** curl from a throwaway container inside the backend network. */
 const curlBackend = (ctx, path, extra = []) =>
   dockerRun(
@@ -140,6 +157,7 @@ const curlBackend = (ctx, path, extra = []) =>
       ...extra,
     ],
     ctx.env,
+    CURL_LIMITS,
   ).then((r) => r.out);
 
 /** curl via traefik from the edge network. curl resolves *.localhost to
@@ -165,6 +183,7 @@ async function curlEdge(ctx, host, path, extra = []) {
       ...extra,
     ],
     ctx.env,
+    CURL_LIMITS,
   ).then((r) => r.out);
 }
 

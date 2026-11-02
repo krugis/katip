@@ -250,6 +250,13 @@ function markChildInterrupt() {
   }
 }
 
+export class TimedOut extends Error {
+  constructor(cmd, ms) {
+    super(`${cmd} did not finish within ${ms / 1000}s`);
+    this.name = 'TimedOut';
+  }
+}
+
 export function run(cmd, args, opts = {}) {
   return new Promise((resolveP, rejectP) => {
     const p = spawn(cmd, args, {
@@ -260,6 +267,13 @@ export function run(cmd, args, opts = {}) {
     });
     let out = '';
     let forwarded = false;
+    let timedOut = false;
+    const timer = opts.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          p.kill('SIGKILL');
+        }, opts.timeoutMs)
+      : null;
     const onInt = () => {
       // forward SIGINT to the child once; the second Ctrl+C force-kills
       if (!forwarded) {
@@ -290,14 +304,17 @@ export function run(cmd, args, opts = {}) {
       opts.onOutput?.(t);
     });
     p.on('error', (e) => {
+      clearTimeout(timer);
       process.off('SIGINT', onInt);
       currentChild = null;
       rejectP(e);
     });
     p.on('close', (code) => {
+      clearTimeout(timer);
       process.off('SIGINT', onInt);
       if (currentChild === p) currentChild = null;
       if (interruptFlag) rejectP(new Interrupted());
+      else if (timedOut) rejectP(new TimedOut(cmd, opts.timeoutMs));
       else resolveP({ code, out });
     });
   });

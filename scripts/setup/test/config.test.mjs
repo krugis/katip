@@ -11,7 +11,7 @@ import {
   validateConfig,
 } from '../config.mjs';
 import { totp } from '../kc-lib.mjs';
-import { INFRA, generatorFor, parseEnvFile, parseYaml, redact } from '../util.mjs';
+import { INFRA, generatorFor, parseEnvFile, parseYaml, redact, run } from '../util.mjs';
 
 const config = loadConfig();
 const clone = () => structuredClone(config);
@@ -184,6 +184,13 @@ describe('util', () => {
     expect(generatorFor('KATIP_LC_CREDS_IV')()).toMatch(/^[0-9a-f]{32}$/);
     expect(generatorFor('KATIP_DEMO_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
     expect(generatorFor('POSTGRES_PASSWORD')()).toMatch(/^[\w-]{43}$/);
+  });
+
+  it('run stops a command that exceeds its time limit', async () => {
+    await expect(run('sleep', ['5'], { timeoutMs: 100 })).rejects.toMatchObject({
+      name: 'TimedOut',
+    });
+    await expect(run('true', [], { timeoutMs: 5000 })).resolves.toMatchObject({ code: 0 });
   });
 
   it('redact hides bearer tokens in command errors', () => {
