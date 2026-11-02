@@ -462,8 +462,9 @@ try {
       messages: [{ role: 'user', content: 'Adresim ayse.yilmaz@ornek.com.tr' }],
       max_tokens: 16,
     });
-  check(chat().status === 200, 'a message with an email address goes through, masked');
-  check(!chat().body.includes('ayse.yilmaz@ornek.com.tr'), 'and the model never sees the address');
+  // The gateway restores masked values in the reply, so this can't show what the model saw.
+  // gateway.test.ts checks that, with a stand-in provider.
+  check(chat().status === 200, 'a message with an email address goes through while masking');
   await admin.getByTestId('pii-mode').selectOption('block');
   await admin.getByTestId('policy-save').click();
   await admin.getByTestId('policy-saved').waitFor();
