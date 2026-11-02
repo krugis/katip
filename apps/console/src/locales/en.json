@@ -32,7 +32,8 @@
       "identity": "Identity",
       "usage": "Usage and reports",
       "billing": "Billing",
-      "audit": "Audit"
+      "audit": "Audit",
+      "requests": "Requests"
     },
     "department": {
       "overview": "Overview",
@@ -156,7 +157,8 @@
     "unknown_department": "Department not found",
     "policy_changed": "Someone else changed this policy just now. Reload the page and try again.",
     "already_decided": "This request has already been decided.",
-    "own_request": "You cannot decide your own request."
+    "own_request": "You cannot decide your own request.",
+    "too_many_requests": "You have many requests waiting already."
   },
   "policy": {
     "aliases": "Model options",
@@ -250,5 +252,36 @@
       "rejected": "Declined",
       "pending": "Waiting"
     }
+  },
+  "account": {
+    "requestType": "Type of request",
+    "reason": "Why do you need it?",
+    "reasonHelp": "Your department manager and company admin see this. Don’t include personal or confidential details.",
+    "send": "Send",
+    "sent": "Your request has been sent.",
+    "noRequests": "You haven’t sent any requests yet.",
+    "sessionsHelp": "You manage your sessions, password and multi-factor sign-in on your account page.",
+    "openAccount": "Open account page",
+    "exportTitle": "Download my data",
+    "exportHelp": "Your account details, usage and requests. Your chats aren’t in this file: you can export them from LibreChat, or ask your company admin.",
+    "exportButton": "Download my data",
+    "deleteTitle": "Ask for my account to be deleted",
+    "deleteHelp": "Your request goes to your company admin. Your account isn’t deleted straight away.",
+    "deleteButton": "Ask for deletion",
+    "confirmDelete": "Send your company admin a request to delete your account?",
+    "privacyType": {
+      "export": "Data download",
+      "delete": "Deletion request"
+    },
+    "privacyStatus": {
+      "pending": "Waiting",
+      "completed": "Done"
+    },
+    "preferencesHelp": "Your language is kept in this browser.",
+    "privacyRequests": "Personal data requests (KVKK)",
+    "privacyRequestsHelp": "KVKK requests may have a legal time limit for an answer. Mark one as done once you’ve carried it out.",
+    "noPrivacyRequests": "No personal data requests are waiting.",
+    "markDone": "Mark as done",
+    "otherRequests": "Other requests"
   }
 }

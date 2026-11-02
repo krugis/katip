@@ -412,6 +412,7 @@ describe('the console role', () => {
     ['read daily cost', `select cost_usd_micro from usage_daily`],
     ['rewrite a request', `update requests set payload = '{}'`],
     ['delete a request', `delete from requests`],
+    ['delete a privacy request', `delete from privacy_requests`],
     ['write daily usage', `delete from usage_daily`],
     ['read model prices', `select price_in_usd_micro_per_m from model_catalog`],
     ['change the catalog', `update model_catalog set enabled = false`],
@@ -1239,6 +1240,152 @@ describe('a department manager', () => {
       const res = await send('GET', `/api/v1/tenants/${a}/${route}`, undefined, bearer);
       expect(res.statusCode, route).toBe(403);
     }
+  });
+});
+
+describe('my account', () => {
+  const asUser = () => token('u@a.test', 'tenant-a', ['user']);
+  let userId: string;
+  let otherUser: string;
+  beforeEach(async () => {
+    userId = await addUser(a, 'u@a.test');
+    otherUser = await addUser(a, 'other@a.test');
+  });
+  const addUsage = async (user: string, tokens: number) => {
+    const [m] = await admin`select id from model_catalog limit 1`;
+    await admin.unsafe(
+      `insert into usage_events (id, tenant_id, user_id, alias, model_id, class, input_tokens, output_tokens, cost_usd_micro, price_usd_micro, source)
+       values ('${randomUUID()}', '${a}', '${user}', 'fast', '${m!['id']}', 'standard', ${tokens}, 0, 5555, 5555, 'chat')`,
+    );
+  };
+
+  it('shows only their own usage, at once, and no cost', async () => {
+    await addUsage(userId, 7);
+    await addUsage(otherUser, 999);
+    const res = await send('GET', '/api/v1/me/usage?groupBy=day', undefined, await asUser());
+    expect(res.json().rows.map((r: { total: number }) => r.total)).toEqual([7]);
+    expect(res.body).not.toContain('5555');
+  });
+
+  it('raises a request, sees it, and it reaches the admin', async () => {
+    const bearer = await asUser();
+    const made = await send(
+      'POST',
+      '/api/v1/me/requests',
+      { type: 'budget', reason: 'Daha fazla' },
+      bearer,
+    );
+    expect(made.statusCode).toBe(201);
+    const mine = await send('GET', '/api/v1/me/requests', undefined, bearer);
+    expect(mine.json().requests[0]).toMatchObject({
+      type: 'budget',
+      reason: 'Daha fazla',
+      status: 'pending',
+    });
+    const all = await send('GET', `/api/v1/tenants/${a}/requests`);
+    expect(all.json().requests[0]).toMatchObject({ userEmail: 'u@a.test', reason: 'Daha fazla' });
+    const decided = await send('PATCH', `/api/v1/tenants/${a}/requests/${made.json().id}`, {
+      status: 'rejected',
+    });
+    expect(decided.json().status).toBe('rejected');
+    expect(
+      (await send('GET', '/api/v1/me/requests', undefined, bearer)).json().requests[0].status,
+    ).toBe('rejected');
+  });
+
+  it('does not see anyone else’s requests', async () => {
+    await admin`insert into requests (tenant_id, user_id, type, payload) values (${a}, ${otherUser}, 'model', '{"reason":"gizli"}'::jsonb)`;
+    const res = await send('GET', '/api/v1/me/requests', undefined, await asUser());
+    expect(res.json().requests).toEqual([]);
+  });
+
+  it('cannot flood the company with requests', async () => {
+    const bearer = await asUser();
+    for (let i = 0; i < 10; i += 1) {
+      await send('POST', '/api/v1/me/requests', { type: 'model', reason: `r${i}` }, bearer);
+    }
+    const res = await send('POST', '/api/v1/me/requests', { type: 'model', reason: 'r' }, bearer);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('too_many_requests');
+  });
+
+  it.each([
+    ['an unknown type', { type: 'world', reason: 'r' }],
+    ['no reason', { type: 'model', reason: ' ' }],
+    ['someone else as the requester', { type: 'model', reason: 'r', userId: randomUUID() }],
+  ])('refuses %s', async (_label, body) => {
+    expect((await send('POST', '/api/v1/me/requests', body, await asUser())).statusCode).toBe(400);
+  });
+
+  it('exports what is held about them, and nobody else, and says where chats are', async () => {
+    await addUsage(userId, 7);
+    await addUsage(otherUser, 999);
+    await admin`insert into requests (tenant_id, user_id, type, payload) values (${a}, ${userId}, 'model', '{"reason":"benim"}'::jsonb)`;
+    await admin`insert into requests (tenant_id, user_id, type, payload) values (${a}, ${otherUser}, 'model', '{"reason":"gizli"}'::jsonb)`;
+    const res = await send('POST', '/api/v1/me/privacy/export', undefined, await asUser());
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-disposition']).toContain('attachment');
+    const data = res.json();
+    expect(data.account).toMatchObject({ email: 'u@a.test', role: 'user' });
+    expect(data.usageByDay.map((u: { total: number }) => u.total)).toEqual([7]);
+    expect(data.requests.map((r: { reason: string }) => r.reason)).toEqual(['benim']);
+    expect(data.chats).toContain('LibreChat');
+    expect(res.body).not.toContain('other@a.test');
+    expect(res.body).not.toContain('gizli');
+    expect(res.body).not.toContain('5555');
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'privacy.export', actor_id: userId });
+  });
+
+  it('asks for deletion once, deletes nothing itself, and the admin sees it', async () => {
+    const bearer = await asUser();
+    const first = await send('POST', '/api/v1/me/privacy/delete', undefined, bearer);
+    const second = await send('POST', '/api/v1/me/privacy/delete', undefined, bearer);
+    expect(first.statusCode).toBe(201);
+    expect(second.json().id).toBe(first.json().id);
+    const [row] = await admin`select status from users where id = ${userId}`;
+    expect(row!['status']).toBe('active');
+    const all = await send('GET', `/api/v1/tenants/${a}/requests`);
+    expect(all.json().privacy[0]).toMatchObject({
+      type: 'delete',
+      status: 'pending',
+      userEmail: 'u@a.test',
+    });
+    const done = await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${first.json().id}`, {
+      status: 'completed',
+    });
+    expect(done.json().status).toBe('completed');
+    const mine = await send('GET', '/api/v1/me/privacy', undefined, bearer);
+    expect(mine.json().requests[0].status).toBe('completed');
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'privacy.complete', actor_id: ownerId });
+  });
+
+  it("can't reach another company's requests or mark them handled", async () => {
+    const other = await addUser(b, 'x@b.test');
+    const [r] =
+      await admin`insert into privacy_requests (tenant_id, user_id, type) values (${b}, ${other}, 'delete') returning id`;
+    const [q] =
+      await admin`insert into requests (tenant_id, user_id, type, payload) values (${b}, ${other}, 'model', '{}'::jsonb) returning id`;
+    expect((await send('GET', `/api/v1/tenants/${b}/requests`)).statusCode).toBe(404);
+    expect(
+      (
+        await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${r!['id']}`, {
+          status: 'completed',
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (await send('PATCH', `/api/v1/tenants/${a}/requests/${q!['id']}`, { status: 'approved' }))
+        .statusCode,
+    ).toBe(404);
+    const [row] = await admin`select status from privacy_requests where id = ${r!['id'] as string}`;
+    expect(row!['status']).toBe('pending');
+  });
+
+  it('a plain user cannot use the admin side', async () => {
+    const res = await send('GET', `/api/v1/tenants/${a}/requests`, undefined, await asUser());
+    expect(res.statusCode).toBe(403);
   });
 });
 

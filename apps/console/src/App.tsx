@@ -22,22 +22,37 @@ import {
   DepartmentUsers,
 } from './department-page';
 import { TenantPolicies } from './policy-page';
+import {
+  AccountPreferences,
+  AccountPrivacy,
+  AccountRequests,
+  AccountSessions,
+  AccountUsage,
+  TenantRequests,
+} from './portal-page';
 import { TenantUsage } from './usage-page';
 import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
 
-const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> = {
-  '/provider/tenants': () => <ProviderTenants />,
-  '/tenant/overview': (me, getToken) => <TenantOverview me={me} getToken={getToken} />,
-  '/tenant/users': (me, getToken) => <TenantUsers me={me} getToken={getToken} />,
-  '/tenant/departments': (me) => <TenantDepartments me={me} />,
-  '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
-  '/tenant/access': (me, getToken) => <TenantAccessRules me={me} getToken={getToken} />,
-  '/tenant/usage': (me, getToken) => <TenantUsage me={me} getToken={getToken} />,
-  '/department/overview': (me, getToken) => <DepartmentOverview me={me} getToken={getToken} />,
-  '/department/users': (me, getToken) => <DepartmentUsers me={me} getToken={getToken} />,
-  '/department/usage': (me, getToken) => <DepartmentUsage me={me} getToken={getToken} />,
-  '/department/requests': (me, getToken) => <DepartmentRequests me={me} getToken={getToken} />,
-};
+const SCREENS: Record<string, (me: Me, getToken: GetToken, config: AppConfig) => React.ReactNode> =
+  {
+    '/account/usage': (_me, getToken) => <AccountUsage getToken={getToken} />,
+    '/account/requests': (_me, getToken) => <AccountRequests getToken={getToken} />,
+    '/account/sessions': (_me, _getToken, config) => <AccountSessions config={config} />,
+    '/account/privacy': (_me, getToken) => <AccountPrivacy getToken={getToken} />,
+    '/account/preferences': () => <AccountPreferences />,
+    '/tenant/requests': (me, getToken) => <TenantRequests me={me} getToken={getToken} />,
+    '/provider/tenants': () => <ProviderTenants />,
+    '/tenant/overview': (me, getToken) => <TenantOverview me={me} getToken={getToken} />,
+    '/tenant/users': (me, getToken) => <TenantUsers me={me} getToken={getToken} />,
+    '/tenant/departments': (me) => <TenantDepartments me={me} />,
+    '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
+    '/tenant/access': (me, getToken) => <TenantAccessRules me={me} getToken={getToken} />,
+    '/tenant/usage': (me, getToken) => <TenantUsage me={me} getToken={getToken} />,
+    '/department/overview': (me, getToken) => <DepartmentOverview me={me} getToken={getToken} />,
+    '/department/users': (me, getToken) => <DepartmentUsers me={me} getToken={getToken} />,
+    '/department/usage': (me, getToken) => <DepartmentUsage me={me} getToken={getToken} />,
+    '/department/requests': (me, getToken) => <DepartmentRequests me={me} getToken={getToken} />,
+  };
 
 function Loading() {
   const { t } = useTranslation();
@@ -48,7 +63,15 @@ function Loading() {
   );
 }
 
-function CurrentScreen({ me, getToken }: { me: Me; getToken: GetToken }) {
+function CurrentScreen({
+  me,
+  getToken,
+  config,
+}: {
+  me: Me;
+  getToken: GetToken;
+  config: AppConfig;
+}) {
   const { pathname } = useLocation();
   const home = homeOf(me);
   if (pathname === '/' || pathname === '/callback') {
@@ -56,7 +79,7 @@ function CurrentScreen({ me, getToken }: { me: Me; getToken: GetToken }) {
   }
   if (!canOpen(me, pathname)) return <NoAccess home={home} />;
   const screen = SCREENS[pathname];
-  if (screen) return screen(me, getToken);
+  if (screen) return screen(me, getToken, config);
   const item = ALL_AREAS.flatMap((a) => a.items).find((i) => i.path === pathname);
   return <ComingSoon labelKey={item?.labelKey ?? 'page.soonTitle'} />;
 }
@@ -102,7 +125,10 @@ function Signed({ config, getToken }: { config: AppConfig; getToken: GetToken })
       onSignOut={() => void auth.signoutRedirect()}
     >
       <Routes>
-        <Route path="*" element={<CurrentScreen me={me.data} getToken={getToken} />} />
+        <Route
+          path="*"
+          element={<CurrentScreen me={me.data} getToken={getToken} config={config} />}
+        />
       </Routes>
     </Shell>
   );

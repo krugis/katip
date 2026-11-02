@@ -699,6 +699,73 @@ try {
   const { context: userContext, page: person } = await openConsole(browser, userEmail, cspErrors);
   check((await visibleAreas(person)).join() === 'account', 'sees only their account');
   check(new URL(person.url()).pathname === '/account/usage', 'starts on their usage');
+  gateway(userEmail, '/chat/completions', {
+    model: 'fast',
+    messages: [{ role: 'user', content: 'merhaba' }],
+    max_tokens: 8,
+  });
+  await person.reload();
+  await person.getByTestId('usage-total').waitFor();
+  const myTotal = Number(await person.getByTestId('usage-total').getAttribute('data-total'));
+  const myReal = Number(
+    sql(`select sum(input_tokens + output_tokens) from usage_events where user_id = '${userId}'`),
+  );
+  check(
+    myTotal > 0 && myTotal === myReal,
+    `a chat shows in their usage at once (${myTotal} tokens)`,
+  );
+  await person.getByTestId('nav-account-requests').click();
+  await person.getByTestId('no-my-requests').waitFor();
+  await person.getByTestId('request-type').selectOption('model');
+  await person.getByTestId('request-reason').fill('Yeni model lazım');
+  await person.getByTestId('request-send').click();
+  await person.getByTestId('request-sent').waitFor();
+  await person.getByTestId('my-requests').waitFor();
+  check(true, 'they can ask for something, and see it');
+  await shot(person, 'account-requests');
+  await person.getByTestId('nav-account-sessions').click();
+  check(
+    (await person.getByTestId('keycloak-account').getAttribute('href')).endsWith(
+      `/realms/${realm}/account`,
+    ),
+    'sessions and MFA link to their real account page',
+  );
+  await person.getByTestId('nav-account-privacy').click();
+  const [exported] = await Promise.all([
+    person.waitForEvent('download'),
+    person.getByTestId('privacy-export').click(),
+  ]);
+  const exportPath = await exported.path();
+  const exportedData = JSON.parse(readFileSync(exportPath, 'utf8'));
+  check(exportedData.account.email === userEmail, 'they can download their data');
+  check(exportedData.requests[0].reason === 'Yeni model lazım', 'with their requests');
+  check(exportedData.chats.includes('LibreChat'), 'and it says where their chats are');
+  person.once('dialog', (d) => void d.accept());
+  await person.getByTestId('privacy-delete').click();
+  await person.locator('[data-testid=my-privacy] [data-type=delete]').waitFor();
+  check(true, 'they can ask for deletion');
+  await shot(person, 'account-privacy');
+
+  console.log('the admin answers');
+  await admin.goto(`${consoleUrl}/tenant/requests`);
+  const askedToDelete = admin.getByTestId(`privacy-${userEmail}-delete`);
+  await askedToDelete.waitFor();
+  check(
+    (await sql(`select status from users where id = '${userId}'`)) === 'active',
+    'asking deleted nothing',
+  );
+  await shot(admin, 'tenant-requests');
+  await askedToDelete.getByTestId('privacy-complete').click();
+  await admin
+    .locator(`[data-testid="privacy-${userEmail}-delete"][data-status=completed]`)
+    .waitFor();
+  check(true, 'the admin sees the deletion request, and can mark it done');
+  const theirRequest = admin.getByTestId(`tenant-request-${userEmail}`);
+  await theirRequest.getByTestId('reject').click();
+  await admin
+    .locator(`[data-testid="tenant-request-${userEmail}"][data-status=rejected]`)
+    .waitFor();
+  check(true, 'and answer a request from someone with no department');
   await shot(person, 'user');
   for (const path of ['/tenant/users', '/department/overview', '/provider/tenants']) {
     await person.goto(`${consoleUrl}${path}`);

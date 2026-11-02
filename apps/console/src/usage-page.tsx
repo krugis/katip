@@ -26,8 +26,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 const FIELD = 'mt-1 block rounded-md border border-line bg-surface px-2 py-1.5 text-sm';
 
 /** Gives the browser a file made here. */
-function saveFile(name: string, contents: string): void {
-  const url = URL.createObjectURL(new Blob([contents], { type: 'text/csv;charset=utf-8' }));
+export function saveFile(name: string, contents: string, type = 'text/csv;charset=utf-8'): void {
+  const url = URL.createObjectURL(new Blob([contents], { type }));
   const link = document.createElement('a');
   link.href = url;
   link.download = name;
@@ -49,13 +49,15 @@ export function UsageReport({
   path,
   groups,
   getToken,
+  noExport = false,
 }: {
   path: string;
   groups: readonly Group[];
   getToken: GetToken;
+  noExport?: boolean;
 }) {
   const { t, i18n } = useTranslation();
-  const [group, setGroup] = useState<Group>('user');
+  const [group, setGroup] = useState<Group>(groups[0] ?? 'user');
   const [from, setFrom] = useState(`${today().slice(0, 7)}-01`);
   const [to, setTo] = useState(today());
   const [exportFailed, setExportFailed] = useState(false);
@@ -117,9 +119,11 @@ export function UsageReport({
             ))}
           </select>
         </label>
-        <Button data-testid="usage-export" onClick={() => void download()}>
-          {t('usage.export')}
-        </Button>
+        {!noExport && (
+          <Button data-testid="usage-export" onClick={() => void download()}>
+            {t('usage.export')}
+          </Button>
+        )}
       </div>
       {exportFailed && (
         <p className="mt-3 text-sm text-danger" role="alert">
