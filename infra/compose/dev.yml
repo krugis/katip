@@ -2,11 +2,11 @@
 # Extends platform.yml: mock provider, self-built LiteLLM (mock-routed config),
 # policy-gateway with dev tenants file. LibreChat runs from the rendered tenant
 # file (infra/compose/tenants/demo.yml), not here.
-name: sme-platform
+name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
 
 services:
   traefik:
-    # dev: dev TLS certs + dashboard on 127.0.0.1:8080 (host)
+    # dev: dev TLS certs + dashboard on 127.0.0.1:9090 (host)
     ports: !override
       - '80:80'
       - '443:443'
@@ -72,15 +72,22 @@ services:
     build:
       context: ../litellm
       args:
-        LITELLM_VERSION: ${LITELLM_VERSION:-1.79.3}
-        LITELLM_SHA256: ${LITELLM_SHA256:?from katip.env/config}
-    image: ghcr.io/krugis/litellm:${LITELLM_VERSION:-1.79.3}
+        LITELLM_VERSION: ${LITELLM_VERSION:?from katip.config.yaml}
+        LITELLM_SHA256: ${LITELLM_SHA256:?from katip.config.yaml}
+    image: ghcr.io/krugis/litellm:${LITELLM_VERSION:?from katip.config.yaml}
     restart: unless-stopped
     volumes:
       - ../litellm/rendered/config.dev.yaml:/app/config.yaml:ro
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
       MOCK_LLM_KEY: ${MOCK_LLM_KEY:?from katip.env}
+      # Real providers (empty = the model routes to mock-llm, see renderLiteLLMModels)
+      DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GCP_PROJECT: ${GCP_PROJECT:-}
+      GCP_VERTEX_KEY: ${GCP_VERTEX_KEY:-}
+      VLLM_TR_KEY: ${VLLM_TR_KEY:-}
     entrypoint: ['litellm', '--config', '/app/config.yaml', '--port', '4000']
     depends_on:
       postgres:
@@ -131,7 +138,8 @@ services:
       presidio-analyzer:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
+      # readyz, not healthz: also fails until the governance DB is migrated and seeded
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1']
       interval: 10s
       timeout: 5s
       retries: 12
@@ -145,10 +153,15 @@ services:
   presidio-analyzer:
     # P1-11: Presidio analyzer with multilingual spaCy (TR+EN PERSON NER).
     # No host port: only the policy-gateway talks to it on the backend network.
-    image: ghcr.io/krugis/presidio-analyzer:dev
+    image: ghcr.io/krugis/presidio-analyzer:${KATIP_PRESIDIO_VERSION:?from katip.config.yaml}
     build:
       context: ../presidio
       dockerfile: Dockerfile
+      args:
+        PRESIDIO_REGISTRY: ${KATIP_PRESIDIO_REGISTRY:?from katip.config.yaml}
+        PRESIDIO_VERSION: ${KATIP_PRESIDIO_VERSION:?from katip.config.yaml}
+        SPACY_MODEL_VERSION: ${KATIP_SPACY_MODEL_VERSION:?from katip.config.yaml}
+        SPACY_MODEL_SHA256: ${KATIP_SPACY_MODEL_SHA256:?from katip.config.yaml}
     restart: unless-stopped
     environment:
       PORT: '3000'
@@ -172,8 +185,8 @@ services:
 
 networks:
   edge:
-    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_edge
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
     external: true
   backend:
-    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_backend
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_backend
     external: true

@@ -80,6 +80,27 @@ beforeEach(() => {
   mock.requests.length = 0;
 });
 
+describe('readiness', () => {
+  it('reports ready by default, and healthz does not depend on it', async () => {
+    build();
+    expect((await gw.inject({ url: '/readyz' })).statusCode).toBe(200);
+    build(tenant(), { ready: async () => false });
+    expect((await gw.inject({ url: '/healthz' })).statusCode).toBe(200);
+    const res = await gw.inject({ url: '/readyz' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().status).toBe('not_ready');
+  });
+
+  it('is not ready while the check throws (e.g. DB not migrated)', async () => {
+    build(tenant(), {
+      ready: async () => {
+        throw new Error('relation "model_catalog" does not exist');
+      },
+    });
+    expect((await gw.inject({ url: '/readyz' })).statusCode).toBe(503);
+  });
+});
+
 describe('authentication and identity', () => {
   it('rejects a missing or wrong key with 401 (OpenAI error shape)', async () => {
     build();

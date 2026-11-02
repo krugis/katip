@@ -66,7 +66,9 @@ Each step is a Fastify hook or plugin with its own unit tests. The pure logic li
 
 Latency budget added by the gateway, excluding the provider: p50 under 40 ms, p95 under 120 ms (PII analysis dominates; run Presidio with 2 workers and cache recognizers).
 
-## 3. LiteLLM configuration (`infra/litellm/config.yaml`)
+## 3. LiteLLM configuration
+
+The model list lives in `katip.config.yaml` (`models`), and the bootstrap renders the LiteLLM config from it. The same list seeds `model_catalog`.
 
 ```yaml
 model_list:

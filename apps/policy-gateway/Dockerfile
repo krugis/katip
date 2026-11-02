@@ -14,8 +14,8 @@ COPY packages/db/package.json packages/db/
 RUN pnpm install --frozen-lockfile
 COPY packages packages
 COPY apps apps
-RUN pnpm --filter @katip/mock-llm build \
- && pnpm --filter @katip/policy-gateway build \
+RUN pnpm --filter "@katip/mock-llm..." build \
+ && pnpm --filter "@katip/policy-gateway..." build \
  && pnpm deploy --legacy --filter=@katip/mock-llm --prod /deploy/mock-llm \
  && pnpm deploy --legacy --filter=@katip/policy-gateway --prod /deploy/policy-gateway
 

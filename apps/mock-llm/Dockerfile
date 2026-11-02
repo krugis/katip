@@ -10,7 +10,7 @@ COPY packages/shared/package.json packages/shared/
 RUN pnpm install --frozen-lockfile
 COPY packages packages
 COPY apps/mock-llm apps/mock-llm
-RUN pnpm --filter @katip/mock-llm build \
+RUN pnpm --filter "@katip/mock-llm..." build \
  && pnpm deploy --legacy --filter=@katip/mock-llm --prod /deploy/mock-llm
 FROM node:22.23.1-alpine
 RUN corepack enable && adduser -S -u 10001 app

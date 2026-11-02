@@ -11,6 +11,6 @@ RUN pip download --no-deps "litellm[proxy]==${LITELLM_VERSION}" -d /tmp/wheel \
  && rm -rf /tmp/wheel
 RUN useradd --system --uid 10001 litellm
 USER litellm
-COPY config.yaml /app/config.yaml
+# /app/config.yaml is mounted: rendered by the bootstrap from katip.config.yaml.
 EXPOSE 4000
 CMD ["litellm", "--config", "/app/config.yaml", "--port", "4000"]

@@ -1,0 +1,10 @@
+# Pass-through ipallow middleware for a tenant (LLD-02 §6), rendered by the
+# bootstrap to dynamic/<slug>-ipallow.yml. No allowlist is configured yet; the
+# provisioner rewrites it when access rules land (P1-28).
+http:
+  middlewares:
+    ${KATIP_SLUG}-ipallow:
+      ipAllowList:
+        sourceRange:
+          - 0.0.0.0/0
+          - ::/0

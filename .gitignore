@@ -20,6 +20,7 @@ infra/traefik/dev-certs/
 infra/litellm/rendered/
 infra/policy-gateway/
 infra/compose/tenants/*.yml
+infra/traefik/dynamic/*-ipallow.yml
 infra/librechat/rendered/
 
 # private brand material (never public)

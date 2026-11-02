@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Bootstrap steps (P0-12…P0-16). Each step: id, title, run(ctx), rollback?(ctx).
+// Bootstrap steps (P0-12…P0-21). Each step: id, title, run(ctx), rollback?(ctx).
 // Steps are layers: a step is done only after its health checks pass, so
 // completed layers always work standalone after an interrupt.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { composeEnv, renderLiteLLMModels, seedInput } from './config.mjs';
 import { tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
-
-export const COMPOSE_PROJECT = 'sme-platform';
-export const TENANT_PROJECT = 'sme-demo';
 
 export const AUTO_KEYS = new Set([
   'POSTGRES_PASSWORD',
@@ -37,54 +35,55 @@ export function deriveEnv(out) {
   };
 }
 
-/** Special generators for keys with format constraints (LibreChat creds). */
-export function deriveTenantSecrets() {
-  const hex = (n) => randomBytes(n).toString('hex').slice(0, 64);
-  return {
-    KATIP_LC_CREDS_KEY: hex(16), // 32 hex chars
-    KATIP_LC_CREDS_IV: hex(16), // 32 hex chars
-  };
-}
-
 export const sha256hex = (s) => createHash('sha256').update(s).digest('hex');
 
-const PLATFORM_FILES = ['-f', 'infra/compose/platform.yml', '-f', 'infra/compose/dev.yml'];
-/** Env additions compose needs for interpolation (litellm build args come from
- *  katip.config.yaml, not the env file). */
-export function composeEnv(config) {
-  return {
-    KATIP_COMPOSE_PROJECT: COMPOSE_PROJECT,
-    ...(config?.images?.litellm
-      ? {
-          LITELLM_VERSION: config.images.litellm.version,
-          LITELLM_SHA256: config.images.litellm.sha256,
-        }
-      : {}),
-  };
-}
-/** Compose with the katip.env file as the interpolation env-file. */
-const platformCompose = (args, env, config) =>
-  tryRun('docker', ['compose', '--env-file', 'infra/env/katip.env', ...PLATFORM_FILES, ...args], {
-    env: { ...env, ...composeEnv(config) },
+const edgeNetwork = (config) => `${config.project.name}_edge`;
+const backendNetwork = (config) => `${config.project.name}_backend`;
+const tenantProject = (config) => `${config.project.name}-${config.tenant.slug}`;
+const tenantFile = (config) => `infra/compose/tenants/${config.tenant.slug}.yml`;
+
+/** `docker compose` arguments for the platform stack (project name comes from the env). */
+export const platformComposeArgs = () => [
+  'compose',
+  '--env-file',
+  'infra/env/katip.env',
+  '-f',
+  'infra/compose/platform.yml',
+  '-f',
+  'infra/compose/dev.yml',
+];
+
+/** `docker compose` arguments for the rendered tenant stack. */
+export const tenantComposeArgs = (config) => [
+  'compose',
+  '--env-file',
+  'infra/env/katip.env',
+  '-f',
+  tenantFile(config),
+  '-p',
+  tenantProject(config),
+];
+
+/** The `platform` step's services; the AI plane starts after the DB is migrated. */
+const PLATFORM_SERVICES = [
+  'traefik',
+  'postgres',
+  'keycloak',
+  'mongodb',
+  'meilisearch',
+  'valkey',
+  'mailpit',
+];
+
+const platformCompose = (args, ctx) =>
+  tryRun('docker', [...platformComposeArgs(), ...args], {
+    env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
-const tenantCompose = (args, env, config) =>
-  tryRun(
-    'docker',
-    [
-      'compose',
-      '--env-file',
-      'infra/env/katip.env',
-      '-f',
-      'infra/compose/tenants/demo.yml',
-      '-p',
-      TENANT_PROJECT,
-      ...args,
-    ],
-    {
-      env: { ...env, ...composeEnv(config) },
-    },
-  );
+const tenantCompose = (args, ctx) =>
+  tryRun('docker', [...tenantComposeArgs(ctx.config), ...args], {
+    env: { ...ctx.env, ...composeEnv(ctx.config) },
+  });
 
 export async function dockerRun(args, env = {}) {
   return tryRun('docker', ['run', '--rm', ...args], { env });
@@ -109,16 +108,15 @@ async function waitUntil(fn, { timeoutMs = 180_000, intervalMs = 3000, onTick } 
   );
 }
 
-const curlImage = 'curlimages/curl:8.8.0';
 /** Traefik's IP on the edge network (for *.localhost resolution in checks). */
-async function traefikEdgeIp() {
+async function traefikEdgeIp(ctx) {
   const r = await tryRun(
     'docker',
     [
       'inspect',
       '-f',
       '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',
-      `${COMPOSE_PROJECT}-traefik-1`,
+      `${ctx.config.project.name}-traefik-1`,
     ],
     {},
   );
@@ -126,30 +124,30 @@ async function traefikEdgeIp() {
 }
 
 /** curl from a throwaway container inside the backend network. */
-const curlBackend = (path, env, extra = []) =>
+const curlBackend = (ctx, path, extra = []) =>
   dockerRun(
     [
       '--network',
-      `${COMPOSE_PROJECT}_backend`,
-      curlImage,
+      backendNetwork(ctx.config),
+      ctx.config.images.curl,
       '-sS',
       '-m',
       '10',
       `http://policy-gateway:8080${path}`,
       ...extra,
     ],
-    env,
+    ctx.env,
   ).then((r) => r.out);
 
 /** curl via traefik from the edge network. curl resolves *.localhost to
  * 127.0.0.1 (RFC 6761), so we hit the traefik IP directly with a Host header. */
-async function curlEdge(host, path, env, extra = []) {
-  const ip = await traefikEdgeIp();
+async function curlEdge(ctx, host, path, extra = []) {
+  const ip = await traefikEdgeIp(ctx);
   return dockerRun(
     [
       '--network',
-      `${COMPOSE_PROJECT}_edge`,
-      curlImage,
+      edgeNetwork(ctx.config),
+      ctx.config.images.curl,
       '-sS',
       '-k',
       '-m',
@@ -163,7 +161,7 @@ async function curlEdge(host, path, env, extra = []) {
       `https://${ip}${path}`,
       ...extra,
     ],
-    env,
+    ctx.env,
   ).then((r) => r.out);
 }
 
@@ -171,68 +169,66 @@ async function curlEdge(host, path, env, extra = []) {
 // renderers
 // ---------------------------------------------------------------------------
 
+/** Replaces every ${NAME} in `tmpl` listed in `vars`; leaves the others alone. */
+const fill = (tmpl, vars) =>
+  tmpl.replace(/\$\{([A-Z0-9_]+)\}/g, (all, name) => (name in vars ? vars[name] : all));
+
 function renderLiteLLMConfig(ctx) {
-  const lines = [];
-  for (const m of ctx.config.models) {
-    const realKey = ctx.env[m.api_key_env] || '';
-    const useMock = !realKey;
-    lines.push(`  - model_name: ${m.alias}`);
-    lines.push(`    litellm_params:`);
-    if (useMock) {
-      lines.push(`      model: openai/${m.litellm_params.model}`);
-      lines.push(`      api_base: http://mock-llm:8080/v1`);
-      lines.push(`      api_key: os.environ/MOCK_LLM_KEY`);
-    } else {
-      lines.push(`      model: ${m.litellm_params.model}`);
-      lines.push(`      api_key: os.environ/${m.api_key_env}`);
-    }
-  }
   const tmpl = readFileSync(join(ctx.infra, 'litellm', 'config.dev.tmpl.yaml'), 'utf8');
-  const out = tmpl.replace('%%MODELS%%', lines.join('\n'));
+  const out = tmpl.replace('%%MODELS%%', () => renderLiteLLMModels(ctx.config, ctx.env));
   mkdirSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true });
   writeFileSync(join(ctx.infra, 'litellm', 'rendered', 'config.dev.yaml'), out);
 }
 
+const ipallowFile = (ctx) =>
+  join(ctx.infra, 'traefik', 'dynamic', `${ctx.config.tenant.slug}-ipallow.yml`);
+
 function renderTenantFiles(ctx) {
-  const slug = ctx.config.tenant.slug;
+  const { slug } = ctx.config.tenant;
+  const base = ctx.config.project.base_domain;
   const envDir = join(ctx.infra, 'env', 'tenants');
   mkdirSync(envDir, { recursive: true });
 
-  // tenant env (LC secrets: ensure present in katip.env first)
-  const lcSec = deriveTenantSecrets();
-  for (const [k, v] of Object.entries(lcSec)) {
-    if (!ctx.env[k] || ctx.env[k] === 'AUTO') ctx.env[k] = v;
-  }
-  const tmplEnv = readFileSync(join(envDir, 'demo.example.env'), 'utf8');
-  const envContent = tmplEnv
-    .replace(/\$\{KATIP_MONGO_PASSWORD\}/g, ctx.env.MONGO_PASSWORD)
-    .replace(/\$\{KATIP_MEILI_MASTER_KEY\}/g, ctx.env.MEILI_MASTER_KEY)
-    .replace(/\$\{KATIP_LC_CREDS_KEY\}/g, ctx.env.KATIP_LC_CREDS_KEY)
-    .replace(/\$\{KATIP_LC_CREDS_IV\}/g, ctx.env.KATIP_LC_CREDS_IV)
-    .replace(/\$\{KATIP_LC_JWT_SECRET\}/g, ctx.env.KATIP_LC_JWT_SECRET)
-    .replace(/\$\{KATIP_LC_JWT_REFRESH_SECRET\}/g, ctx.env.KATIP_LC_JWT_REFRESH_SECRET);
-  writeFileSync(join(envDir, 'demo.env'), envContent, { mode: 0o600 });
-  chmodSync(join(envDir, 'demo.env'), 0o600);
+  // tenant env
+  const tmplEnv = readFileSync(join(ctx.infra, 'env', 'tenant.example.env'), 'utf8');
+  const envContent = fill(tmplEnv, {
+    KATIP_SLUG: slug,
+    KATIP_BASE_DOMAIN: base,
+    KATIP_MONGO_PASSWORD: ctx.env.MONGO_PASSWORD,
+    KATIP_MEILI_MASTER_KEY: ctx.env.MEILI_MASTER_KEY,
+    KATIP_LC_CREDS_KEY: ctx.env.KATIP_LC_CREDS_KEY,
+    KATIP_LC_CREDS_IV: ctx.env.KATIP_LC_CREDS_IV,
+    KATIP_LC_JWT_SECRET: ctx.env.KATIP_LC_JWT_SECRET,
+    KATIP_LC_JWT_REFRESH_SECRET: ctx.env.KATIP_LC_JWT_REFRESH_SECRET,
+  });
+  writeFileSync(join(envDir, `${slug}.env`), envContent, { mode: 0o600 });
+  chmodSync(join(envDir, `${slug}.env`), 0o600);
 
   // librechat.yaml
   const tmplLc = readFileSync(join(ctx.infra, 'librechat', 'librechat.tmpl.yaml'), 'utf8');
-  const lc = tmplLc
-    .replace(/\$\{KATIP_DEMO_GATEWAY_KEY\}/g, ctx.env.KATIP_DEMO_GATEWAY_KEY)
-    .replace(/<slug>/g, slug);
+  const lc = fill(tmplLc, { KATIP_DEMO_GATEWAY_KEY: ctx.env.KATIP_DEMO_GATEWAY_KEY }).replace(
+    /<slug>/g,
+    slug,
+  );
   const lcDir = join(ctx.infra, 'librechat', 'rendered');
   mkdirSync(lcDir, { recursive: true });
   writeFileSync(join(lcDir, `${slug}.librechat.yaml`), lc, { mode: 0o600 });
 
   // tenant compose file
   const tmplCompose = readFileSync(join(ctx.infra, 'compose', 'tenant.tmpl.yml'), 'utf8');
-  const comp = tmplCompose
-    .replace(/\$\{KATIP_SLUG\}/g, slug)
-    .replace(/\$\{KATIP_BASE_DOMAIN\}/g, ctx.config.project.base_domain)
-    .replace(/\$\{KATIP_LIBRECHAT_VERSION\}/g, ctx.config.images.librechat.split(':')[1])
-    .replace(/\$\{KATIP_COMPOSE_PROJECT\}/g, COMPOSE_PROJECT);
+  const comp = fill(tmplCompose, {
+    KATIP_SLUG: slug,
+    KATIP_BASE_DOMAIN: base,
+    KATIP_IMAGE_LIBRECHAT: ctx.config.images.librechat,
+    KATIP_COMPOSE_PROJECT: ctx.config.project.name,
+  });
   const tDir = join(ctx.infra, 'compose', 'tenants');
   mkdirSync(tDir, { recursive: true });
   writeFileSync(join(tDir, `${slug}.yml`), comp);
+
+  // Traefik ipallow middleware the tenant router refers to
+  const tmplIp = readFileSync(join(ctx.infra, 'traefik', 'tenant-ipallow.tmpl.yml'), 'utf8');
+  writeFileSync(ipallowFile(ctx), fill(tmplIp, { KATIP_SLUG: slug }));
 }
 
 function renderAll(ctx) {
@@ -271,41 +267,51 @@ export const steps = [
       ctx.env = env;
       ctx.log(`katip.env ${changed ? 'generated' : 'present'}`);
 
-      // dev TLS cert (*.localhost), idempotent
+      // dev TLS cert for the base domain; regenerated when the domain changes
+      const base = ctx.config.project.base_domain;
       const certDir = join(ctx.infra, 'traefik', 'dev-certs');
-      if (!existsSync(join(certDir, 'localhost.crt'))) {
+      const marker = join(certDir, 'domain');
+      const current = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
+      if (!existsSync(join(certDir, 'localhost.crt')) || current !== base) {
         mkdirSync(certDir, { recursive: true });
-        execFileSync('openssl', [
-          'req',
-          '-x509',
-          '-newkey',
-          'rsa:2048',
-          '-sha256',
-          '-days',
-          '825',
-          '-nodes',
-          '-keyout',
-          join(certDir, 'localhost.key'),
-          '-out',
-          join(certDir, 'localhost.crt'),
-          '-subj',
-          '/CN=localhost',
-          '-addext',
-          'subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1',
-        ]);
+        execFileSync(
+          'openssl',
+          [
+            'req',
+            '-x509',
+            '-newkey',
+            'rsa:2048',
+            '-sha256',
+            '-days',
+            '825',
+            '-nodes',
+            '-keyout',
+            join(certDir, 'localhost.key'),
+            '-out',
+            join(certDir, 'localhost.crt'),
+            '-subj',
+            `/CN=${base}`,
+            '-addext',
+            `subjectAltName=DNS:${base},DNS:*.${base},IP:127.0.0.1`,
+          ],
+          { stdio: 'ignore' },
+        );
+        writeFileSync(marker, `${base}\n`);
         ctx.log('dev TLS cert generated');
       } else {
         ctx.log('dev TLS cert present');
       }
 
       renderAll(ctx);
-      ctx.log('rendered: litellm config, tenant files, gateway tenants');
+      ctx.log('rendered: litellm config, tenant files, traefik ipallow');
     },
     async rollback(ctx) {
+      const { slug } = ctx.config.tenant;
       rmSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'librechat', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'compose', 'tenants'), { recursive: true, force: true });
-      rmSync(join(ctx.infra, 'env', 'tenants', 'demo.env'), { force: true });
+      rmSync(join(ctx.infra, 'env', 'tenants', `${slug}.env`), { force: true });
+      rmSync(ipallowFile(ctx), { force: true });
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
     },
   },
@@ -313,8 +319,7 @@ export const steps = [
     id: 'networks',
     title: 'Networks (edge, backend)',
     async run(ctx) {
-      for (const n of ['edge', 'backend']) {
-        const name = `${COMPOSE_PROJECT}_${n}`;
+      for (const name of [edgeNetwork(ctx.config), backendNetwork(ctx.config)]) {
         const exists = await tryRun('docker', ['network', 'inspect', name], {}).then(
           () => true,
           () => false,
@@ -327,9 +332,9 @@ export const steps = [
         }
       }
     },
-    async rollback() {
-      for (const n of ['edge', 'backend']) {
-        await tryRun('docker', ['network', 'rm', `${COMPOSE_PROJECT}_${n}`], {}).catch(() => {});
+    async rollback(ctx) {
+      for (const name of [edgeNetwork(ctx.config), backendNetwork(ctx.config)]) {
+        await tryRun('docker', ['network', 'rm', name], {}).catch(() => {});
       }
     },
   },
@@ -339,7 +344,7 @@ export const steps = [
     async run(ctx) {
       for (const [, ref] of Object.entries(ctx.config.images)) {
         if (isInterrupted()) throw new Interrupted();
-        if (typeof ref === 'object') continue; // litellm: self-built
+        if (typeof ref === 'object') continue; // self-built: see the build step
         ctx.tui?.setDetail?.(`pulling ${ref}`);
         await tryRun('docker', ['pull', ref], {});
         ctx.log(`pulled ${ref}`);
@@ -348,7 +353,7 @@ export const steps = [
   },
   {
     id: 'build',
-    title: 'Build images (litellm checksum-verified, gateway, mock)',
+    title: 'Build images (litellm + presidio checksum-verified, gateway, mock)',
     async run(ctx) {
       const { version, sha256 } = ctx.config.images.litellm;
       ctx.tui?.setDetail?.(`litellm ${version} (sha256 verified)`);
@@ -367,6 +372,28 @@ export const steps = [
         {},
       );
       ctx.log(`built ghcr.io/krugis/litellm:${version}`);
+
+      const presidio = ctx.config.images.presidio_analyzer;
+      ctx.tui?.setDetail?.(`presidio ${presidio.version} (spaCy model sha256 verified)`);
+      await tryRun(
+        'docker',
+        [
+          'build',
+          '--build-arg',
+          `PRESIDIO_REGISTRY=${presidio.registry}`,
+          '--build-arg',
+          `PRESIDIO_VERSION=${presidio.version}`,
+          '--build-arg',
+          `SPACY_MODEL_VERSION=${presidio.spacy_model_version}`,
+          '--build-arg',
+          `SPACY_MODEL_SHA256=${presidio.spacy_model_sha256}`,
+          '-t',
+          `ghcr.io/krugis/presidio-analyzer:${presidio.version}`,
+          'infra/presidio',
+        ],
+        {},
+      );
+      ctx.log(`built ghcr.io/krugis/presidio-analyzer:${presidio.version}`);
 
       ctx.tui?.setDetail?.('policy-gateway');
       await tryRun(
@@ -397,13 +424,11 @@ export const steps = [
     title: 'Platform services (postgres, keycloak, mongo, meili, valkey, traefik, mailpit)',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
-      await platformCompose(['up', '-d', '--wait'], ctx.env, ctx.config);
+      await platformCompose(['up', '-d', '--wait', ...PLATFORM_SERVICES], ctx);
       ctx.log('platform healthy');
     },
     async rollback(ctx) {
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx.env, ctx.config).catch(
-        () => {},
-      );
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
     },
   },
   {
@@ -415,21 +440,18 @@ export const steps = [
       const env = {
         DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
         KATIP_DEMO_GATEWAY_KEY: ctx.env.KATIP_DEMO_GATEWAY_KEY,
-        KATIP_TENANT_STD_LIMITS: String(ctx.config.tenant.limits.standard),
-        KATIP_TENANT_PREM_LIMITS: String(ctx.config.tenant.limits.premium),
+        KATIP_SEED: JSON.stringify(seedInput(ctx.config)),
       };
       await dockerRun(
         [
           '--network',
-          `${COMPOSE_PROJECT}_backend`,
+          backendNetwork(ctx.config),
           '-e',
           'DATABASE_URL',
           '-e',
           'KATIP_DEMO_GATEWAY_KEY',
           '-e',
-          'KATIP_TENANT_STD_LIMITS',
-          '-e',
-          'KATIP_TENANT_PREM_LIMITS',
+          'KATIP_SEED',
           '--entrypoint',
           'node',
           '-w',
@@ -446,15 +468,22 @@ export const steps = [
   },
   {
     id: 'aiplane',
-    title: 'AI plane (mock-llm, litellm, policy-gateway) + gateway smoke',
+    title: 'AI plane (mock-llm, litellm, presidio, policy-gateway) + gateway smoke',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
-      await platformCompose(['up', '-d', '--wait'], ctx.env, ctx.config);
-      await waitUntil(async () => (await curlBackend('/healthz', ctx.env)).includes('ok'), {
+      await platformCompose(['up', '-d', '--wait'], ctx);
+      // Compose doesn't notice a changed bind-mounted file, so reload it.
+      if (ctx.configChanged) {
+        await platformCompose(
+          ['up', '-d', '--wait', '--force-recreate', '--no-deps', 'litellm'],
+          ctx,
+        );
+      }
+      await waitUntil(async () => (await curlBackend(ctx, '/readyz')).includes('"ok"'), {
         timeoutMs: 180_000,
-        onTick: () => ctx.tui?.setDetail?.('waiting for gateway healthz'),
+        onTick: () => ctx.tui?.setDetail?.('waiting for gateway readyz'),
       });
-      const body = await curlBackend('/v1/chat/completions', ctx.env, [
+      const body = await curlBackend(ctx, '/v1/chat/completions', [
         '-H',
         `authorization: Bearer ${ctx.env.KATIP_DEMO_GATEWAY_KEY}`,
         '-H',
@@ -468,9 +497,7 @@ export const steps = [
       ctx.log('gateway smoke ok (chat through gateway → mock)');
     },
     async rollback(ctx) {
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx.env, ctx.config).catch(
-        () => {},
-      );
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
     },
   },
   {
@@ -478,11 +505,14 @@ export const steps = [
     title: 'Demo tenant (LibreChat up, traefik route)',
     async run(ctx) {
       renderTenantFiles(ctx);
-      await tenantCompose(['up', '-d', '--wait'], ctx.env, ctx.config);
+      await tenantCompose(
+        ['up', '-d', '--wait', ...(ctx.configChanged ? ['--force-recreate'] : [])],
+        ctx,
+      );
       const base = ctx.config.project.base_domain;
       await waitUntil(
         async () => {
-          const code = await curlEdge(`${ctx.config.tenant.slug}.${base}`, '/', ctx.env);
+          const code = await curlEdge(ctx, `${ctx.config.tenant.slug}.${base}`, '/');
           return ['200', '301', '302', '307', '308'].includes(code.trim());
         },
         {
@@ -493,14 +523,14 @@ export const steps = [
       ctx.log(`demo tenant healthy at https://${ctx.config.tenant.slug}.${base}`);
     },
     async rollback(ctx) {
-      await tenantCompose(['down', '-v', '--remove-orphans'], ctx.env, ctx.config).catch(() => {});
+      await tenantCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
     },
   },
   {
     id: 'smoke',
     title: 'End-to-end smoke (models + final report)',
     async run(ctx) {
-      const models = await curlBackend('/v1/models', ctx.env, [
+      const models = await curlBackend(ctx, '/v1/models', [
         '-H',
         `authorization: Bearer ${ctx.env.KATIP_DEMO_GATEWAY_KEY}`,
         '-H',
@@ -512,3 +542,9 @@ export const steps = [
     },
   },
 ];
+
+/** Steps that only hold while the containers run; `dev:down` makes them pending again. */
+export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke'];
+
+/** Steps a config change doesn't affect, so they stay done when re-applying. */
+export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight', 'networks']);

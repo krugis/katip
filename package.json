@@ -15,6 +15,7 @@
     "format": "prettier --write .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:setup": "vitest run --dir scripts/setup",
     "db:generate": "turbo run db:generate --filter=@katip/db",
     "db:migrate": "pnpm --filter @katip/db db:migrate",
     "db:seed": "pnpm --filter @katip/db db:seed",

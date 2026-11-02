@@ -29,11 +29,24 @@ Single-command dev bootstrap: one master config file, one secrets file, rich TUI
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P0-12 | Master config `katip.config.yaml` + `infra/env/katip.example.env`; all compose/template inputs render from these two files; secrets auto-generated once, never overwritten | 01 | P0 | done | P0-01 | Every rendered artifact derives from config + env | katip.config.yaml + katip.example.env; secrets fill-once into gitignored katip.env |
+| P0-12 | Master config `katip.config.yaml` + `infra/env/katip.example.env`; all compose/template inputs render from these two files; secrets auto-generated once, never overwritten | 01 | P0 | done | P0-01 | Every rendered artifact derives from config + env | katip.config.yaml + katip.example.env; secrets fill-once into gitignored katip.env; finished in P0-17…P0-21 |
 | P0-13 | Infra pieces: traefik static+dynamic config, dev TLS certs, postgres init (keycloak/litellm DBs), app Dockerfiles, dev LiteLLM config render, tenant + librechat templates | 01, 03, 07 | P0 | done | P0-12 | `docker compose config` validates platform+dev+tenant | traefik.yml/dev.yml, dynamic middlewares + demo ipallow, initdb script, pnpm-deploy Dockerfiles, tenant.tmpl.yml + librechat.tmpl.yaml; subsumes compose part of P0-05 |
 | P0-14 | `scripts/setup/` (`pnpm dev:up`): TUI (progress bar, step states, logs), SIGINT → keep/rollback prompt, state in `.katip/setup-state.json`, idempotent resume; `dev:down`/`dev:status`/`dev:rollback` | 01 | P0 | done | P0-13 | Interrupt at any step; keep → usable partial stack; re-run resumes; rollback cleans | Verified: mid-run SIGINT marks step partial, resume completes, rollback removes all |
 | P0-15 | Demo tenant render + LibreChat pin via bootstrap (custom endpoint → gateway) | 03, 07 | P0 | done | P0-13 | `https://demo.localhost` loads; chat routes through gateway | LibreChat v0.7.8 pinned; SME AI endpoint loaded; gateway smoke passes end-to-end |
 | P0-16 | E2E verify from clean state + smoke tests (gateway chat/models, tenant URL) | 01, 03 | P0 | done | P0-14, P0-15 | Clean run green; smoke tests pass | Full cold run green (11 containers healthy); chat via gateway returns Echo; lint/typecheck/tests/spdx/secrets/licences all pass |
+
+### Phase 0.6 — Unified setup (S1c)
+
+One script, one config file and one env file set up every building block. Each building block added later must install through `pnpm dev:up` and take its settings from these two files.
+
+| ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| P0-17 | Images, project name, domain and tenant slug all come from `katip.config.yaml`; unknown settings rejected; project renamed to `katip` | 01 | P0 | review | P0-12 | Changing a value in the config changes what runs | Compose reads images and names from the config; config validated at start; test fails if compose pins an image; `SME AI` label and `sk-sme-` key prefix unchanged (LLD-02) (#6) |
+| P0-18 | Presidio built by the bootstrap; spaCy model pinned and checksum-verified | 01, 03 | P0 | review | P1-11 | Clean install builds it with a verified model | Version and wheel sha256 in the config; image tagged by version, not `:dev` (#6) |
+| P0-19 | Models and tenant settings have one source | 01, 05 | P0 | review | P0-17 | Static LiteLLM config removed; DB catalog and tenant match the config | `models` feeds LiteLLM and `model_catalog`; seats, plan, KVKK add-on and PII policy applied; provider keys now reach LiteLLM; `seed.ts` and `DEFAULT_CATALOG` keep defaults for tests only (#6) |
+| P0-20 | Re-running `dev:up` applies config and env changes | 01 | P0 | review | P0-14 | Edit config, re-run, change is live | Hash of config + env; renaming a live project or slug is refused (#6) |
+| P0-21 | Gateway readiness and useful failure logs | 01, 03 | P0 | review | P1-04 | Gateway unhealthy until migrated; failed step's log has the error | `/readyz`; platform step no longer starts the AI plane; bearer tokens redacted from command errors (#6) |
+| P0-22 | `dev` / `prod` profiles, SOPS for production secrets | 01, 10 | P0 | todo | P0-06, P0-17…21 | One script installs either profile | Dev keeps the plaintext `katip.env`; design first |
 
 ## Phase 1 — Sellable core
 

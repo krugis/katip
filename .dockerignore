@@ -1,0 +1,9 @@
+# The image must build from source alone, and the context must never hold secrets.
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+.git
+.katip
+infra
+docs

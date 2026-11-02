@@ -1,6 +1,6 @@
 # Per-tenant compose template (LLD-01 §2.2, LLD-07). Rendered by the bootstrap
 # (dev) or provisioner (dev/test/pilot) to infra/compose/tenants/<slug>.yml
-# with project name sme-<slug>. Only traefik + LibreChat touch the edge network.
+# with project name <project>-<slug>. Only traefik + LibreChat touch the edge network.
 x-default-logging: &default-logging
   driver: json-file
   options:
@@ -9,7 +9,7 @@ x-default-logging: &default-logging
 
 services:
   lc-${KATIP_SLUG}:
-    image: ghcr.io/danny-avila/librechat:${KATIP_LIBRECHAT_VERSION}
+    image: ${KATIP_IMAGE_LIBRECHAT}
     restart: unless-stopped
     env_file:
       - ../../env/tenants/${KATIP_SLUG}.env
@@ -26,6 +26,7 @@ services:
           cpus: '${KATIP_TENANT_CPUS:-1.0}'
     labels:
       - traefik.enable=true
+      - traefik.docker.network=${KATIP_COMPOSE_PROJECT}_edge
       - traefik.http.routers.${KATIP_SLUG}.rule=Host(`${KATIP_SLUG}.${KATIP_BASE_DOMAIN}`)
       - traefik.http.routers.${KATIP_SLUG}.entrypoints=websecure
       - traefik.http.routers.${KATIP_SLUG}.tls=true
