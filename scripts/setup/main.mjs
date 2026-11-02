@@ -30,6 +30,7 @@ import {
   allTenants,
   deriveEnv,
   loadAllTenantSecrets,
+  removeLocalLlmRelay,
   platformComposeArgs,
   steps,
   tenantComposeArgs,
@@ -367,6 +368,7 @@ async function cmdDown() {
       env: { ...process.env, ...ce },
     }).catch(() => {});
   }
+  await removeLocalLlmRelay(ctx);
   console.log(dim('stopping platform…'));
   await tryRun('docker', [...platformComposeArgs(), 'down', '--remove-orphans'], {
     env: { ...process.env, ...ce },

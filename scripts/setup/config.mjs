@@ -204,6 +204,8 @@ export function composeEnv(config) {
 }
 
 /** The model_list entries for LiteLLM. Without its API key, a model routes to mock-llm. */
+export const LOCAL_LLM_RELAY_PORT = 18090;
+
 export function renderLiteLLMModels(config, env) {
   const lines = [];
   for (const m of config.models) {
@@ -211,6 +213,11 @@ export function renderLiteLLMModels(config, env) {
     lines.push(`    litellm_params:`);
     if (env[m.api_key_env]) {
       for (const [k, v] of Object.entries(m.litellm_params)) lines.push(`      ${k}: ${v}`);
+    } else if (env.KATIP_LOCAL_LLM_UPSTREAM) {
+      // A real model on this machine, reached through the relay (local-llm-relay.mjs).
+      lines.push(`      model: openai/local`);
+      lines.push(`      api_base: http://host.docker.internal:${LOCAL_LLM_RELAY_PORT}/v1`);
+      lines.push(`      api_key: os.environ/LOCAL_LLM_KEY`);
     } else {
       lines.push(`      model: openai/${m.litellm_params.model}`);
       lines.push(`      api_base: http://mock-llm:8080/v1`);

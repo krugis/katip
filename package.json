@@ -34,6 +34,7 @@
     "tenant:upgrade": "node scripts/setup/tenant-cli.mjs upgrade",
     "test:lifecycle": "node scripts/setup/lifecycle-e2e.mjs",
     "test:users": "node scripts/setup/users-e2e.mjs",
+    "test:local-llm": "node scripts/setup/local-llm-check.mjs",
     "test:console": "NODE_EXTRA_CA_CERTS=infra/traefik/dev-certs/localhost.crt node apps/console/e2e/run.mjs"
   },
   "devDependencies": {

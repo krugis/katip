@@ -15,6 +15,7 @@ import {
   seedInput,
   tenantNetworkName,
   tenantSecretName,
+  LOCAL_LLM_RELAY_PORT,
   pickTenantSubnet,
   tenantInputErrors,
 } from './config.mjs';
@@ -545,6 +546,56 @@ async function refuseIfNotActive(ctx, slug) {
 }
 
 /** The tenant's data, login client, network and gateway key. Its LibreChat comes next. */
+/**
+ * Starts or stops the relay to a model on this machine. It's outside compose because it needs
+ * the host's network, and because most installs don't have one.
+ */
+const RELAY_CONTAINER = (ctx) => `${ctx.config.project.name}-local-llm-relay`;
+
+export async function applyLocalLlmRelay(ctx) {
+  await run('docker', ['rm', '-f', RELAY_CONTAINER(ctx)]);
+  const upstream = ctx.env.KATIP_LOCAL_LLM_UPSTREAM;
+  if (!upstream) return;
+  const inspect = async (network) =>
+    (
+      await tryRun('docker', [
+        'network',
+        'inspect',
+        '-f',
+        '{{(index .IPAM.Config 0).Subnet}} {{(index .IPAM.Config 0).Gateway}}',
+        network,
+      ])
+    ).out.trim();
+  const [allow] = (await inspect(backendNetwork(ctx.config))).split(' ');
+  const [, bind] = (await inspect('bridge')).split(' ');
+  await tryRun('docker', [
+    'run',
+    '-d',
+    '--name',
+    RELAY_CONTAINER(ctx),
+    '--restart',
+    'unless-stopped',
+    '--network',
+    'host',
+    '-e',
+    `RELAY_BIND=${bind}`,
+    '-e',
+    `RELAY_PORT=${LOCAL_LLM_RELAY_PORT}`,
+    '-e',
+    `RELAY_ALLOW=${allow}`,
+    '-e',
+    `RELAY_UPSTREAM=${upstream}`,
+    '-v',
+    `${join(ROOT, 'scripts', 'setup', 'local-llm-relay.mjs')}:/relay.mjs:ro`,
+    'node:22.23.1-alpine',
+    'node',
+    '/relay.mjs',
+  ]);
+  ctx.log(`relay to the local model at ${upstream}`);
+}
+
+export const removeLocalLlmRelay = (ctx) => run('docker', ['rm', '-f', RELAY_CONTAINER(ctx)]);
+
 export async function provisionTenant(ctx, t) {
   const errors = tenantInputErrors(t);
   if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
@@ -1033,6 +1084,7 @@ export const steps = [
     title:
       'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api, console) + gateway smoke',
     async run(ctx) {
+      await applyLocalLlmRelay(ctx);
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait'], ctx);
       // Compose doesn't notice a changed bind-mounted file, so reload it.
@@ -1057,13 +1109,18 @@ export const steps = [
           '-d',
           '{"model":"fast","messages":[{"role":"user","content":"merhaba"}],"max_tokens":32}',
         ]);
-        if (!body.includes('Echo:')) {
+        // The mock echoes. A real model answers as it likes, so any answer will do.
+        const answered = ctx.env.KATIP_LOCAL_LLM_UPSTREAM
+          ? body.includes('"choices"')
+          : body.includes('Echo:');
+        if (!answered) {
           throw new Error(`gateway smoke failed for ${t.slug}: ${body.slice(0, 300)}`);
         }
       }
       ctx.log('gateway smoke ok (chat through gateway → mock)');
     },
     async rollback(ctx) {
+      await removeLocalLlmRelay(ctx);
       await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
     },
   },
@@ -1104,6 +1161,14 @@ export const steps = [
           throw new Error(`console ${path}: expected ${expected}, got ${code}`);
       }
       for (const t of ctx.config.tenants) {
+        // On a resumed run LibreChat may still be starting: WSL or Docker may have restarted.
+        await waitUntil(
+          async () =>
+            (
+              await curlEdge(ctx, `${t.slug}.${ctx.config.project.base_domain}`, '/health')
+            ).trim() === '200',
+          { timeoutMs: 180_000 },
+        );
         const models = await curlBackend(ctx, '/v1/models', [
           '-H',
           `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
@@ -1117,11 +1182,12 @@ export const steps = [
           ctx,
           t,
           'oidc-smoke.mjs',
-          {},
+          ctx.env.KATIP_LOCAL_LLM_UPSTREAM ? { REAL_MODEL: '1' } : {},
           tenantNetworkName(ctx.config, t),
         );
         await checkUsageRecorded(ctx, t, out);
-        await checkToolCallPath(ctx, t);
+        // This one relies on the mock's fixed tool call. pnpm test:local-llm covers a real model.
+        if (!ctx.env.KATIP_LOCAL_LLM_UPSTREAM) await checkToolCallPath(ctx, t);
       }
       ctx.log(
         'e2e smoke ok (models, login with MFA, chat headers, tool calls, non-member refused)',
