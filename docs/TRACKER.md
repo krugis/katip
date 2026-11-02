@@ -70,6 +70,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-14 | `usage_events` writer + Valkey outbox replay | 03, 05 | P0 | review | P1-09, P1-17 | Postgres down → events replayed later, none lost | DbUsageSink: direct insert, Valkey outbox on connection failure, background drain (5 s), idempotent uuid replay, dead-letter list; 4 store tests + e2e (#5) |
 | P1-15 | Gateway metrics (Prometheus) + OTel traces (no prompt text) | 03 | P1 | todo | P1-01 | Dashboard shows requests, tokens, latency by tenant | |
 | P1-16 | M1 demo + load baseline (50 concurrent streams, mock provider) | 03 | P0 | todo | P1-01…15 | p95 overhead under 120 ms; CPU under 1 vCPU | |
+| P1-57 | Gateway request allow list: scan every text field, drop unknown fields; tool arguments stay masked; images and files allowed and logged | 03 | P0 | review | P1-12 | Each request field tested: nothing leaves unmasked except what's decided | Owner's decisions 2026-11-02: gateway is the one control point, MCP stays open to users; tool arguments stay masked; images and files allowed for now (P3-11) |
 
 ### M2 Governance console and portal (S4–S5)
 
@@ -162,3 +163,4 @@ One script, one config file and one env file set up every building block. Each b
 | P3-08 | OpenBao per-tenant keys | 10 | P2 | todo |
 | P3-09 | ISO 27001 readiness (if required by customers) | 10 | P2 | todo |
 | P3-10 | Revisit ADR-002: shared multi-tenant LibreChat | DESIGN | P2 | todo |
+| P3-11 | Filter uploaded documents before they are sent: find open source building blocks or write our own (check licences) | 03 | P1 | todo |

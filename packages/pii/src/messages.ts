@@ -51,23 +51,32 @@ function effectiveMode(policy: PiiPolicy, type: EntityType): PiiMode {
   return policy.entities?.[type] ?? policy.mode;
 }
 
-/**
- * Masks user, system and tool messages. Assistant messages are masked too, because earlier
- * assistant turns were un-masked for the user and would otherwise leak values back to the provider.
- */
-export async function maskMessages(
-  messages: ChatMessage[],
+export interface Masker {
+  /** True when masking is on for at least one entity type. */
+  enabled: boolean;
+  maskOne(text: string): Promise<string>;
+  /** Masks many strings with one detector call, for requests holding hundreds of them. */
+  maskMany(texts: string[]): Promise<string[]>;
+  blocked(): EntityType[];
+  detectorFailed(): boolean;
+}
+
+export function createMasker(
   policy: PiiPolicy,
   map: PlaceholderMap,
   extra?: ExtraDetector,
-): Promise<MaskResult> {
+): Masker {
   const active = new Set(ALL_TYPES.filter((t) => effectiveMode(policy, t) !== 'off'));
-  if (active.size === 0) return { messages, blocked: [], detectorFailed: false };
-
   const blocked = new Set<EntityType>();
   let detectorFailed = false;
 
+  const finish = (text: string, found: Span[]): string => {
+    for (const s of found) if (effectiveMode(policy, s.type) === 'block') blocked.add(s.type);
+    return maskText(text, found, map);
+  };
+
   const maskOne = async (text: string): Promise<string> => {
+    if (active.size === 0) return text;
     let spans = detectStructured(text, active);
     // After one failure, skip the detector for the rest of the request so an
     // outage costs at most one timeout. The caller applies onDetectorFailure.
@@ -79,9 +88,57 @@ export async function maskMessages(
         detectorFailed = true;
       }
     }
-    for (const s of spans) if (effectiveMode(policy, s.type) === 'block') blocked.add(s.type);
-    return maskText(text, spans, map);
+    return finish(text, spans);
   };
+
+  const maskMany = async (texts: string[]): Promise<string[]> => {
+    if (active.size === 0 || texts.length === 0) return texts;
+    const named: Span[][] = texts.map(() => []);
+    if (extra && !detectorFailed && active.has('PERSON')) {
+      const SEPARATOR = '\n';
+      try {
+        const found = await extra(texts.join(SEPARATOR));
+        let offset = 0;
+        texts.forEach((text, i) => {
+          const end = offset + text.length;
+          for (const s of found) {
+            if (active.has(s.type) && s.start >= offset && s.end <= end) {
+              named[i]!.push({ ...s, start: s.start - offset, end: s.end - offset });
+            }
+          }
+          offset = end + SEPARATOR.length;
+        });
+      } catch {
+        detectorFailed = true;
+      }
+    }
+    return texts.map((text, i) =>
+      finish(text, resolveOverlaps([...detectStructured(text, active), ...named[i]!])),
+    );
+  };
+
+  return {
+    enabled: active.size > 0,
+    maskOne,
+    maskMany,
+    blocked: () => [...blocked],
+    detectorFailed: () => detectorFailed,
+  };
+}
+
+/**
+ * Masks user, system and tool messages. Assistant messages are masked too, because earlier
+ * assistant turns were un-masked for the user and would otherwise leak values back to the provider.
+ */
+export async function maskMessages(
+  messages: ChatMessage[],
+  policy: PiiPolicy,
+  map: PlaceholderMap,
+  extra?: ExtraDetector,
+): Promise<MaskResult> {
+  const masker = createMasker(policy, map, extra);
+  if (!masker.enabled) return { messages, blocked: [], detectorFailed: false };
+  const maskOne = masker.maskOne;
 
   const out: ChatMessage[] = [];
   for (const m of messages) {
@@ -101,5 +158,5 @@ export async function maskMessages(
       out.push(m);
     }
   }
-  return { messages: out, blocked: [...blocked], detectorFailed };
+  return { messages: out, blocked: masker.blocked(), detectorFailed: masker.detectorFailed() };
 }
