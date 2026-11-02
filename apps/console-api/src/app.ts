@@ -18,7 +18,9 @@ import {
 } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { authorize, resolveCaller, type Access, type Caller, type TokenVerifier } from './auth.js';
+import type { IdentityClient } from './identity.js';
 import type { ConsoleStore } from './stores.js';
+import { registerUserRoutes } from './users.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -33,6 +35,7 @@ declare module 'fastify' {
 
 export interface ConsoleDeps {
   store: ConsoleStore;
+  identity: IdentityClient;
   verifyToken: TokenVerifier;
   logger?: Logger;
   /** Routes added after the access check is in place; for testing that check. */
@@ -76,6 +79,9 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
     loggerInstance: log as FastifyBaseLogger,
     disableRequestLogging: false,
   }).withTypeProvider<ZodTypeProvider>();
+  app.addContentTypeParser('text/csv', { parseAs: 'string' }, (_req, body, done) =>
+    done(null, body),
+  );
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   app.decorateRequest('caller', null);
@@ -185,6 +191,8 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
     },
     async () => ({ tenants: await deps.store.listTenants() }),
   );
+
+  registerUserRoutes(app as unknown as FastifyInstance, deps, API_PREFIX, callerOf);
 
   deps.extraRoutes?.(app as unknown as FastifyInstance);
   await app.ready();

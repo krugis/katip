@@ -24,6 +24,10 @@
 | `realm_access.roles` | built-in | console RBAC |
 | `resource_access.lc-<slug>.roles` | built-in | LibreChat login gate |
 
+### 1.2 Who holds Keycloak's admin rights
+
+`console-api` faces the internet and holds none. Tested on Keycloak 26.8: adding a user to an organization needs `manage-realm`, which can also change realm settings such as the login flow and MFA, and `manage-users` can reset any password, including a provider admin's. So the rights sit in the internal **identity service** (`apps/provisioner/src/identity-server.ts`), on the backend network only, never behind Traefik, and reached with a token only console-api has. It offers fixed actions: invite, send invite, set role, enable or disable. It refuses the provider organization, the `provider_admin` role, and anyone not in that one company. A hacked console-api could still act on tenants' users, but couldn't change login rules, reach provider admins or grant `provider_admin`. The owner chose this on 2 Nov 2026.
+
 ## 2. LibreChat OIDC configuration (per tenant)
 
 ```env
@@ -52,10 +56,10 @@ These variables and the client-role path are verified on LibreChat v0.7.8 by the
 | Event | Action (provisioner / console-api) |
 | --- | --- |
 | Tenant created | Create organization `<slug>`; create client `lc-<slug>` (redirect `https://<slug>.<domain>/oauth/openid/callback`); create client role `member`; store client secret in tenant env (SOPS) |
-| User invited (console) | Create user (or link existing by email); add to organization; set attributes `tenant_id`, `department_id`; grant `member` on `lc-<slug>` + realm role; send Keycloak "execute actions" email (set password + configure passkey/OTP) |
+| User invited (console) | Through the identity service: create the user, or link one that belongs to no other company, keeping its id; add to the organization; grant `member` on `lc-<slug>` + realm role; then the governance DB row; then the Keycloak "execute actions" email (set password + configure MFA). An email already in another company answers one generic 409, so a caller can't learn where |
 | User joins via customer IdP | First login creates the user in the org (organization domain mapping); a console "pending approval" or auto-approve setting decides whether the `member` role is granted |
 | Seat assignment (tier) | Stored in governance DB `seats` (not in Keycloak); the gateway reads it |
-| User disabled | Disable in Keycloak + revoke sessions (Admin API `logout`); gateway cache invalidated via Valkey pub/sub `user.disabled` |
+| User disabled | Disable in Keycloak and end their sessions, through the identity service. The gateway and console-api read the user's status on every request, so there's no cache to clear: they refuse at once. LibreChat's own session lasts until it expires, but it can't reach a model |
 | Tenant suspended | Disable client `lc-<slug>`; gateway key revoked; LibreChat container stopped (data kept) |
 
 ## 4. Console authorisation (RBAC)

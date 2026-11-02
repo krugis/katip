@@ -75,6 +75,7 @@ export const Errors = {
       'Personal data checks are temporarily unavailable, and company policy does not allow sending without them. Please try again shortly.',
     ),
   badRequest: (msg: string) => new AppError(400, 'bad_request', msg),
+  conflict: (code: string, msg: string) => new AppError(409, code, msg),
   upstream: (msg = 'All model providers failed. Please try again.') =>
     new AppError(502, 'upstream_failed', msg),
 };

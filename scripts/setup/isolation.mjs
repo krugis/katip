@@ -11,6 +11,7 @@ const NOT_FOR_TENANTS = [
   'valkey:6379',
   'postgres:5432',
   'litellm:4000',
+  'identity:8090',
   'presidio-analyzer:3000',
   'mock-llm:8080',
   'keycloak:8080',

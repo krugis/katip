@@ -61,8 +61,20 @@ describe('the console role', () => {
     expect(rows.map((r) => r['tenant_id'])).toEqual([a]);
   });
 
+  it("can't change users outside its tenant context", async () => {
+    const none = await console_`update users set status = 'disabled' returning id`;
+    expect(none).toHaveLength(0);
+    const other = await console_.begin(async (tx) => {
+      await tx`select set_config('app.tenant_id', ${a}, true)`;
+      return tx`update users set status = 'disabled' where tenant_id = ${b} returning id`;
+    });
+    expect(other).toHaveLength(0);
+    const [row] = await admin`select status from users where tenant_id = ${b}`;
+    expect(row!['status']).toBe('active');
+  });
+
   it.each([
-    ['change users', `update users set status = 'disabled'`],
+    ['change a user email', `update users set email = 'x'`],
     ['read gateway keys', `select * from gateway_keys`],
     ['read usage', `select * from usage_events`],
     ['read the audit log', `select * from audit_log`],

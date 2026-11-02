@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Keycloak Admin API for one realm, as a service account: not the master admin, which
 // could reach every realm (LLD-02 §1).
+import type { DirectoryUser, IdentityDirectory, TenantRole } from './identity.js';
 import type { IdentityAdmin, TenantInput } from './provision.js';
 
 export interface KeycloakOptions {
@@ -8,6 +9,8 @@ export interface KeycloakOptions {
   realm: string;
   clientId: string;
   clientSecret: string;
+  /** For invite links, where the tenant input isn't at hand. */
+  baseDomain?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -21,7 +24,7 @@ interface Named {
   id: string;
 }
 
-export class KeycloakAdmin implements IdentityAdmin {
+export class KeycloakAdmin implements IdentityAdmin, IdentityDirectory {
   private readonly doFetch: typeof fetch;
   private token: string | null = null;
 
@@ -50,14 +53,21 @@ export class KeycloakAdmin implements IdentityAdmin {
 
   /** Parsed JSON; null for an empty body, and for a GET that finds nothing. */
   private async api<T>(method: string, path: string, body?: unknown): Promise<T | null> {
-    const r = await this.doFetch(`${this.opts.url}/admin/realms/${this.opts.realm}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${await this.login()}`,
-        'content-type': 'application/json',
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    const send = async () =>
+      this.doFetch(`${this.opts.url}/admin/realms/${this.opts.realm}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${await this.login()}`,
+          'content-type': 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    let r = await send();
+    // A long-running service outlives its token.
+    if (r.status === 401) {
+      this.token = null;
+      r = await send();
+    }
     if (r.status === 404 && method === 'GET') return null;
     if (!r.ok) throw new Error(`keycloak ${method} ${path.split('?')[0]}: HTTP ${r.status}`);
     const text = await r.text();
@@ -210,6 +220,89 @@ export class KeycloakAdmin implements IdentityAdmin {
     }
     const client = await this.client(clientIdOf(slug));
     if (client) await this.api('DELETE', `/clients/${client.id}`);
+  }
+
+  // ---- the identity service (identity.ts) ----------------------------------------------
+
+  async findUser(email: string): Promise<DirectoryUser | null> {
+    const users = await this.api<Named[]>(
+      'GET',
+      `/users?email=${encodeURIComponent(email)}&exact=true`,
+    );
+    return users?.[0] ?? null;
+  }
+
+  async organizationsOf(userId: string): Promise<string[]> {
+    const orgs = await this.api<{ alias: string }[]>(
+      'GET',
+      `/organizations/members/${userId}/organizations`,
+    );
+    return (orgs ?? []).map((o) => o.alias);
+  }
+
+  async realmRolesOf(userId: string): Promise<string[]> {
+    const roles = await this.api<{ name: string }[]>('GET', `/users/${userId}/role-mappings/realm`);
+    return (roles ?? []).map((r) => r.name);
+  }
+
+  async createInvitedUser(input: { email: string; name: string }): Promise<string> {
+    const [firstName, ...rest] = input.name.split(' ');
+    await this.api('POST', '/users', {
+      username: input.email,
+      email: input.email,
+      firstName,
+      lastName: rest.join(' ') || firstName,
+      enabled: true,
+      emailVerified: true,
+      requiredActions: INVITE_ACTIONS,
+    });
+    const user = await this.findUser(input.email);
+    if (!user) throw new Error('the user is missing after creating them');
+    return user.id;
+  }
+
+  async grantMembership(slug: string, userId: string): Promise<void> {
+    const client = await this.client(clientIdOf(slug));
+    if (!client) throw new Error('the LibreChat client is missing');
+    const member = await this.api('GET', `/clients/${client.id}/roles/member`);
+    await this.api('POST', `/users/${userId}/role-mappings/clients/${client.id}`, [member]);
+    const org = await this.organization(slug);
+    if (!org) throw new Error('the organization is missing');
+    const orgs = await this.organizationsOf(userId);
+    if (!orgs.includes(slug)) await this.api('POST', `/organizations/${org.id}/members`, userId);
+  }
+
+  async setRealmRole(
+    userId: string,
+    role: TenantRole,
+    allRoles: readonly TenantRole[],
+  ): Promise<void> {
+    const current = await this.api<{ name: string }[]>(
+      'GET',
+      `/users/${userId}/role-mappings/realm`,
+    );
+    const old = (current ?? []).filter(
+      (r) => r.name !== role && (allRoles as readonly string[]).includes(r.name),
+    );
+    if (old.length > 0) await this.api('DELETE', `/users/${userId}/role-mappings/realm`, old);
+    const wanted = await this.api('GET', `/roles/${role}`);
+    await this.api('POST', `/users/${userId}/role-mappings/realm`, [wanted]);
+  }
+
+  async setEnabled(userId: string, enabled: boolean): Promise<void> {
+    await this.api('PUT', `/users/${userId}`, { enabled });
+  }
+
+  async endSessions(userId: string): Promise<void> {
+    await this.api('POST', `/users/${userId}/logout`);
+  }
+
+  async sendInviteEmail(slug: string, userId: string): Promise<void> {
+    const query = new URLSearchParams({
+      client_id: clientIdOf(slug),
+      redirect_uri: `https://${slug}.${this.opts.baseDomain}/oauth/openid/callback`,
+    });
+    await this.api('PUT', `/users/${userId}/execute-actions-email?${query}`, INVITE_ACTIONS);
   }
 
   async sendInvite(userId: string, input: TenantInput): Promise<void> {

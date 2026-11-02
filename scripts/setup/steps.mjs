@@ -36,6 +36,7 @@ export const AUTO_KEYS = new Set([
   'KATIP_CONSOLE_DB_PASSWORD',
   'KATIP_PROVIDER_DB_PASSWORD',
   'KATIP_PROVISIONER_KC_SECRET',
+  'KATIP_IDENTITY_TOKEN',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -58,6 +59,7 @@ const backendNetwork = (config) => `${config.project.name}_backend`;
 const tenantProject = (config, t) => `${config.project.name}-${t.slug}`;
 const tenantFile = (t) => `infra/compose/tenants/${t.slug}.yml`;
 const tenantSecret = (ctx, t, name) => ctx.env[tenantSecretName(t.slug, name)];
+export const tenantSecretOf = tenantSecret;
 const RENDERED_COMPOSE = 'infra/compose/rendered/tenants.yml';
 
 /** `docker compose` arguments for the platform stack (project name comes from the env). */
@@ -200,7 +202,7 @@ export async function curlEdge(ctx, host, path, extra = []) {
  * Runs a scripts/setup/*.mjs file on a network with Traefik on it (default: edge), reaching
  * Keycloak and the tenant as a browser would. Uses the gateway image as a node runtime.
  */
-function runOnEdge(
+export function runOnEdge(
   ctx,
   t,
   script,
@@ -1028,7 +1030,8 @@ export const steps = [
   },
   {
     id: 'aiplane',
-    title: 'Services (mock-llm, litellm, presidio, policy-gateway, console-api) + gateway smoke',
+    title:
+      'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api) + gateway smoke',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait'], ctx);

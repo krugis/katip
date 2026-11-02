@@ -151,6 +151,40 @@ services:
         max-size: '10m'
         max-file: '3'
 
+  # Holds the Keycloak rights console-api must not (LLD-02 §1). On the backend network only,
+  # never behind Traefik.
+  identity:
+    image: ghcr.io/krugis/provisioner:dev
+    build:
+      context: ../..
+      dockerfile: apps/provisioner/Dockerfile
+    restart: unless-stopped
+    command: ['node', '/app/provisioner/dist/identity-server.js']
+    environment:
+      PORT: '8090'
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KATIP_REALM:?from katip.config.yaml}
+      KEYCLOAK_CLIENT_ID: katip-provisioner
+      KEYCLOAK_CLIENT_SECRET: ${KATIP_PROVISIONER_KC_SECRET:?from katip.env}
+      BASE_DOMAIN: ${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+      IDENTITY_TOKEN: ${KATIP_IDENTITY_TOKEN:?from katip.env}
+    networks:
+      - backend
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8090/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
   console-api:
     image: ghcr.io/krugis/console-api:dev
     build:
@@ -163,6 +197,8 @@ services:
       DATABASE_URL: postgres://katip_console:${KATIP_CONSOLE_DB_PASSWORD:?from katip.env}@postgres:5432/governance
       OIDC_ISSUER: https://auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}/realms/${KATIP_REALM:?from katip.config.yaml}
       OIDC_JWKS_URL: http://keycloak:8080/realms/${KATIP_REALM:?from katip.config.yaml}/protocol/openid-connect/certs
+      IDENTITY_URL: http://identity:8090
+      IDENTITY_TOKEN: ${KATIP_IDENTITY_TOKEN:?from katip.env}
       LOG_LEVEL: info
     networks:
       - edge
@@ -171,6 +207,8 @@ services:
       postgres:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      identity:
         condition: service_healthy
     labels:
       - traefik.enable=true
