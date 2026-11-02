@@ -8,6 +8,29 @@ x-default-logging: &default-logging
     max-file: '3'
 
 services:
+  # One per tenant: LibreChat's index names are fixed, and its sync deletes documents
+  # missing from its own Mongo database, so a shared instance would lose other
+  # tenants' search data.
+  meili-${KATIP_SLUG}:
+    image: ${KATIP_IMAGE_MEILISEARCH}
+    restart: unless-stopped
+    environment:
+      MEILI_NO_ANALYTICS: 'true'
+      MEILI_ENV: development
+    env_file:
+      - ../../env/tenants/${KATIP_SLUG}.meili.env
+    volumes:
+      - meili-${KATIP_SLUG}:/meili_data
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:7700/health']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
+
   lc-${KATIP_SLUG}:
     image: ${KATIP_IMAGE_LIBRECHAT}
     restart: unless-stopped
@@ -19,6 +42,9 @@ services:
       - |
         until node -e 'fetch(process.env.OPENID_ISSUER + "/.well-known/openid-configuration").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'; do sleep 3; done
         exec npm run backend
+    depends_on:
+      meili-${KATIP_SLUG}:
+        condition: service_healthy
     env_file:
       - ../../env/tenants/${KATIP_SLUG}.env
     volumes:
@@ -45,6 +71,7 @@ services:
 
 volumes:
   lc-uploads-${KATIP_SLUG}: {}
+  meili-${KATIP_SLUG}: {}
 
 networks:
   edge:

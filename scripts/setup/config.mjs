@@ -44,7 +44,7 @@ export function validateConfig(c) {
     }
   };
 
-  unknown(c, ['project', 'identity', 'images', 'models', 'tenant'], 'config');
+  unknown(c, ['project', 'identity', 'images', 'models', 'tenants'], 'config');
 
   unknown(c.project, ['name', 'base_domain'], 'project');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(c.project?.name ?? '')) {
@@ -114,27 +114,36 @@ export function validateConfig(c) {
     if (!m?.litellm_params?.model) errors.push(`${where}.litellm_params.model: required`);
   }
 
-  const t = c.tenant ?? {};
-  unknown(t, ['slug', 'name', 'plan', 'seats', 'kvkk_addon', 'limits', 'pii'], 'tenant');
-  if (!/^[a-z0-9-]{3,32}$/.test(t.slug ?? '')) {
-    errors.push('tenant.slug: must match ^[a-z0-9-]{3,32}$');
+  if (!Array.isArray(c.tenants) || c.tenants.length === 0) {
+    errors.push('tenants: at least one tenant is required');
   }
-  if (!t.name) errors.push('tenant.name: required');
-  if (!t.plan) errors.push('tenant.plan: required');
-  if (!Number.isInteger(t.seats) || t.seats < 1) {
-    errors.push('tenant.seats: must be a positive integer');
-  }
-  if (typeof t.kvkk_addon !== 'boolean') errors.push('tenant.kvkk_addon: must be true or false');
-  unknown(t.limits, ['standard', 'premium'], 'tenant.limits');
-  if (!isInt(t.limits?.standard) || !isInt(t.limits?.premium)) {
-    errors.push('tenant.limits: standard and premium must be integers');
-  }
-  unknown(t.pii, ['mode', 'on_detector_failure'], 'tenant.pii');
-  if (!['off', 'mask', 'block'].includes(t.pii?.mode)) {
-    errors.push('tenant.pii.mode: must be off, mask or block');
-  }
-  if (!['allow', 'block'].includes(t.pii?.on_detector_failure)) {
-    errors.push('tenant.pii.on_detector_failure: must be allow or block');
+  const slugs = new Set();
+  for (const [i, t] of (Array.isArray(c.tenants) ? c.tenants : []).entries()) {
+    const where = `tenants[${t?.slug ?? i}]`;
+    unknown(t, ['slug', 'name', 'plan', 'seats', 'kvkk_addon', 'limits', 'pii'], where);
+    if (!/^[a-z0-9-]{3,32}$/.test(t?.slug ?? '')) {
+      errors.push(`${where}.slug: must match ^[a-z0-9-]{3,32}$`);
+    }
+    if (slugs.has(t?.slug)) errors.push(`${where}: duplicate slug`);
+    slugs.add(t?.slug);
+    if (!t?.name) errors.push(`${where}.name: required`);
+    if (!t?.plan) errors.push(`${where}.plan: required`);
+    if (!Number.isInteger(t?.seats) || t.seats < 1) {
+      errors.push(`${where}.seats: must be a positive integer`);
+    }
+    if (typeof t?.kvkk_addon !== 'boolean')
+      errors.push(`${where}.kvkk_addon: must be true or false`);
+    unknown(t?.limits, ['standard', 'premium'], `${where}.limits`);
+    if (!isInt(t?.limits?.standard) || !isInt(t?.limits?.premium)) {
+      errors.push(`${where}.limits: standard and premium must be integers`);
+    }
+    unknown(t?.pii, ['mode', 'on_detector_failure'], `${where}.pii`);
+    if (!['off', 'mask', 'block'].includes(t?.pii?.mode)) {
+      errors.push(`${where}.pii.mode: must be off, mask or block`);
+    }
+    if (!['allow', 'block'].includes(t?.pii?.on_detector_failure)) {
+      errors.push(`${where}.pii.on_detector_failure: must be allow or block`);
+    }
   }
   return errors;
 }
@@ -154,7 +163,6 @@ export function composeEnv(config) {
   const env = {
     KATIP_COMPOSE_PROJECT: config.project.name,
     KATIP_BASE_DOMAIN: config.project.base_domain,
-    KATIP_TENANT_SLUG: config.tenant.slug,
     LITELLM_VERSION: litellm.version,
     LITELLM_SHA256: litellm.sha256,
     KATIP_PRESIDIO_REGISTRY: presidio.registry,
@@ -186,23 +194,44 @@ export function renderLiteLLMModels(config, env) {
 /** The custom endpoint's name in infra/librechat/librechat.tmpl.yaml. */
 export const CHAT_ENDPOINT = 'SME AI';
 
-/** The login smoke test's user: Keycloak's copy is throwaway, the DB row stays so chat works. */
-const smokeEmail = (config) => `smoke-member@${config.tenant.slug}.${config.project.base_domain}`;
+/** The login smoke test's user: disabled in Keycloak between runs, the DB row stays so chat works. */
+const smokeEmail = (config, t) => `smoke-member@${t.slug}.${config.project.base_domain}`;
+
+/** Per-tenant secrets, generated once into katip.env. */
+const TENANT_SECRETS = [
+  'GATEWAY_KEY',
+  'LC_CREDS_KEY',
+  'LC_CREDS_IV',
+  'LC_JWT_SECRET',
+  'LC_JWT_REFRESH_SECRET',
+  'LC_OIDC_CLIENT_SECRET',
+  'LC_OIDC_SESSION_SECRET',
+  'MONGO_PASSWORD',
+  'MEILI_KEY',
+  'DEMO_USER_PASSWORD',
+];
+
+export const tenantSecretName = (slug, name) =>
+  `KATIP_T_${slug.toUpperCase().replace(/-/g, '_')}_${name}`;
+
+export const tenantSecretNames = (config) =>
+  config.tenants.flatMap((t) => TENANT_SECRETS.map((name) => tenantSecretName(t.slug, name)));
 
 /** Input for scripts/setup/db-seed.mjs, which runs inside the gateway image. */
 export function seedInput(config) {
-  const t = config.tenant;
   return {
-    tenant: {
-      slug: t.slug,
-      name: t.name,
-      planCode: t.plan,
-      seats: t.seats,
-      kvkkAddon: t.kvkk_addon,
-    },
-    limits: t.limits,
-    smokeEmail: smokeEmail(config),
-    pii: { mode: t.pii.mode, onDetectorFailure: t.pii.on_detector_failure },
+    tenants: config.tenants.map((t) => ({
+      tenant: {
+        slug: t.slug,
+        name: t.name,
+        planCode: t.plan,
+        seats: t.seats,
+        kvkkAddon: t.kvkk_addon,
+      },
+      limits: t.limits,
+      smokeEmail: smokeEmail(config, t),
+      pii: { mode: t.pii.mode, onDetectorFailure: t.pii.on_detector_failure },
+    })),
     models: config.models.map((m) => ({
       id: m.alias,
       litellmName: m.alias,
@@ -218,8 +247,8 @@ export function seedInput(config) {
 }
 
 /** Input for scripts/setup/keycloak.mjs and oidc-smoke.mjs. Users match the DB seed. */
-export function identityInput(config) {
-  const { slug, name } = config.tenant;
+export function identityInput(config, t) {
+  const { slug, name } = t;
   const origin = `https://${slug}.${config.project.base_domain}`;
   const demoUser = (local, firstName, realmRole) => ({
     email: `${local}@${slug}.localhost`,
@@ -233,7 +262,7 @@ export function identityInput(config) {
     defaultLocale: config.identity.default_locale,
     baseDomain: config.project.base_domain,
     tenant: { slug, name },
-    smokeEmail: smokeEmail(config),
+    smokeEmail: smokeEmail(config, t),
     chatEndpoint: CHAT_ENDPOINT,
     client: { id: `lc-${slug}`, origin, redirectUri: `${origin}/oauth/openid/callback` },
     users: [
@@ -253,5 +282,5 @@ export function configHash(configPath = CONFIG_PATH, envPath = ENV_PATH) {
 
 export const identityOf = (config) => ({
   project: config.project.name,
-  slug: config.tenant.slug,
+  slugs: config.tenants.map((t) => t.slug),
 });

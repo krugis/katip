@@ -6,7 +6,13 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeEnv, identityInput, renderLiteLLMModels, seedInput } from './config.mjs';
+import {
+  composeEnv,
+  identityInput,
+  renderLiteLLMModels,
+  seedInput,
+  tenantSecretName,
+} from './config.mjs';
 import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const AUTO_KEYS = new Set([
@@ -15,18 +21,9 @@ export const AUTO_KEYS = new Set([
   'LITELLM_DB_PASSWORD',
   'KC_BOOTSTRAP_ADMIN_PASSWORD',
   'MONGO_PASSWORD',
-  'MEILI_MASTER_KEY',
   'LITELLM_MASTER_KEY',
   'MOCK_LLM_KEY',
   'KATIP_PII_TOKEN_KEY',
-  'KATIP_DEMO_GATEWAY_KEY',
-  'KATIP_LC_CREDS_KEY',
-  'KATIP_LC_CREDS_IV',
-  'KATIP_LC_JWT_SECRET',
-  'KATIP_LC_JWT_REFRESH_SECRET',
-  'KATIP_LC_OIDC_CLIENT_SECRET',
-  'KATIP_LC_OIDC_SESSION_SECRET',
-  'KATIP_DEMO_USER_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -43,8 +40,10 @@ export const sha256hex = (s) => createHash('sha256').update(s).digest('hex');
 
 const edgeNetwork = (config) => `${config.project.name}_edge`;
 const backendNetwork = (config) => `${config.project.name}_backend`;
-const tenantProject = (config) => `${config.project.name}-${config.tenant.slug}`;
-const tenantFile = (config) => `infra/compose/tenants/${config.tenant.slug}.yml`;
+const tenantProject = (config, t) => `${config.project.name}-${t.slug}`;
+const tenantFile = (t) => `infra/compose/tenants/${t.slug}.yml`;
+const tenantSecret = (ctx, t, name) => ctx.env[tenantSecretName(t.slug, name)];
+const RENDERED_COMPOSE = 'infra/compose/rendered/tenants.yml';
 
 /** `docker compose` arguments for the platform stack (project name comes from the env). */
 export const platformComposeArgs = () => [
@@ -55,37 +54,31 @@ export const platformComposeArgs = () => [
   'infra/compose/platform.yml',
   '-f',
   'infra/compose/dev.yml',
+  '-f',
+  RENDERED_COMPOSE,
 ];
 
 /** `docker compose` arguments for the rendered tenant stack. */
-export const tenantComposeArgs = (config) => [
+export const tenantComposeArgs = (config, t) => [
   'compose',
   '--env-file',
   'infra/env/katip.env',
   '-f',
-  tenantFile(config),
+  tenantFile(t),
   '-p',
-  tenantProject(config),
+  tenantProject(config, t),
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-const PLATFORM_SERVICES = [
-  'traefik',
-  'postgres',
-  'keycloak',
-  'mongodb',
-  'meilisearch',
-  'valkey',
-  'mailpit',
-];
+const PLATFORM_SERVICES = ['traefik', 'postgres', 'keycloak', 'mongodb', 'valkey', 'mailpit'];
 
 const platformCompose = (args, ctx) =>
   tryRun('docker', [...platformComposeArgs(), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
-const tenantCompose = (args, ctx) =>
-  tryRun('docker', [...tenantComposeArgs(ctx.config), ...args], {
+const tenantCompose = (args, ctx, t) =>
+  tryRun('docker', [...tenantComposeArgs(ctx.config, t), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
@@ -192,12 +185,12 @@ async function curlEdge(ctx, host, path, extra = []) {
  * Runs a scripts/setup/*.mjs file on the edge network, reaching Keycloak and the
  * tenant through Traefik as a browser would. Uses the gateway image as a node runtime.
  */
-function runOnEdge(ctx, script, extraEnv = {}) {
+function runOnEdge(ctx, t, script, extraEnv = {}) {
   const env = {
     KC_URL: `https://auth.${ctx.config.project.base_domain}`,
     KC_ADMIN_USER: ctx.env.KC_BOOTSTRAP_ADMIN_USER,
     KC_ADMIN_PASSWORD: ctx.env.KC_BOOTSTRAP_ADMIN_PASSWORD,
-    KATIP_IDENTITY: JSON.stringify(identityInput(ctx.config)),
+    KATIP_IDENTITY: JSON.stringify(identityInput(ctx.config, t)),
     ...extraEnv,
   };
   return dockerRun(
@@ -224,10 +217,10 @@ function runOnEdge(ctx, script, extraEnv = {}) {
  * The gateway's usage row is the proof that LibreChat's headers arrived: its user comes
  * from X-User-Email and its conversation id from X-Conversation-Id (P1-05).
  */
-async function checkUsageRecorded(ctx, smokeOutput) {
+async function checkUsageRecorded(ctx, t, smokeOutput) {
   const id = smokeOutput.match(/chat-conversation=([\w-]+)/)?.[1];
   if (!id) throw new Error('the smoke test reported no conversation id');
-  const { smokeEmail } = identityInput(ctx.config);
+  const { smokeEmail } = identityInput(ctx.config, t);
   const sql =
     `select count(*) from usage_events e join users u on u.id = e.user_id ` +
     `where e.conversation_id = '${id}' and u.email = '${smokeEmail}'`;
@@ -260,11 +253,24 @@ function renderLiteLLMConfig(ctx) {
   writeFileSync(join(ctx.infra, 'litellm', 'rendered', 'config.dev.yaml'), out);
 }
 
-const ipallowFile = (ctx) =>
-  join(ctx.infra, 'traefik', 'dynamic', `${ctx.config.tenant.slug}-ipallow.yml`);
+const ipallowFile = (ctx, t) => join(ctx.infra, 'traefik', 'dynamic', `${t.slug}-ipallow.yml`);
 
-function renderTenantFiles(ctx) {
-  const { slug } = ctx.config.tenant;
+/**
+ * What the tenants add to the platform stack. Generated as a compose file so that
+ * compose keeps it on every recreate. Dev has no DNS: containers reach public
+ * hostnames through Traefik, using the same Keycloak URL as the browser.
+ */
+function renderPlatformOverlay(ctx) {
+  const base = ctx.config.project.base_domain;
+  const aliases = [`auth.${base}`, ...ctx.config.tenants.map((t) => `${t.slug}.${base}`)];
+  const overlay = { services: { traefik: { networks: { edge: { aliases } } } } };
+  mkdirSync(join(ROOT, 'infra', 'compose', 'rendered'), { recursive: true });
+  // JSON is valid YAML.
+  writeFileSync(join(ROOT, RENDERED_COMPOSE), `${JSON.stringify(overlay, null, 2)}\n`);
+}
+
+function renderTenantFiles(ctx, t) {
+  const { slug } = t;
   const base = ctx.config.project.base_domain;
   const envDir = join(ctx.infra, 'env', 'tenants');
   mkdirSync(envDir, { recursive: true });
@@ -274,25 +280,27 @@ function renderTenantFiles(ctx) {
   const envContent = fill(tmplEnv, {
     KATIP_SLUG: slug,
     KATIP_BASE_DOMAIN: base,
-    KATIP_MONGO_PASSWORD: ctx.env.MONGO_PASSWORD,
-    KATIP_MEILI_MASTER_KEY: ctx.env.MEILI_MASTER_KEY,
-    KATIP_LC_CREDS_KEY: ctx.env.KATIP_LC_CREDS_KEY,
-    KATIP_LC_CREDS_IV: ctx.env.KATIP_LC_CREDS_IV,
-    KATIP_LC_JWT_SECRET: ctx.env.KATIP_LC_JWT_SECRET,
-    KATIP_LC_JWT_REFRESH_SECRET: ctx.env.KATIP_LC_JWT_REFRESH_SECRET,
+    KATIP_MONGO_PASSWORD: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+    KATIP_MEILI_MASTER_KEY: tenantSecret(ctx, t, 'MEILI_KEY'),
+    KATIP_LC_CREDS_KEY: tenantSecret(ctx, t, 'LC_CREDS_KEY'),
+    KATIP_LC_CREDS_IV: tenantSecret(ctx, t, 'LC_CREDS_IV'),
+    KATIP_LC_JWT_SECRET: tenantSecret(ctx, t, 'LC_JWT_SECRET'),
+    KATIP_LC_JWT_REFRESH_SECRET: tenantSecret(ctx, t, 'LC_JWT_REFRESH_SECRET'),
     KATIP_REALM: ctx.config.identity.realm,
-    KATIP_LC_OIDC_CLIENT_SECRET: ctx.env.KATIP_LC_OIDC_CLIENT_SECRET,
-    KATIP_LC_OIDC_SESSION_SECRET: ctx.env.KATIP_LC_OIDC_SESSION_SECRET,
+    KATIP_LC_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
+    KATIP_LC_OIDC_SESSION_SECRET: tenantSecret(ctx, t, 'LC_OIDC_SESSION_SECRET'),
   });
   writeFileSync(join(envDir, `${slug}.env`), envContent, { mode: 0o600 });
   chmodSync(join(envDir, `${slug}.env`), 0o600);
+  const meiliEnv = `MEILI_MASTER_KEY=${tenantSecret(ctx, t, 'MEILI_KEY')}\n`;
+  writeFileSync(join(envDir, `${slug}.meili.env`), meiliEnv, { mode: 0o600 });
+  chmodSync(join(envDir, `${slug}.meili.env`), 0o600);
 
   // librechat.yaml
   const tmplLc = readFileSync(join(ctx.infra, 'librechat', 'librechat.tmpl.yaml'), 'utf8');
-  const lc = fill(tmplLc, { KATIP_DEMO_GATEWAY_KEY: ctx.env.KATIP_DEMO_GATEWAY_KEY }).replace(
-    /<slug>/g,
-    slug,
-  );
+  const lc = fill(tmplLc, {
+    KATIP_TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
+  }).replace(/<slug>/g, slug);
   const lcDir = join(ctx.infra, 'librechat', 'rendered');
   mkdirSync(lcDir, { recursive: true });
   writeFileSync(join(lcDir, `${slug}.librechat.yaml`), lc, { mode: 0o600 });
@@ -303,6 +311,7 @@ function renderTenantFiles(ctx) {
     KATIP_SLUG: slug,
     KATIP_BASE_DOMAIN: base,
     KATIP_IMAGE_LIBRECHAT: ctx.config.images.librechat,
+    KATIP_IMAGE_MEILISEARCH: ctx.config.images.meilisearch,
     KATIP_COMPOSE_PROJECT: ctx.config.project.name,
   });
   const tDir = join(ctx.infra, 'compose', 'tenants');
@@ -311,12 +320,59 @@ function renderTenantFiles(ctx) {
 
   // Traefik ipallow middleware the tenant router refers to
   const tmplIp = readFileSync(join(ctx.infra, 'traefik', 'tenant-ipallow.tmpl.yml'), 'utf8');
-  writeFileSync(ipallowFile(ctx), fill(tmplIp, { KATIP_SLUG: slug }));
+  writeFileSync(ipallowFile(ctx, t), fill(tmplIp, { KATIP_SLUG: slug }));
 }
 
 function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
-  renderTenantFiles(ctx);
+  renderPlatformOverlay(ctx);
+  for (const t of ctx.config.tenants) renderTenantFiles(ctx, t);
+}
+
+/** LibreChat rejects these when encrypting, and katip.env values are never overwritten. */
+function checkCredentialFormats(ctx) {
+  for (const t of ctx.config.tenants) {
+    const key = tenantSecretName(t.slug, 'LC_CREDS_KEY');
+    const iv = tenantSecretName(t.slug, 'LC_CREDS_IV');
+    if (!/^[0-9a-f]{64}$/.test(ctx.env[key])) throw new Error(`${key} must be 64 hex characters`);
+    if (!/^[0-9a-f]{32}$/.test(ctx.env[iv])) throw new Error(`${iv} must be 32 hex characters`);
+  }
+}
+
+/** The tenant's own Mongo login, with access to its own database only (LLD-07). */
+async function ensureTenantMongoUser(ctx, t) {
+  const db = `lc_${t.slug}`;
+  const script =
+    'const d = db.getSiblingDB(process.env.DB);' +
+    'const spec = { pwd: process.env.TP, roles: [{ role: "readWrite", db: process.env.DB }] };' +
+    'if (d.getUser(process.env.DB)) d.updateUser(process.env.DB, spec);' +
+    'else d.createUser({ user: process.env.DB, ...spec });';
+  await tryRun(
+    'docker',
+    [
+      'exec',
+      '-e',
+      'MU',
+      '-e',
+      'MP',
+      '-e',
+      'TP',
+      '-e',
+      'DB',
+      `${ctx.config.project.name}-mongodb-1`,
+      'sh',
+      '-c',
+      `mongosh --quiet -u "$MU" -p "$MP" --authenticationDatabase admin --eval '${script}'`,
+    ],
+    {
+      env: {
+        MU: ctx.env.MONGO_USER,
+        MP: ctx.env.MONGO_PASSWORD,
+        TP: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+        DB: db,
+      },
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -349,12 +405,13 @@ export const steps = [
       const { env, changed } = ctx.ensureEnv();
       ctx.env = env;
       ctx.log(`katip.env ${changed ? 'generated' : 'present'}`);
+      checkCredentialFormats(ctx);
 
       // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
       // on a two-label name (*.localhost), so the names containers use are listed too.
       const base = ctx.config.project.base_domain;
       const hosts = [base, `*.${base}`, `auth.${base}`, `mailpit.${base}`];
-      hosts.push(`${ctx.config.tenant.slug}.${base}`);
+      hosts.push(...ctx.config.tenants.map((t) => `${t.slug}.${base}`));
       const san = `${hosts.map((h) => `DNS:${h}`).join(',')},IP:127.0.0.1`;
       const certDir = join(ctx.infra, 'traefik', 'dev-certs');
       const marker = join(certDir, 'domain');
@@ -394,12 +451,15 @@ export const steps = [
       ctx.log('rendered: litellm config, tenant files, traefik ipallow');
     },
     async rollback(ctx) {
-      const { slug } = ctx.config.tenant;
+      rmSync(join(ROOT, 'infra', 'compose', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'librechat', 'rendered'), { recursive: true, force: true });
       rmSync(join(ctx.infra, 'compose', 'tenants'), { recursive: true, force: true });
-      rmSync(join(ctx.infra, 'env', 'tenants', `${slug}.env`), { force: true });
-      rmSync(ipallowFile(ctx), { force: true });
+      for (const t of ctx.config.tenants) {
+        rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.env`), { force: true });
+        rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.meili.env`), { force: true });
+        rmSync(ipallowFile(ctx, t), { force: true });
+      }
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
     },
   },
@@ -509,7 +569,7 @@ export const steps = [
   },
   {
     id: 'platform',
-    title: 'Platform services (postgres, keycloak, mongo, meili, valkey, traefik, mailpit)',
+    title: 'Platform services (postgres, keycloak, mongo, valkey, traefik, mailpit)',
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait', ...PLATFORM_SERVICES], ctx);
@@ -530,22 +590,28 @@ export const steps = [
     id: 'identity',
     title: 'Identity (Keycloak realm, login flow, tenant client, demo users)',
     async run(ctx) {
-      await runOnEdge(ctx, 'keycloak.mjs', {
-        LC_CLIENT_SECRET: ctx.env.KATIP_LC_OIDC_CLIENT_SECRET,
-        DEMO_USER_PASSWORD: ctx.env.KATIP_DEMO_USER_PASSWORD,
-      });
+      for (const t of ctx.config.tenants) {
+        await runOnEdge(ctx, t, 'keycloak.mjs', {
+          LC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
+          DEMO_USER_PASSWORD: tenantSecret(ctx, t, 'DEMO_USER_PASSWORD'),
+        });
+      }
       ctx.log(`realm ${ctx.config.identity.realm} applied`);
     },
   },
   {
     id: 'governance-db',
-    title: 'Governance DB (migrate, seed, demo gateway key)',
+    title: 'Governance DB (migrate, seed, tenant gateway keys)',
     async run(ctx) {
       // Runs the repo's migrate + seed + demo-key upsert inside the gateway
       // image (node + our built packages) on the backend network.
       const env = {
         DATABASE_URL: `postgres://katip:${ctx.env.POSTGRES_PASSWORD}@postgres:5432/governance`,
-        KATIP_DEMO_GATEWAY_KEY: ctx.env.KATIP_DEMO_GATEWAY_KEY,
+        KATIP_TENANT_KEYS: JSON.stringify(
+          Object.fromEntries(
+            ctx.config.tenants.map((t) => [t.slug, tenantSecret(ctx, t, 'GATEWAY_KEY')]),
+          ),
+        ),
         KATIP_SEED: JSON.stringify(seedInput(ctx.config)),
       };
       await dockerRun(
@@ -555,7 +621,7 @@ export const steps = [
           '-e',
           'DATABASE_URL',
           '-e',
-          'KATIP_DEMO_GATEWAY_KEY',
+          'KATIP_TENANT_KEYS',
           '-e',
           'KATIP_SEED',
           '--entrypoint',
@@ -569,7 +635,7 @@ export const steps = [
         ],
         env,
       );
-      ctx.log('migrations + seed applied; demo gateway key stored (argon2id)');
+      ctx.log('migrations + seed applied; tenant gateway keys stored (argon2id)');
     },
   },
   {
@@ -589,17 +655,21 @@ export const steps = [
         timeoutMs: 180_000,
         onTick: () => ctx.tui?.setDetail?.('waiting for gateway readyz'),
       });
-      const body = await curlBackend(ctx, '/v1/chat/completions', [
-        '-H',
-        `authorization: Bearer ${ctx.env.KATIP_DEMO_GATEWAY_KEY}`,
-        '-H',
-        'content-type: application/json',
-        '-H',
-        'x-user-email: demo@example.com',
-        '-d',
-        '{"model":"fast","messages":[{"role":"user","content":"merhaba"}],"max_tokens":32}',
-      ]);
-      if (!body.includes('Echo:')) throw new Error(`gateway smoke failed: ${body.slice(0, 300)}`);
+      for (const t of ctx.config.tenants) {
+        const body = await curlBackend(ctx, '/v1/chat/completions', [
+          '-H',
+          `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
+          '-H',
+          'content-type: application/json',
+          '-H',
+          'x-user-email: demo@example.com',
+          '-d',
+          '{"model":"fast","messages":[{"role":"user","content":"merhaba"}],"max_tokens":32}',
+        ]);
+        if (!body.includes('Echo:')) {
+          throw new Error(`gateway smoke failed for ${t.slug}: ${body.slice(0, 300)}`);
+        }
+      }
       ctx.log('gateway smoke ok (chat through gateway → mock)');
     },
     async rollback(ctx) {
@@ -608,44 +678,53 @@ export const steps = [
   },
   {
     id: 'tenant',
-    title: 'Demo tenant (LibreChat up, traefik route)',
+    title: 'Tenants (Mongo user, Meilisearch, LibreChat, traefik route)',
     async run(ctx) {
-      renderTenantFiles(ctx);
-      await tenantCompose(
-        ['up', '-d', '--wait', ...(ctx.configChanged ? ['--force-recreate'] : [])],
-        ctx,
-      );
       const base = ctx.config.project.base_domain;
-      await waitUntil(
-        async () => {
-          const code = await curlEdge(ctx, `${ctx.config.tenant.slug}.${base}`, '/');
-          return ['200', '301', '302', '307', '308'].includes(code.trim());
-        },
-        {
-          timeoutMs: 180_000,
-          onTick: () => ctx.tui?.setDetail?.('waiting for LibreChat behind traefik'),
-        },
-      );
-      ctx.log(`demo tenant healthy at https://${ctx.config.tenant.slug}.${base}`);
+      for (const t of ctx.config.tenants) {
+        renderTenantFiles(ctx, t);
+        await ensureTenantMongoUser(ctx, t);
+        await tenantCompose(
+          ['up', '-d', '--wait', ...(ctx.configChanged ? ['--force-recreate'] : [])],
+          ctx,
+          t,
+        );
+        await waitUntil(
+          async () => {
+            const code = await curlEdge(ctx, `${t.slug}.${base}`, '/');
+            return ['200', '301', '302', '307', '308'].includes(code.trim());
+          },
+          {
+            timeoutMs: 180_000,
+            onTick: () => ctx.tui?.setDetail?.(`waiting for LibreChat ${t.slug} behind traefik`),
+          },
+        );
+        ctx.log(`tenant healthy at https://${t.slug}.${base}`);
+      }
     },
     async rollback(ctx) {
-      await tenantCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+      for (const t of ctx.config.tenants) {
+        await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch(() => {});
+      }
     },
   },
   {
     id: 'smoke',
     title: 'End-to-end smoke (models, login with MFA + final report)',
     async run(ctx) {
-      const models = await curlBackend(ctx, '/v1/models', [
-        '-H',
-        `authorization: Bearer ${ctx.env.KATIP_DEMO_GATEWAY_KEY}`,
-        '-H',
-        'x-user-email: demo@example.com',
-      ]);
-      if (!models.includes('auto'))
-        throw new Error(`gateway /v1/models failed: ${models.slice(0, 200)}`);
-      const { out } = await runOnEdge(ctx, 'oidc-smoke.mjs');
-      await checkUsageRecorded(ctx, out);
+      for (const t of ctx.config.tenants) {
+        const models = await curlBackend(ctx, '/v1/models', [
+          '-H',
+          `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
+          '-H',
+          'x-user-email: demo@example.com',
+        ]);
+        if (!models.includes('auto')) {
+          throw new Error(`gateway /v1/models failed for ${t.slug}: ${models.slice(0, 200)}`);
+        }
+        const { out } = await runOnEdge(ctx, t, 'oidc-smoke.mjs');
+        await checkUsageRecorded(ctx, t, out);
+      }
       ctx.log('e2e smoke ok (models, login with MFA, chat headers, non-member refused)');
     },
   },
@@ -655,4 +734,4 @@ export const steps = [
 export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke'];
 
 /** Steps a config change doesn't affect, so they stay done when re-applying. */
-export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight', 'networks']);
+export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight']);

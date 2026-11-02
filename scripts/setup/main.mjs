@@ -21,7 +21,7 @@ import {
   tryRun,
   requestInterrupt,
 } from './util.mjs';
-import { composeEnv, configHash, identityOf, loadConfig } from './config.mjs';
+import { composeEnv, configHash, identityOf, loadConfig, tenantSecretNames } from './config.mjs';
 import {
   AUTO_KEYS,
   KEEP_ON_CONFIG_CHANGE,
@@ -62,7 +62,7 @@ function makeCtx() {
       if (currentLog) currentLog.push(line);
     },
     ensureEnv: () => {
-      const r = ensureEnvFile(AUTO_KEYS, deriveEnv);
+      const r = ensureEnvFile(AUTO_KEYS, deriveEnv, tenantSecretNames(config));
       if (!ctx.env) ctx.env = r.env;
       currentLog = null;
       return r;
@@ -197,11 +197,12 @@ function applyConfigChanges(ctx, state) {
   const anyDone = Object.values(state.steps ?? {}).includes('done');
   const identity = identityOf(ctx.config);
   if (!fresh && anyDone && state.identity) {
-    const { project, slug } = state.identity;
-    if (project !== identity.project || slug !== identity.slug) {
+    const { project, slugs = [state.identity.slug] } = state.identity;
+    const removed = slugs.filter((s) => !identity.slugs.includes(s));
+    if (project !== identity.project || removed.length > 0) {
       console.error(
         err(
-          `project.name or tenant.slug changed (${project}/${slug} → ${identity.project}/${identity.slug}), and the running stack can't be renamed.`,
+          `project.name changed or a tenant was removed (${project}: ${slugs.join(', ')} → ${identity.project}: ${identity.slugs.join(', ')}), and the running stack can't be changed that way.`,
         ),
       );
       console.error(dim('Restore the old values, run `pnpm dev:rollback`, then change them.'));
@@ -271,13 +272,14 @@ async function rollbackAll(ctx, state) {
 function printSummary(ctx) {
   const env = ctx.env ?? {};
   const base = ctx.config.project.base_domain;
-  const { slug } = ctx.config.tenant;
   console.log('');
   console.log(ok(bold('  Kâtip dev stack is up.')));
   console.log('');
-  console.log(
-    `    ${bold('Chat UI')}          https://${slug}.${base}  (LibreChat, ${slug} tenant)`,
-  );
+  for (const t of ctx.config.tenants) {
+    console.log(
+      `    ${bold('Chat UI')}          https://${t.slug}.${base}  (LibreChat, ${t.slug} tenant)`,
+    );
+  }
   console.log(
     `    ${bold('Keycloak admin')}    https://auth.${base}  (user: ${env.KC_BOOTSTRAP_ADMIN_USER ?? 'katip-admin'})`,
   );
@@ -287,7 +289,7 @@ function printSummary(ctx) {
   console.log(dim('    Gateway smoke passed: chat through policy-gateway → LiteLLM → mock.'));
   console.log(
     dim(
-      `    Demo login: user@${slug}.localhost, password KATIP_DEMO_USER_PASSWORD in katip.env; MFA enrolment at first login.`,
+      `    Demo login: user@<tenant>.localhost, password KATIP_T_<TENANT>_DEMO_USER_PASSWORD in katip.env; MFA enrolment at first login.`,
     ),
   );
   console.log(dim(`    Secrets: infra/env/katip.env  ·  state: .katip/setup-state.json`));
@@ -332,17 +334,19 @@ async function cmdStatus() {
   } catch {
     console.log(dim('  (platform not running)'));
   }
-  try {
-    const r = await tryRun(
-      'docker',
-      [...tenantComposeArgs(ctx.config), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
-      {
-        env: { ...process.env, ...ce },
-      },
-    );
-    if (r.out.trim()) console.log(r.out.trim());
-  } catch {
-    /* tenant not created yet */
+  for (const t of ctx.config.tenants) {
+    try {
+      const r = await tryRun(
+        'docker',
+        [...tenantComposeArgs(ctx.config, t), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
+        {
+          env: { ...process.env, ...ce },
+        },
+      );
+      if (r.out.trim()) console.log(r.out.trim());
+    } catch {
+      /* tenant not created yet */
+    }
   }
 }
 
@@ -350,10 +354,12 @@ async function cmdDown() {
   const ctx = makeCtx();
   ctx.ensureEnv();
   const ce = composeEnv(ctx.config);
-  console.log(dim('stopping tenant…'));
-  await tryRun('docker', [...tenantComposeArgs(ctx.config), 'down', '--remove-orphans'], {
-    env: { ...process.env, ...ce },
-  }).catch(() => {});
+  console.log(dim('stopping tenants…'));
+  for (const t of ctx.config.tenants) {
+    await tryRun('docker', [...tenantComposeArgs(ctx.config, t), 'down', '--remove-orphans'], {
+      env: { ...process.env, ...ce },
+    }).catch(() => {});
+  }
   console.log(dim('stopping platform…'));
   await tryRun('docker', [...platformComposeArgs(), 'down', '--remove-orphans'], {
     env: { ...process.env, ...ce },
