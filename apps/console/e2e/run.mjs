@@ -500,8 +500,10 @@ try {
   await shot(admin, 'policies');
 
   console.log('access rules, through to real Traefik');
+  // In a real tab, which is what the rule has to stop, and which trusts the dev certificate.
+  const probe = await adminContext.newPage();
   const chatStatus = async () =>
-    (await fetch(`https://${slug}.${base}/health`).catch(() => ({ status: 0 }))).status;
+    (await probe.goto(`https://${slug}.${base}/health`))?.status() ?? 0;
   await admin.getByTestId('nav-tenant-access').click();
   await admin.getByTestId('access-form').waitFor();
   const myIp = (await admin.getByTestId('caller-ip').textContent()).trim();
