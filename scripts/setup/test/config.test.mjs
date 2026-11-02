@@ -240,6 +240,13 @@ describe('tenants', () => {
   });
 });
 
+describe('console-api', () => {
+  it('connects as the role row-level security binds, not the admin one', () => {
+    const dev = read('compose', 'dev.yml');
+    expect(dev).toContain('postgres://katip_console:${KATIP_CONSOLE_DB_PASSWORD');
+  });
+});
+
 describe('seedInput', () => {
   it('covers every model and tenant setting', () => {
     const s = seedInput(config);

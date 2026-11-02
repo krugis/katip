@@ -1,0 +1,30 @@
+{
+  "name": "@katip/console-api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/app.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/server.js",
+    "dev": "node --env-file=.env --watch --import tsx src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/swagger": "9.9.3",
+    "@katip/db": "workspace:*",
+    "@katip/shared": "workspace:*",
+    "drizzle-orm": "0.44.6",
+    "fastify": "5.12.7",
+    "fastify-type-provider-zod": "4.0.2",
+    "jose": "6.2.15",
+    "postgres": "3.4.7",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "11.5.1",
+    "tsx": "4.23.15"
+  }
+}

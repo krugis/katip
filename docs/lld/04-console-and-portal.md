@@ -50,6 +50,13 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 
 ## 2. API (excerpt; full OpenAPI generated)
 
+**Built so far (P1-20):** token check, role and tenant checks, problem+json errors, OpenAPI at `/api/v1/openapi.json`, `GET /api/v1/me`, `GET /api/v1/tenants/:tid` and `GET /api/v1/admin/tenants`. The rest of this table arrives with its own tasks.
+
+- **Deny by default:** the server won't start if an `/api/v1` route doesn't declare who may use it.
+- **Status codes:** no or bad token 401; wrong role 403; another tenant's resource 404, so a caller can't tell it exists.
+- **Test matrix:** `apps/console-api/test/rbac.test.ts` holds role × endpoint × own or other tenant, and fails if an API route is missing from it.
+- **Every request reads the user:** a disabled user or suspended company is refused immediately, whatever the token says.
+
 | Method | Path | Role | Notes |
 | --- | --- | --- | --- |
 | GET | `/api/v1/me` | any | User, tenant, roles, seat, quotas |

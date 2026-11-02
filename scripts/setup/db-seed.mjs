@@ -26,6 +26,11 @@ if (!/^[\w-]{32,}$/.test(gatewayPassword)) {
   throw new Error('KATIP_GATEWAY_DB_PASSWORD is missing or has the wrong format');
 }
 await client.unsafe(`ALTER ROLE katip_gateway PASSWORD '${gatewayPassword}'`);
+const consolePassword = process.env.KATIP_CONSOLE_DB_PASSWORD ?? '';
+if (!/^[\w-]{32,}$/.test(consolePassword)) {
+  throw new Error('KATIP_CONSOLE_DB_PASSWORD is missing or has the wrong format');
+}
+await client.unsafe(`ALTER ROLE katip_console PASSWORD '${consolePassword}'`);
 
 for (const { tenant, limits, pii, smokeEmail } of tenants) {
   await seed(d, { models, tenant });

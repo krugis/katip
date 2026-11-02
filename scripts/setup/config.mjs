@@ -180,6 +180,7 @@ export function composeEnv(config) {
   const env = {
     KATIP_COMPOSE_PROJECT: config.project.name,
     KATIP_BASE_DOMAIN: config.project.base_domain,
+    KATIP_REALM: config.identity.realm,
     LITELLM_VERSION: litellm.version,
     LITELLM_SHA256: litellm.sha256,
     KATIP_PRESIDIO_REGISTRY: presidio.registry,
@@ -279,6 +280,7 @@ export function identityInput(config, t) {
     locales: config.identity.locales,
     defaultLocale: config.identity.default_locale,
     baseDomain: config.project.base_domain,
+    consoleOrigin: `https://console.${config.project.base_domain}`,
     tenant: { slug, name },
     smokeEmail: smokeEmail(config, t),
     chatEndpoint: CHAT_ENDPOINT,

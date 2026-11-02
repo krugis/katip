@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Row-level security as console-api really connects: as katip_console (CLAUDE.md rule 4).
+import { migrateWithClient } from '@katip/db';
+import { PostgreSqlContainer } from '@testcontainers/postgresql';
+import postgres from 'postgres';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DbConsoleStore } from '../src/stores.js';
+
+let container: Awaited<ReturnType<PostgreSqlContainer['start']>>;
+let admin: postgres.Sql;
+let console_: postgres.Sql;
+let store: DbConsoleStore;
+let a: string;
+let b: string;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer('postgres:16.9-alpine').start();
+  admin = postgres(container.getConnectionUri(), { max: 1, onnotice: () => {} });
+  await migrateWithClient(admin);
+  await admin.unsafe(`ALTER ROLE katip_console PASSWORD 'console-test-password'`);
+  const add = async (slug: string, email: string) => {
+    const rows = await admin`insert into tenants (slug, name, status, kvkk_addon)
+      values (${slug}, ${slug}, 'active', false) returning id`;
+    const id = rows[0]!.id as string;
+    await admin`insert into users (tenant_id, keycloak_id, email, name, role, status)
+      values (${id}, ${email}, ${email}, ${email}, 'user', 'active')`;
+    return id;
+  };
+  a = await add('tenant-a', 'ayse@a.test');
+  b = await add('tenant-b', 'mehmet@b.test');
+  const url = new URL(container.getConnectionUri());
+  url.username = 'katip_console';
+  url.password = 'console-test-password';
+  console_ = postgres(url.toString(), { max: 1 });
+  store = new DbConsoleStore(url.toString());
+}, 240_000);
+
+afterAll(async () => {
+  await store?.close();
+  await console_?.end();
+  await admin?.end();
+  await container?.stop();
+});
+
+describe('the console role', () => {
+  it('is not a superuser and does not bypass RLS', async () => {
+    const [r] =
+      await admin`select rolsuper, rolbypassrls from pg_roles where rolname = 'katip_console'`;
+    expect(r).toEqual({ rolsuper: false, rolbypassrls: false });
+  });
+
+  it('sees no users without a tenant context', async () => {
+    expect(await console_`select id from users`).toHaveLength(0);
+  });
+
+  it('sees only that tenant, even with no tenant filter in the query', async () => {
+    const rows = await console_.begin(async (tx) => {
+      await tx`select set_config('app.tenant_id', ${a}, true)`;
+      return tx`select tenant_id from users`;
+    });
+    expect(rows.map((r) => r['tenant_id'])).toEqual([a]);
+  });
+
+  it.each([
+    ['change users', `update users set status = 'disabled'`],
+    ['read gateway keys', `select * from gateway_keys`],
+    ['read usage', `select * from usage_events`],
+    ['read the audit log', `select * from audit_log`],
+    ['change tenants', `update tenants set status = 'suspended'`],
+    ['drop a table', `drop table users`],
+  ])('is denied: %s', async (_label, statement) => {
+    await expect(console_.unsafe(statement)).rejects.toThrow(/permission denied|must be owner/);
+  });
+});
+
+describe('DbConsoleStore on that role', () => {
+  it('finds companies', async () => {
+    expect((await store.tenantBySlug('tenant-a'))?.id).toBe(a);
+    expect((await store.tenantById(b))?.slug).toBe('tenant-b');
+    expect(await store.tenantBySlug('nope')).toBeNull();
+    expect((await store.listTenants()).map((t) => t.slug)).toContain('tenant-b');
+  });
+
+  it('finds a user only in their own tenant', async () => {
+    expect((await store.findUser(a, 'ayse@a.test'))?.email).toBe('ayse@a.test');
+    expect(await store.findUser(a, 'mehmet@b.test')).toBeNull();
+  });
+
+  it('is ready once migrated', async () => {
+    expect(await store.ready()).toBe(true);
+  });
+});
