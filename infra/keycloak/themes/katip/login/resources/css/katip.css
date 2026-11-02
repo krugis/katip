@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Kâtip login: the brand logo on top of Keycloak's v2 theme. */
+#kc-header-wrapper {
+  height: 80px;
+  font-size: 0;
+  background: url('../img/katip-logo.svg') center / contain no-repeat;
+}

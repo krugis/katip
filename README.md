@@ -89,6 +89,7 @@ pnpm dev:rollback  # remove everything the bootstrap created
 - All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, names, domain, models, tenant). `pnpm dev:up` rejects unknown settings, and re-running it applies your edits. To change `project.name` or `tenant.slug`, run `pnpm dev:rollback` first.
 - All keys live in **infra/env/katip.env** — generated once from `katip.example.env` on first run; secrets are random and never overwritten. Real provider API keys (DeepInfra, OpenRouter, Anthropic) are optional: without them, everything routes to the mock provider.
 - An interrupted run keeps finished layers working; re-running resumes from where it stopped.
+- Login goes through Keycloak, with MFA enrolment at first login. Demo users are `admin@`, `manager@` and `user@demo.localhost`, with the password `KATIP_DEMO_USER_PASSWORD` from `infra/env/katip.env`. The dev certificate is self-signed, so your browser will warn about it.
 - After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.
 
 The gateway alone against the mock provider (no Docker):

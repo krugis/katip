@@ -11,11 +11,20 @@ services:
   lc-${KATIP_SLUG}:
     image: ${KATIP_IMAGE_LIBRECHAT}
     restart: unless-stopped
+    # LibreChat looks up the OIDC issuer once at startup and never retries, so after
+    # a restart login would stay broken if Keycloak came up later. Wait for it first.
+    command:
+      - sh
+      - -c
+      - |
+        until node -e 'fetch(process.env.OPENID_ISSUER + "/.well-known/openid-configuration").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'; do sleep 3; done
+        exec npm run backend
     env_file:
       - ../../env/tenants/${KATIP_SLUG}.env
     volumes:
       - ../../librechat/rendered/${KATIP_SLUG}.librechat.yaml:/app/librechat.yaml:ro
       - lc-uploads-${KATIP_SLUG}:/app/uploads
+      - ../../traefik/dev-certs/localhost.crt:/certs/dev-ca.crt:ro
     networks:
       - edge
       - backend

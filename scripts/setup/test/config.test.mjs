@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   composeEnv,
+  identityInput,
   loadConfig,
   renderLiteLLMModels,
   seedInput,
   validateConfig,
 } from '../config.mjs';
+import { totp } from '../kc-lib.mjs';
 import { INFRA, generatorFor, parseEnvFile, parseYaml, redact } from '../util.mjs';
 
 const config = loadConfig();
@@ -111,6 +113,45 @@ describe('renderLiteLLMModels', () => {
     expect(out).toContain('api_key: os.environ/ANTHROPIC_API_KEY');
     expect(out).toContain('vertex_location: europe-west3');
     expect(out).not.toContain('sekret');
+  });
+});
+
+describe('identity', () => {
+  it('rejects an invalid realm and a default locale that is not offered', () => {
+    const c = clone();
+    c.identity.realm = 'Not Valid';
+    c.identity.default_locale = 'de';
+    const errors = validateConfig(c);
+    expect(errors).toContain('identity.realm: must match ^[a-z0-9-]+$');
+    expect(errors).toContain('identity.default_locale: must be one of identity.locales');
+  });
+
+  it('derives the client and redirect URI from the tenant and domain', () => {
+    const c = clone();
+    c.tenant.slug = 'acme';
+    c.project.base_domain = 'example.test';
+    const i = identityInput(c);
+    expect(i.client).toEqual({
+      id: 'lc-acme',
+      origin: 'https://acme.example.test',
+      redirectUri: 'https://acme.example.test/oauth/openid/callback',
+    });
+    expect(i.users.map((u) => u.email)).toContain('admin@acme.localhost');
+  });
+
+  it('renders OIDC settings into the tenant env template only as variables', () => {
+    const tmpl = read('env', 'tenant.example.env');
+    expect(tmpl).toContain('OPENID_CLIENT_SECRET=${KATIP_LC_OIDC_CLIENT_SECRET}');
+    expect(tmpl).toContain('ALLOW_EMAIL_LOGIN=false');
+  });
+
+  it('makes LibreChat wait for the issuer before it starts', () => {
+    expect(read('compose', 'tenant.tmpl.yml')).toContain('.well-known/openid-configuration');
+  });
+
+  it('computes TOTP per the RFC 6238 test vector', () => {
+    expect(totp('12345678901234567890', 59_000, 8)).toBe('94287082');
+    expect(totp('12345678901234567890', 59_000)).toBe('287082');
   });
 });
 

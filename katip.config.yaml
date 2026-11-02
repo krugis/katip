@@ -19,6 +19,15 @@ project:
   base_domain: localhost
 
 # ------------------------------------------------------------------------------
+# Identity (LLD-02). Keycloak is configured from here by the bootstrap's identity
+# step. Locales: login pages use the default unless the user picks another.
+# ------------------------------------------------------------------------------
+identity:
+  realm: katip
+  default_locale: tr
+  locales: [tr, en]
+
+# ------------------------------------------------------------------------------
 # Image pins. Never use :latest (CLAUDE.md §7).
 # ------------------------------------------------------------------------------
 images:

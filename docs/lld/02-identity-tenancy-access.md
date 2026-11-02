@@ -4,14 +4,14 @@
 
 | Item | Value |
 | --- | --- |
-| Realm | `sme` (single realm) |
+| Realm | `identity.realm` in `katip.config.yaml`, default `katip` (single realm) |
 | Organizations | one per tenant (`alias = tenant slug`), plus `provider` for our staff |
 | Clients | `console` (public, PKCE); `lc-<slug>` per tenant LibreChat instance (confidential); `gateway-admin` (service account, provisioner only) |
 | Realm roles | `provider_admin`, `tenant_admin`, `dept_manager`, `user` |
 | Client roles (per `lc-<slug>`) | `member`: required to log in to that tenant's LibreChat |
 | Identity providers | Per tenant (optional): the customer's Entra ID (OIDC) or Google Workspace, linked to the tenant organization (Keycloak 26 organizations support IdP linking; verify behaviour for the pinned version) |
-| MFA | Browser flow copy `sme-browser`: passkeys enabled; WebAuthn or OTP **required** for local accounts; skipped when the user logs in via a linked customer IdP (their MFA applies) |
-| Themes | `sme` login theme, Turkish + English |
+| MFA | Browser flow copy `<realm>-browser`: passkeys enabled; local accounts must enrol OTP at first login (default required action `CONFIGURE_TOTP`) and can add a passkey afterwards, because Keycloak's built-in steps can't offer a choice at enrolment; a user with either credential is asked for it at login; skipped when the user logs in via a linked customer IdP (their MFA applies; not built yet) |
+| Themes | `katip` login theme (`infra/keycloak/themes`), Turkish + English |
 | Tokens | Access token 5 min, SSO session idle 30 min (tenant-configurable 15–480), max 10 h |
 
 ### 1.1 Token claims (protocol mappers)
@@ -31,7 +31,7 @@
 ALLOW_EMAIL_LOGIN=false
 ALLOW_REGISTRATION=false
 ALLOW_SOCIAL_LOGIN=true
-OPENID_ISSUER=https://auth.<domain>/realms/sme
+OPENID_ISSUER=https://auth.<domain>/realms/katip
 OPENID_CLIENT_ID=lc-<slug>
 OPENID_CLIENT_SECRET=<from provisioner>
 OPENID_SESSION_SECRET=<random 32 bytes>
@@ -44,7 +44,7 @@ OPENID_USE_END_SESSION_ENDPOINT=true
 OPENID_BUTTON_LABEL="Giriş yap / Sign in"
 ```
 
-The variables listed here are confirmed in the LibreChat Keycloak docs. Check the exact `PARAMETER_PATH` syntax for client roles (dots inside the client id) against the pinned version.
+These variables and the client-role path are verified on LibreChat v0.7.8 by the bootstrap's login smoke test. The path is split on dots, so slugs (which can't contain dots) are safe. `dev:up` applies all of this from `katip.config.yaml` through the Admin API (`scripts/setup/keycloak.mjs`).
 
 **Fallback.** If client-role paths with dashes or dots do not work, use the realm role `member-<slug>` with `realm_access.roles`.
 

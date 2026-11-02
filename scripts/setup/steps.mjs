@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { composeEnv, renderLiteLLMModels, seedInput } from './config.mjs';
+import { composeEnv, identityInput, renderLiteLLMModels, seedInput } from './config.mjs';
 import { tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
 export const AUTO_KEYS = new Set([
@@ -23,6 +23,9 @@ export const AUTO_KEYS = new Set([
   'KATIP_LC_CREDS_IV',
   'KATIP_LC_JWT_SECRET',
   'KATIP_LC_JWT_REFRESH_SECRET',
+  'KATIP_LC_OIDC_CLIENT_SECRET',
+  'KATIP_LC_OIDC_SESSION_SECRET',
+  'KATIP_DEMO_USER_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -165,6 +168,38 @@ async function curlEdge(ctx, host, path, extra = []) {
   ).then((r) => r.out);
 }
 
+/**
+ * Runs a scripts/setup/*.mjs file on the edge network, reaching Keycloak and the
+ * tenant through Traefik as a browser would. Uses the gateway image as a node runtime.
+ */
+function runOnEdge(ctx, script, extraEnv = {}) {
+  const env = {
+    KC_URL: `https://auth.${ctx.config.project.base_domain}`,
+    KC_ADMIN_USER: ctx.env.KC_BOOTSTRAP_ADMIN_USER,
+    KC_ADMIN_PASSWORD: ctx.env.KC_BOOTSTRAP_ADMIN_PASSWORD,
+    KATIP_IDENTITY: JSON.stringify(identityInput(ctx.config)),
+    ...extraEnv,
+  };
+  return dockerRun(
+    [
+      '--network',
+      edgeNetwork(ctx.config),
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      '-e',
+      'NODE_EXTRA_CA_CERTS=/certs/dev-ca.crt',
+      '-v',
+      `${join(ROOT, 'scripts', 'setup')}:/setup:ro`,
+      '-v',
+      `${join(ctx.infra, 'traefik', 'dev-certs', 'localhost.crt')}:/certs/dev-ca.crt:ro`,
+      '--entrypoint',
+      'node',
+      'ghcr.io/krugis/policy-gateway:dev',
+      `/setup/${script}`,
+    ],
+    env,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // renderers
 // ---------------------------------------------------------------------------
@@ -200,6 +235,9 @@ function renderTenantFiles(ctx) {
     KATIP_LC_CREDS_IV: ctx.env.KATIP_LC_CREDS_IV,
     KATIP_LC_JWT_SECRET: ctx.env.KATIP_LC_JWT_SECRET,
     KATIP_LC_JWT_REFRESH_SECRET: ctx.env.KATIP_LC_JWT_REFRESH_SECRET,
+    KATIP_REALM: ctx.config.identity.realm,
+    KATIP_LC_OIDC_CLIENT_SECRET: ctx.env.KATIP_LC_OIDC_CLIENT_SECRET,
+    KATIP_LC_OIDC_SESSION_SECRET: ctx.env.KATIP_LC_OIDC_SESSION_SECRET,
   });
   writeFileSync(join(envDir, `${slug}.env`), envContent, { mode: 0o600 });
   chmodSync(join(envDir, `${slug}.env`), 0o600);
@@ -267,12 +305,16 @@ export const steps = [
       ctx.env = env;
       ctx.log(`katip.env ${changed ? 'generated' : 'present'}`);
 
-      // dev TLS cert for the base domain; regenerated when the domain changes
+      // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
+      // on a two-label name (*.localhost), so the names containers use are listed too.
       const base = ctx.config.project.base_domain;
+      const hosts = [base, `*.${base}`, `auth.${base}`, `mailpit.${base}`];
+      hosts.push(`${ctx.config.tenant.slug}.${base}`);
+      const san = `${hosts.map((h) => `DNS:${h}`).join(',')},IP:127.0.0.1`;
       const certDir = join(ctx.infra, 'traefik', 'dev-certs');
       const marker = join(certDir, 'domain');
       const current = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
-      if (!existsSync(join(certDir, 'localhost.crt')) || current !== base) {
+      if (!existsSync(join(certDir, 'localhost.crt')) || current !== san) {
         mkdirSync(certDir, { recursive: true });
         execFileSync(
           'openssl',
@@ -292,11 +334,12 @@ export const steps = [
             '-subj',
             `/CN=${base}`,
             '-addext',
-            `subjectAltName=DNS:${base},DNS:*.${base},IP:127.0.0.1`,
+            `subjectAltName=${san}`,
           ],
           { stdio: 'ignore' },
         );
-        writeFileSync(marker, `${base}\n`);
+        writeFileSync(marker, `${san}\n`);
+        ctx.certRegenerated = true;
         ctx.log('dev TLS cert generated');
       } else {
         ctx.log('dev TLS cert present');
@@ -425,10 +468,28 @@ export const steps = [
     async run(ctx) {
       ctx.tui?.setDetail?.('docker compose up --wait');
       await platformCompose(['up', '-d', '--wait', ...PLATFORM_SERVICES], ctx);
+      // Traefik only reads the certificate when it starts.
+      if (ctx.certRegenerated) {
+        await platformCompose(
+          ['up', '-d', '--wait', '--force-recreate', '--no-deps', 'traefik'],
+          ctx,
+        );
+      }
       ctx.log('platform healthy');
     },
     async rollback(ctx) {
       await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+    },
+  },
+  {
+    id: 'identity',
+    title: 'Identity (Keycloak realm, login flow, tenant client, demo users)',
+    async run(ctx) {
+      await runOnEdge(ctx, 'keycloak.mjs', {
+        LC_CLIENT_SECRET: ctx.env.KATIP_LC_OIDC_CLIENT_SECRET,
+        DEMO_USER_PASSWORD: ctx.env.KATIP_DEMO_USER_PASSWORD,
+      });
+      ctx.log(`realm ${ctx.config.identity.realm} applied`);
     },
   },
   {
@@ -528,7 +589,7 @@ export const steps = [
   },
   {
     id: 'smoke',
-    title: 'End-to-end smoke (models + final report)',
+    title: 'End-to-end smoke (models, login with MFA + final report)',
     async run(ctx) {
       const models = await curlBackend(ctx, '/v1/models', [
         '-H',
@@ -538,7 +599,8 @@ export const steps = [
       ]);
       if (!models.includes('auto'))
         throw new Error(`gateway /v1/models failed: ${models.slice(0, 200)}`);
-      ctx.log('e2e smoke ok');
+      await runOnEdge(ctx, 'oidc-smoke.mjs');
+      ctx.log('e2e smoke ok (models, login with MFA, non-member refused)');
     },
   },
 ];
