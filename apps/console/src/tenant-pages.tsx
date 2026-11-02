@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A tenant admin's screens (LLD-04 §1.2, tracker P1-26).
 import { useCreate, useList, useUpdate } from '@refinedev/core';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, apiFetch, apiSend, type GetToken, type Me } from './api';
@@ -630,6 +630,134 @@ const toMicro = (usd: FormDataEntryValue | null): number | null => {
   return text === '' ? null : Math.round(Number(text) * 1_000_000);
 };
 
+interface DepartmentPolicy {
+  override: {
+    aliases?: Record<string, boolean>;
+    atQuotaLimit?: string;
+    pii?: { mode: string };
+  };
+  company: {
+    aliases: Record<string, boolean>;
+    atQuotaLimit: string;
+    pii: { mode: string };
+  };
+}
+
+function DepartmentRules({ path, getToken }: { path: string; getToken: GetToken }) {
+  const { t } = useTranslation();
+  const problemText = useProblemText();
+  const client = useQueryClient();
+  const rules = useQuery({
+    queryKey: ['department-policy', path],
+    queryFn: () => apiFetch<DepartmentPolicy>(path, getToken),
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  if (!rules.data) return null;
+  const { override, company } = rules.data;
+  const piiRank = ['off', 'mask', 'block'];
+  const limitRank = ['overage', 'downgrade', 'block'];
+  const stricter = (rank: string[], current: string) => rank.slice(rank.indexOf(current) + 1);
+
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const data = new FormData(e.currentTarget);
+    const aliases = Object.fromEntries(
+      Object.keys(company.aliases)
+        .filter((a) => company.aliases[a] && !data.get(`alias-${a}`))
+        .map((a) => [a, false]),
+    );
+    const pii = String(data.get('pii') ?? '');
+    const limit = String(data.get('limit') ?? '');
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await apiSend<DepartmentPolicy>('PUT', path, getToken, {
+        ...(Object.keys(aliases).length > 0 ? { aliases } : {}),
+        ...(pii ? { pii: { mode: pii } } : {}),
+        ...(limit ? { atQuotaLimit: limit } : {}),
+      });
+      client.setQueryData(['department-policy', path], result);
+      setSaved(true);
+    } catch (err) {
+      setError(problemText(err));
+    }
+  };
+
+  return (
+    <form
+      onSubmit={(e) => void submit(e)}
+      className="border-t border-line p-3"
+      data-testid="department-rules"
+    >
+      <h3 className="text-sm font-medium">{t('departments.rules')}</h3>
+      <p className="mt-1 text-sm text-muted">{t('departments.rulesHelp')}</p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <label className={LABEL}>
+          {t('policy.pii')}
+          <select
+            name="pii"
+            data-testid="rules-pii"
+            className={`mt-1 ${INPUT}`}
+            defaultValue={override.pii?.mode ?? ''}
+          >
+            <option value="">{t('departments.sameAsCompany')}</option>
+            {stricter(piiRank, company.pii.mode).map((m) => (
+              <option key={m} value={m}>
+                {t(`policy.piiMode.${m}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={LABEL}>
+          {t('policy.atLimit')}
+          <select
+            name="limit"
+            data-testid="rules-limit"
+            className={`mt-1 ${INPUT}`}
+            defaultValue={override.atQuotaLimit ?? ''}
+          >
+            <option value="">{t('departments.sameAsCompany')}</option>
+            {stricter(limitRank, company.atQuotaLimit).map((m) => (
+              <option key={m} value={m}>
+                {t(`policy.limit.${m}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <fieldset className="mt-3">
+        <legend className="text-sm font-medium">{t('policy.aliases')}</legend>
+        {(['auto', 'fast', 'best'] as const)
+          .filter((a) => company.aliases[a])
+          .map((a) => (
+            <label key={a} className="mt-1 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name={`alias-${a}`}
+                data-testid={`rules-alias-${a}`}
+                defaultChecked={override.aliases?.[a] ?? true}
+              />
+              {t(`policy.alias.${a}`)}
+            </label>
+          ))}
+      </fieldset>
+      <div className="mt-3 flex items-center gap-3">
+        <Button variant="primary" type="submit" data-testid="rules-save">
+          {t('departments.saveRules')}
+        </Button>
+        {saved && (
+          <p className="text-sm text-muted" role="status" data-testid="rules-saved">
+            {t('policy.saved')}
+          </p>
+        )}
+      </div>
+      {error && <Alert>{error}</Alert>}
+    </form>
+  );
+}
+
 function DepartmentEditor({
   department,
   managers,
@@ -721,7 +849,7 @@ function DepartmentEditor({
   );
 }
 
-export function TenantDepartments({ me }: { me: Me }) {
+export function TenantDepartments({ me, getToken }: { me: Me; getToken: GetToken }) {
   const { t, i18n } = useTranslation();
   const problemText = useProblemText();
   const tenantId = me.tenant!.id;
@@ -802,12 +930,18 @@ export function TenantDepartments({ me }: { me: Me }) {
           {rows.map((d) => (
             <li key={d.id} data-testid={`department-${d.name}`}>
               {editing === d.id ? (
-                <DepartmentEditor
-                  department={d}
-                  managers={managers}
-                  resource={resource}
-                  onClose={() => setEditing(null)}
-                />
+                <>
+                  <DepartmentEditor
+                    department={d}
+                    managers={managers}
+                    resource={resource}
+                    onClose={() => setEditing(null)}
+                  />
+                  <DepartmentRules
+                    path={`/tenants/${tenantId}/departments/${d.id}/policy`}
+                    getToken={getToken}
+                  />
+                </>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
                   <div>

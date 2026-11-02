@@ -61,6 +61,43 @@ const actorOf = (caller: Caller): Actor =>
     ? { type: 'provider', id: caller.sub }
     : { type: 'user', id: caller.user.id };
 
+/** What a department can set, which is only ever stricter than its company. */
+export const OverrideSchema = z
+  .object({
+    aliases: PolicySchema.shape.aliases.partial().optional(),
+    allowedModels: z.array(z.string().min(1)).max(200).optional(),
+    atQuotaLimit: z.enum(['block', 'downgrade', 'overage']).optional(),
+    pii: z.object({ mode: PiiMode }).strict().optional(),
+  })
+  .strict();
+export type OverrideDocument = z.infer<typeof OverrideSchema>;
+
+const PII_STRICTNESS = { off: 0, mask: 1, block: 2 };
+const LIMIT_STRICTNESS = { overage: 0, downgrade: 1, block: 2 };
+
+/** Why this override would loosen the company's policy, if it would. */
+export function looserThan(company: PolicyDocument, override: OverrideDocument): string | null {
+  for (const [alias, on] of Object.entries(override.aliases ?? {})) {
+    if (on && !company.aliases[alias as keyof PolicyDocument['aliases']]) {
+      return 'A department cannot turn on an option the company has off';
+    }
+  }
+  const models = override.allowedModels ?? [];
+  if (company.allowedModels.length > 0 && models.some((m) => !company.allowedModels.includes(m))) {
+    return 'A department cannot allow a model the company does not';
+  }
+  if (
+    override.atQuotaLimit &&
+    LIMIT_STRICTNESS[override.atQuotaLimit] < LIMIT_STRICTNESS[company.atQuotaLimit]
+  ) {
+    return 'A department cannot be less strict at the quota limit';
+  }
+  if (override.pii && PII_STRICTNESS[override.pii.mode] < PII_STRICTNESS[company.pii.mode]) {
+    return 'A department cannot protect personal data less than the company does';
+  }
+  return null;
+}
+
 export function registerPolicyRoutes(
   parent: FastifyInstance,
   store: ConsoleStore,
@@ -87,6 +124,61 @@ export function registerPolicyRoutes(
       const policy = await store.policy(req.params.tid);
       if (!policy) throw Errors.notFound();
       return policy;
+    },
+  );
+
+  app.get(
+    `${prefix}/tenants/:tid/departments/:did/policy`,
+    {
+      config: { access },
+      schema: {
+        summary: "A department's stricter rules, and the company's",
+        security: secured,
+        params: TenantParams.extend({ did: z.string().uuid() }),
+        response: {
+          200: z.object({ override: OverrideSchema, company: PolicySchema }),
+          ...errors,
+        },
+      },
+    },
+    async (req) => {
+      const found = await store.departmentPolicy(req.params.tid, req.params.did);
+      if (!found) throw Errors.notFound();
+      return found;
+    },
+  );
+
+  app.put(
+    `${prefix}/tenants/:tid/departments/:did/policy`,
+    {
+      config: { access },
+      schema: {
+        summary: "Set a department's stricter rules",
+        security: secured,
+        params: TenantParams.extend({ did: z.string().uuid() }),
+        body: OverrideSchema,
+        response: {
+          200: z.object({ override: OverrideSchema, company: PolicySchema }),
+          ...errors,
+        },
+      },
+    },
+    async (req) => {
+      const current = await store.departmentPolicy(req.params.tid, req.params.did);
+      if (!current) throw Errors.notFound();
+      const why = looserThan(current.company, req.body);
+      if (why) throw Errors.badRequest(why);
+      const saved = await store.saveDepartmentPolicy(
+        req.params.tid,
+        req.params.did,
+        req.body,
+        actorOf(callerOf(req)),
+      );
+      if (!saved) throw Errors.notFound();
+      await Promise.resolve(events && publishPolicyChanged(events, req.params.tid)).catch(
+        (e: Error) => log.warn({ err: { name: e.name } }, 'could not announce the policy change'),
+      );
+      return saved;
     },
   );
 

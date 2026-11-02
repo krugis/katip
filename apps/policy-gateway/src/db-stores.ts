@@ -16,6 +16,8 @@ import {
   type QuotaDecision,
   type RouterRule,
   type TenantPolicy,
+  tightenPolicy,
+  type DepartmentOverride,
 } from '@katip/policy-engine';
 import type { PiiPolicy } from '@katip/pii';
 import * as schema from '@katip/db';
@@ -682,9 +684,10 @@ export class DbPolicySource {
     );
     const row = rows[0];
     const base = { ...DEFAULT_POLICY, ...((row?.policy as Partial<TenantPolicy>) ?? {}) };
-    const rawOverride = (row?.override ?? {}) as Partial<TenantPolicy> & { pii?: StoredPii };
+    const rawOverride = (row?.override ?? {}) as DepartmentOverride & { pii?: StoredPii };
     const { pii: overridePii, ...override } = rawOverride;
-    const policy = { ...base, ...override };
+    // Only ever stricter, whatever is stored and whenever the company last changed.
+    const policy = tightenPolicy(base, override);
     return { policy, pii: effectivePii(row?.policy, overridePii) };
   }
 }

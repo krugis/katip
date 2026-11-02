@@ -1629,6 +1629,84 @@ describe('usage alerts', () => {
   });
 });
 
+describe("a department's stricter rules", () => {
+  const path = (dept: string, tenant = a) => `/api/v1/tenants/${tenant}/departments/${dept}/policy`;
+  let dept: string;
+  const setCompany = async (change: object) => {
+    const current = (await send('GET', `/api/v1/tenants/${a}/policy`)).json();
+    return send('PUT', `/api/v1/tenants/${a}/policy`, {
+      policy: { ...current.policy, ...change },
+      version: current.version,
+    });
+  };
+  beforeEach(async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${a}, 'Satış') returning id`;
+    dept = d!['id'] as string;
+  });
+
+  it('saves what is stricter, audits it, and tells the gateways', async () => {
+    announced.length = 0;
+    const res = await send('PUT', path(dept), {
+      aliases: { best: false },
+      atQuotaLimit: 'block',
+      pii: { mode: 'block' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().override).toMatchObject({ atQuotaLimit: 'block', pii: { mode: 'block' } });
+    const [row] = await admin`select policy_override from departments where id = ${dept}`;
+    expect(row!['policy_override']).toMatchObject({ aliases: { best: false } });
+    expect(announced).toEqual([`policy.changed ${a}`]);
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'department.policy', target_id: dept });
+  });
+
+  it('can clear them', async () => {
+    await send('PUT', path(dept), { atQuotaLimit: 'block' });
+    expect((await send('PUT', path(dept), {})).json().override).toEqual({});
+  });
+
+  it.each([
+    ['less personal data protection', { pii: { mode: 'off' } }],
+    ['less strictness at the limit', { atQuotaLimit: 'overage' }],
+    ['a setting it has no say in', { residency: 'EU_ONLY' }],
+  ])('refuses %s, and changes nothing', async (_label, body) => {
+    expect((await send('PUT', path(dept), body)).statusCode).toBe(400);
+    const [row] = await admin`select policy_override from departments where id = ${dept}`;
+    expect(row!['policy_override']).toBeNull();
+  });
+
+  it('refuses what the company has off, or does not allow', async () => {
+    const catalog = (await send('GET', `/api/v1/tenants/${a}/policy`)).json().catalog;
+    const [one, two] = catalog.map((m: { id: string }) => m.id);
+    await setCompany({
+      aliases: { auto: true, fast: true, best: false, 'tr-local': false },
+      allowedModels: [one],
+    });
+    expect((await send('PUT', path(dept), { aliases: { best: true } })).statusCode).toBe(400);
+    expect((await send('PUT', path(dept), { allowedModels: [two] })).statusCode).toBe(400);
+    expect((await send('PUT', path(dept), { allowedModels: [one] })).statusCode).toBe(200);
+  });
+
+  it("can't reach another company's department", async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${b}, 'Theirs') returning id`;
+    const id = d!['id'] as string;
+    expect((await send('GET', path(id))).statusCode).toBe(404);
+    expect((await send('PUT', path(id), { atQuotaLimit: 'block' })).statusCode).toBe(404);
+    expect((await send('GET', path(id, b))).statusCode).toBe(404);
+  });
+
+  it('keeps per-entity choices on the company policy, and refuses unknown modes', async () => {
+    const saved = await setCompany({
+      pii: { mode: 'mask', entities: { PERSON: 'off', TR_TCKN: 'block' } },
+    });
+    expect(saved.json().policy.pii.entities).toEqual({ PERSON: 'off', TR_TCKN: 'block' });
+    const bad = await setCompany({ pii: { mode: 'mask', entities: { PERSON: 'sometimes' } } });
+    expect(bad.statusCode).toBe(400);
+  });
+});
+
 describe('parseCsv', () => {
   it('reads Excel on a Turkish system: semicolons, byte order mark, CRLF', () => {
     const { columns, rows } = parseCsv('\uFEFFEmail;Name\r\nayse@a.test;Ayşe\r\n\r\n');

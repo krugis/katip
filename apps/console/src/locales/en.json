@@ -143,7 +143,11 @@
     "noManagerYet": "No manager assigned",
     "noBudget": "No budget",
     "people_one": "{{count}} person",
-    "people_other": "{{count}} people"
+    "people_other": "{{count}} people",
+    "rules": "Stricter rules",
+    "rulesHelp": "A department can only be stricter than the company.",
+    "sameAsCompany": "Same as the company",
+    "saveRules": "Save rules"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",
@@ -203,7 +207,24 @@
     },
     "residencyAddon": "Choosing a data location comes with the KVKK add-on.",
     "save": "Save",
-    "saved": "Saved. It takes effect within 30 seconds."
+    "saved": "Saved. It takes effect within 30 seconds.",
+    "entities": "By kind of data",
+    "entitiesHelp": "Choose to treat a kind of data differently from the setting above.",
+    "entityDefault": "As above",
+    "entityMode": {
+      "mask": "Mask",
+      "block": "Block",
+      "off": "Off"
+    },
+    "entity": {
+      "TR_TCKN": "Turkish ID number",
+      "TR_VKN": "Tax number",
+      "TR_IBAN": "Bank account (IBAN)",
+      "TR_PHONE": "Phone number",
+      "EMAIL_ADDRESS": "Email address",
+      "CREDIT_CARD": "Credit card",
+      "PERSON": "Person’s name"
+    }
   },
   "access": {
     "ipAllowlist": "Allowed IP addresses",

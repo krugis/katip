@@ -9,3 +9,4 @@ export {
   type QuotaDecision,
 } from './quota.js';
 export { DEFAULT_CATALOG, DEFAULT_RULES, DEFAULT_POLICY } from './defaults.js';
+export { tightenPolicy, type DepartmentOverride } from './tighten.js';

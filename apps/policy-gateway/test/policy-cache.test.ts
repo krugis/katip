@@ -138,14 +138,14 @@ describe('P1-10 effective policy cache + policy.changed invalidation', () => {
     expect(cached.policy.atQuotaLimit).toBe('block'); // still the old override
 
     // The console edits the department override, then publishes.
-    await pg`update departments set policy_override = '{"atQuotaLimit":"overage"}'::jsonb where id = ${deptId}`;
+    await pg`update departments set policy_override = '{}'::jsonb where id = ${deptId}`;
     await publishPolicyChanged(redis, tenantId);
 
     // give the subscriber a moment to process the notification
     await new Promise((r) => setTimeout(r, 250));
 
     const after = await src.effectivePolicy(tenant(), user());
-    expect(after.policy.atQuotaLimit).toBe('overage'); // fresh from DB
+    expect(after.policy.atQuotaLimit).toBe('downgrade'); // fresh from DB
     await src.close();
   });
 
