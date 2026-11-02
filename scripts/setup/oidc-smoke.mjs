@@ -7,7 +7,17 @@
 // Uses users with a random password. The member stays in Keycloak, disabled between
 // runs: LibreChat refuses a login when a known email arrives with a new Keycloak id.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { adminClient, findClient, findUser, grantClientRole, totp } from './kc-lib.mjs';
+import {
+  adminClient,
+  browser,
+  findClient,
+  findUser,
+  grantClientRole,
+  parseForm,
+  submit,
+  totp,
+  USER_AGENT,
+} from './kc-lib.mjs';
 
 const {
   realm,
@@ -27,72 +37,6 @@ const api = await adminClient(
 const R = `/realms/${realm}`;
 const lcUrl = `https://${tenant.slug}.${baseDomain}`;
 const password = randomBytes(24).toString('base64url');
-// LibreChat rejects API calls without a browser's user agent.
-const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36';
-
-/** Minimal browser: a cookie jar and manual redirects. */
-function browser() {
-  const jar = new Map();
-  async function go(url, init = {}) {
-    let current = url;
-    let opts = init;
-    for (let hops = 0; hops < 12; hops++) {
-      const host = new URL(current).host;
-      const cookies = cookieHeader(host);
-      const r = await fetch(current, {
-        ...opts,
-        redirect: 'manual',
-        headers: {
-          'user-agent': USER_AGENT,
-          ...opts.headers,
-          ...(cookies ? { cookie: cookies } : {}),
-        },
-      });
-      for (const c of r.headers.getSetCookie()) {
-        const [pair] = c.split(';');
-        const eq = pair.indexOf('=');
-        jar.set(`${host}|${pair.slice(0, eq)}`, pair.slice(eq + 1));
-      }
-      const next = r.headers.get('location');
-      if (r.status >= 300 && r.status < 400 && next) {
-        current = new URL(next, current).href;
-        opts = {};
-        continue;
-      }
-      return { status: r.status, url: current, html: await r.text() };
-    }
-    throw new Error('too many redirects');
-  }
-  const cookieHeader = (host) =>
-    [...jar.entries()]
-      .filter(([k]) => k.startsWith(`${host}|`))
-      .map(([k, v]) => `${k.split('|')[1]}=${v}`)
-      .join('; ');
-  return { go, cookieHeader, hasCookie: (host, name) => jar.has(`${host}|${name}`) };
-}
-
-const decode = (s) => s.replace(/&amp;/g, '&').replace(/&#x3D;/g, '=');
-
-/** The page's form: action URL and hidden fields. */
-function parseForm(html) {
-  const form = html.match(/<form[^>]*action="([^"]+)"[^>]*>[\s\S]*?<\/form>/);
-  if (!form) throw new Error('no form on the page');
-  const fields = {};
-  for (const tag of form[0].match(/<input[^>]*>/g) ?? []) {
-    if (!/type="hidden"/.test(tag)) continue;
-    const name = tag.match(/name="([^"]+)"/)?.[1];
-    if (name) fields[name] = decode(tag.match(/value="([^"]*)"/)?.[1] ?? '');
-  }
-  return { action: decode(form[1]), fields };
-}
-
-const submit = (b, form, extra) =>
-  b.go(form.action, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ ...form.fields, ...extra }),
-  });
-
 async function makeUser(email) {
   await api('POST', `${R}/users`, {
     username: email,

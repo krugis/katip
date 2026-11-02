@@ -3,6 +3,7 @@ import { createLogger } from '@katip/shared';
 import { buildApi } from './app.js';
 import { createVerifier, remoteKeys } from './auth.js';
 import { loadConfig } from './config.js';
+import { HttpIdentityClient } from './identity.js';
 import { DbConsoleStore } from './stores.js';
 
 const config = loadConfig();
@@ -11,6 +12,7 @@ const store = new DbConsoleStore(config.DATABASE_URL);
 
 const app = await buildApi({
   store,
+  identity: new HttpIdentityClient(config.IDENTITY_URL, config.IDENTITY_TOKEN),
   verifyToken: createVerifier({
     issuer: config.OIDC_ISSUER,
     audience: config.OIDC_AUDIENCE,

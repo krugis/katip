@@ -139,6 +139,9 @@ importers:
       drizzle-orm:
         specifier: 0.44.6
         version: 0.44.6(postgres@3.4.7)
+      fastify:
+        specifier: 5.12.7
+        version: 5.12.7
       mongodb:
         specifier: 7.8.0
         version: 7.8.0

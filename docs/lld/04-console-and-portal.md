@@ -64,7 +64,8 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | POST | `/api/v1/me/requests` | any | `{type: premium_access/budget/model, reason}` |
 | POST | `/api/v1/me/privacy/export` | any | Async job; returns job id |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/users` | tenant_admin | Invite, change tier/department/role, disable |
-| POST | `/api/v1/tenants/:tid/users:import` | tenant_admin | CSV (email, name, department, tier) |
+| POST | `/api/v1/tenants/:tid/users/:uid/invite` | tenant_admin | Send the invite again |
+| POST | `/api/v1/tenants/:tid/users/import` | tenant_admin | CSV (email, name, department, tier); comma or semicolon. Up to 1000 rows, each reported as created, skipped or failed |
 | GET/PUT | `/api/v1/tenants/:tid/policy` | tenant_admin | Effective policy JSON (zod `TenantPolicy`) |
 | GET/PUT | `/api/v1/tenants/:tid/access-rules` | tenant_admin | Validates lock-out (§LLD-02 6) |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/departments` | tenant_admin | |

@@ -7,7 +7,8 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWK } from
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApi } from '../src/app.js';
 import { createVerifier, type Role } from '../src/auth.js';
-import type { ConsoleStore, TenantRecord, UserRecord } from '../src/stores.js';
+import type { IdentityClient } from '../src/identity.js';
+import type { ConsoleStore, ManagedUser, TenantRecord, UserRecord } from '../src/stores.js';
 
 type SigningKey = Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
 
@@ -30,7 +31,24 @@ const user = (email: string, status = 'active'): UserRecord => ({
   role: 'user',
   status,
 });
+const managed: ManagedUser = {
+  ...user('ayse@acme.test'),
+  departmentId: null,
+  seatPlanCode: 'business',
+  lastSeenAt: null,
+};
+const identity: IdentityClient = {
+  invite: async () => ({ keycloakId: 'kc' }),
+  sendInvite: async () => undefined,
+  setRole: async () => undefined,
+  setEnabled: async () => undefined,
+};
 const store: ConsoleStore = {
+  listUsers: async () => [managed],
+  userById: async () => managed,
+  departmentIdByName: async () => null,
+  createUser: async () => managed,
+  updateUser: async () => managed,
   tenantBySlug: async (slug) => tenants.find((t) => t.slug === slug) ?? null,
   tenantById: async (id) => tenants.find((t) => t.id === id) ?? null,
   listTenants: async () => tenants,
@@ -77,6 +95,17 @@ const get = (url: string, bearer?: string) =>
     headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
   });
 
+const call = (row: (typeof MATRIX)[number], url: string, bearer?: string) =>
+  api.inject({
+    method: row.method ?? 'GET',
+    url,
+    headers: {
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      ...(typeof row.body === 'string' ? { 'content-type': 'text/csv' } : {}),
+    },
+    ...(row.body === undefined ? {} : { payload: row.body }),
+  });
+
 beforeAll(async () => {
   const pair = await generateKeyPair('RS256', { extractable: true });
   privateKey = pair.privateKey as SigningKey;
@@ -84,6 +113,7 @@ beforeAll(async () => {
   const jwk: JWK = { ...(await exportJWK(pair.publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
   api = await buildApi({
     store,
+    identity,
     verifyToken: createVerifier({
       issuer: ISSUER,
       audience: AUDIENCE,
@@ -101,8 +131,12 @@ const asRole = (role: Who): TokenOptions =>
     : { roles: role === 'none' ? [] : [role] };
 
 /** Expected status for each role, on own tenant and another tenant's. */
+const ADMIN_ONLY = { dept_manager: 403, user: 403, none: 403 };
+const OTHER_TENANT = { tenant_admin: 404, dept_manager: 404, user: 404, none: 404 };
 const MATRIX: {
   route: string;
+  method?: 'GET' | 'POST' | 'PATCH';
+  body?: object | string;
   url: (tenant: string) => string;
   own: Record<Who, number>;
   other?: Record<Who, number>;
@@ -123,6 +157,43 @@ const MATRIX: {
     url: () => '/api/v1/admin/tenants',
     own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
   },
+  {
+    route: '/api/v1/tenants/:tid/users',
+    url: (t) => `/api/v1/tenants/${t}/users`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/users',
+    method: 'POST',
+    body: { email: 'new@acme.test', name: 'New' },
+    url: (t) => `/api/v1/tenants/${t}/users`,
+    own: { provider_admin: 201, tenant_admin: 201, ...ADMIN_ONLY },
+    other: { provider_admin: 201, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/users/:uid',
+    method: 'PATCH',
+    body: { name: 'New name' },
+    url: (t) => `/api/v1/tenants/${t}/users/${USER_ID}`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/users/:uid/invite',
+    method: 'POST',
+    url: (t) => `/api/v1/tenants/${t}/users/${USER_ID}/invite`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/users/import',
+    method: 'POST',
+    body: 'email,name\n',
+    url: (t) => `/api/v1/tenants/${t}/users/import`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
 ];
 
 describe('RBAC matrix', () => {
@@ -135,17 +206,18 @@ describe('RBAC matrix', () => {
 
   for (const row of MATRIX) {
     for (const role of Object.keys(row.own) as Who[]) {
-      it(`${row.route} as ${role}, own tenant → ${row.own[role]}`, async () => {
-        const res = await get(row.url(A), await token(asRole(role)));
+      const label = `${row.method ?? 'GET'} ${row.route}`;
+      it(`${label} as ${role}, own tenant → ${row.own[role]}`, async () => {
+        const res = await call(row, row.url(A), await token(asRole(role)));
         expect(res.statusCode).toBe(row.own[role]);
       });
-      it(`${row.route} with no token → 401`, async () => {
-        expect((await get(row.url(A))).statusCode).toBe(401);
+      it(`${label} with no token → 401`, async () => {
+        expect((await call(row, row.url(A))).statusCode).toBe(401);
       });
       if (row.other) {
         const expected = row.other[role];
-        it(`${row.route} as ${role}, other tenant → ${expected}`, async () => {
-          const res = await get(row.url(B), await token(asRole(role)));
+        it(`${label} as ${role}, other tenant → ${expected}`, async () => {
+          const res = await call(row, row.url(B), await token(asRole(role)));
           expect(res.statusCode).toBe(expected);
         });
       }
@@ -261,6 +333,7 @@ describe('deny by default', () => {
     await expect(
       buildApi({
         store,
+        identity,
         verifyToken: async () => ({}),
         logger: createLogger('test', { level: 'silent' }),
         extraRoutes: (app) => {
