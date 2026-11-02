@@ -283,5 +283,39 @@
     "noPrivacyRequests": "Bekleyen kişisel veri isteği yok.",
     "markDone": "Tamamlandı olarak işaretle",
     "otherRequests": "Diğer istekler"
+  },
+  "audit": {
+    "filter": "Olay türü",
+    "all": "Tümü",
+    "empty": "Henüz kayıt yok.",
+    "when": "Zaman",
+    "who": "Kim",
+    "what": "Ne yaptı",
+    "detail": "Ayrıntı",
+    "more": "Daha fazla göster",
+    "deletedUser": "Artık şirkette olmayan kullanıcı",
+    "actorType": {
+      "system": "Sistem",
+      "provider": "Sağlayıcı"
+    },
+    "action": {
+      "user_invite": "Kullanıcı davet edildi",
+      "user_update": "Kullanıcı değiştirildi",
+      "department_create": "Departman oluşturuldu",
+      "department_update": "Departman değiştirildi",
+      "policy_update": "Politika değiştirildi",
+      "access_rules_update": "Erişim kuralları değiştirildi",
+      "request_create": "İstek gönderildi",
+      "request_decide": "İstek karara bağlandı",
+      "privacy_export": "Veriler indirildi",
+      "privacy_delete_request": "Silme istendi",
+      "privacy_complete": "Kişisel veri isteği tamamlandı",
+      "tenant_create": "Şirket oluşturuldu",
+      "tenant_suspend": "Şirket askıya alındı",
+      "tenant_resume": "Şirket yeniden açıldı",
+      "tenant_delete": "Şirket silindi",
+      "tenant_restore": "Şirket geri yüklendi",
+      "tenant_purge": "Şirket verileri temizlendi"
+    }
   }
 }

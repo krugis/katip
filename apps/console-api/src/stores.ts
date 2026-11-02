@@ -161,7 +161,32 @@ export interface PrivacyRequestView {
 /** Enough open requests from one person for anyone to get through. */
 const MAX_OPEN_REQUESTS = 10;
 
+export interface AuditEntry {
+  id: string;
+  ts: string;
+  action: string;
+  actorType: string;
+  /** A person's name and email, if they're in this company. */
+  actor: string | null;
+  targetType: string;
+  targetId: string | null;
+  details: Record<string, unknown> | null;
+}
+
+export interface AuditQuery {
+  action?: string | undefined;
+  before?: string | undefined;
+  limit: number;
+}
+
 export interface ConsoleStore {
+  auditPage(
+    tenantId: string,
+    query: AuditQuery,
+  ): Promise<{ entries: AuditEntry[]; next: string | null }>;
+  auditAcrossTenants(
+    query: AuditQuery & { tenant?: string | undefined },
+  ): Promise<{ entries: (AuditEntry & { tenantSlug: string })[]; next: string | null }>;
   /** Inclusive UTC days. With a department or person, only what's counted to them. */
   usage(
     tenantId: string,
@@ -964,6 +989,16 @@ export class DbConsoleStore implements ConsoleStore {
           status: schema.requests.status,
           createdAt: schema.requests.createdAt,
         });
+      // The type only: the reason is the person's own words.
+      await this.audit(
+        tx,
+        tenantId,
+        { type: 'user', id: userId },
+        'request.create',
+        row!.id,
+        { type },
+        'request',
+      );
       return {
         id: row!.id,
         type,
@@ -1184,6 +1219,74 @@ export class DbConsoleStore implements ConsoleStore {
       );
       return { ...row.view, status, decidedAt: decidedAt.toISOString() };
     });
+  }
+
+  async auditPage(
+    tenantId: string,
+    query: AuditQuery,
+  ): Promise<{ entries: AuditEntry[]; next: string | null }> {
+    const a = schema.auditLog;
+    const rows = await this.inTenant(tenantId, (tx) =>
+      tx
+        .select({
+          id: a.id,
+          ts: a.ts,
+          action: a.action,
+          actorType: a.actorType,
+          actorId: a.actorId,
+          targetType: a.targetType,
+          targetId: a.targetId,
+          details: a.details,
+          actorName: schema.users.name,
+          actorEmail: schema.users.email,
+        })
+        .from(a)
+        .leftJoin(
+          schema.users,
+          and(
+            eq(a.actorType, 'user'),
+            sql`${schema.users.id}::text = ${a.actorId}`,
+            eq(schema.users.tenantId, tenantId),
+          ),
+        )
+        .where(
+          and(
+            eq(a.tenantId, tenantId),
+            query.action ? eq(a.action, query.action) : undefined,
+            query.before ? sql`${a.ts} < ${query.before}::timestamptz` : undefined,
+          ),
+        )
+        .orderBy(desc(a.ts))
+        .limit(query.limit + 1),
+    );
+    const page = rows.slice(0, query.limit);
+    return {
+      entries: page.map((r) => ({
+        id: r.id,
+        ts: r.ts.toISOString(),
+        action: r.action,
+        actorType: r.actorType,
+        actor: r.actorName ? `${r.actorName} (${r.actorEmail})` : null,
+        targetType: r.targetType,
+        targetId: r.targetId,
+        details: (r.details as Record<string, unknown> | null) ?? null,
+      })),
+      next: rows.length > query.limit ? page.at(-1)!.ts.toISOString() : null,
+    };
+  }
+
+  async auditAcrossTenants(query: AuditQuery & { tenant?: string | undefined }) {
+    const tenants = await this.listTenants();
+    const chosen = query.tenant ? tenants.filter((t) => t.id === query.tenant) : tenants;
+    // One company at a time: row-level security gives this role no other way in.
+    const pages = await Promise.all(
+      chosen.map(async (t) =>
+        (await this.auditPage(t.id, query)).entries.map((e) => ({ ...e, tenantSlug: t.slug })),
+      ),
+    );
+    const all = pages.flat().sort((x, y) => y.ts.localeCompare(x.ts));
+    const entries = all.slice(0, query.limit);
+    return { entries, next: all.length > query.limit ? entries.at(-1)!.ts : null };
   }
 
   private async accessRulesOf(tx: Tx, tenantId: string): Promise<AccessRulesView> {

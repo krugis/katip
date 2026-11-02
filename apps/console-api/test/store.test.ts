@@ -77,7 +77,8 @@ describe('the console role', () => {
     ['change a user email', `update users set email = 'x'`],
     ['read gateway keys', `select * from gateway_keys`],
     ['read usage', `select * from usage_events`],
-    ['read the audit log', `select * from audit_log`],
+    ['change the audit log', `update audit_log set action = 'x'`],
+    ['delete from the audit log', `delete from audit_log`],
     ['change tenants', `update tenants set status = 'suspended'`],
     ['drop a table', `drop table users`],
   ])('is denied: %s', async (_label, statement) => {

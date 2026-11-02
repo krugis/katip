@@ -791,6 +791,26 @@ try {
   await shot(person, 'user-disabled');
   await userContext.close();
 
+  console.log('the audit log');
+  await admin.goto(`${consoleUrl}/tenant/audit`);
+  await admin.getByTestId('audit-table').waitFor();
+  const auditText = await admin.getByTestId('audit-table').textContent();
+  check(auditText.includes('Kullanıcı davet edildi'), 'it shows what happened, in Turkish');
+  check(auditText.includes(owner), 'and who did it');
+  check(auditText.includes('Sistem'), 'and what the system did, such as creating the company');
+  await admin.getByTestId('audit-action').selectOption('policy.update');
+  await admin
+    .locator('[data-testid=audit-table] tr[data-action=policy\\.update]')
+    .first()
+    .waitFor();
+  check(
+    (await admin
+      .locator('[data-testid=audit-table] tbody tr:not([data-action=policy\\.update])')
+      .count()) === 0,
+    'it can be narrowed to one kind of event',
+  );
+  await shot(admin, 'audit');
+
   console.log('provider admin');
   providerEmail = `staff-${slug}@katip.test`;
   await api('POST', `${R}/users`, {
@@ -822,6 +842,12 @@ try {
     'the company list comes from the real API',
   );
   check((await provider.getByTestId('open-chat').count()) === 0, 'has no chat link');
+  await provider.getByTestId('nav-provider-audit').click();
+  await provider.getByTestId('audit-table').waitFor();
+  check(
+    (await provider.getByTestId('audit-table').textContent()).includes(slug),
+    'sees the audit log across companies',
+  );
   await shot(provider, 'provider');
   await providerContext.close();
 
