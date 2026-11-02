@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Seed data (LLD-05 §4): plans v1, model catalog from LLD-03 §3, router rules v1
 // from LLD-03 §4, and a `demo` tenant with 3 users for local dev.
+import { and, eq, ne, notInArray } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { isCliEntry } from './cli-entry.js';
 import * as schema from './schema.js';
+
+/** What the bootstrap passes from katip.config.yaml; the defaults suit tests and `pnpm db:seed`. */
+export interface SeedOptions {
+  /** Replaces the default catalog; models not listed get disabled. */
+  models?: (typeof schema.modelCatalog.$inferInsert)[];
+  tenant?: {
+    slug: string;
+    name: string;
+    planCode: string;
+    seats: number;
+    kvkkAddon: boolean;
+  };
+}
 
 export interface SeedResult {
   tenants: number;
@@ -94,6 +108,14 @@ const MODELS: (typeof schema.modelCatalog.$inferInsert)[] = [
     priceOutUsdMicroPerM: 0,
   },
 ];
+
+const DEMO_TENANT: NonNullable<SeedOptions['tenant']> = {
+  slug: 'demo',
+  name: 'Demo A.Ş.',
+  planCode: 'business',
+  seats: 10,
+  kvkkAddon: false,
+};
 
 const PLANS: (typeof schema.plans.$inferInsert)[] = [
   {
@@ -237,14 +259,37 @@ const ROUTER_RULES: (typeof schema.routerRules.$inferInsert)[] = [
   },
 ];
 
-export async function seed(db: PostgresJsDatabase<typeof schema>): Promise<SeedResult> {
+export async function seed(
+  db: PostgresJsDatabase<typeof schema>,
+  opts: SeedOptions = {},
+): Promise<SeedResult> {
+  const models = opts.models ?? MODELS;
+  const tenant = opts.tenant ?? DEMO_TENANT;
+
+  // Fail before writing: a bad config must not leave a half-applied catalog.
+  const modelIds = models.map((m) => m.id);
+  for (const r of ROUTER_RULES) {
+    for (const id of (r.route as { models: string[] }).models) {
+      if (!modelIds.includes(id)) {
+        throw new Error(`router rule ${r.id} uses model ${id}, which is not in the catalog`);
+      }
+    }
+  }
+  if (!PLANS.some((p) => p.code === tenant.planCode)) {
+    throw new Error(`unknown plan ${tenant.planCode}`);
+  }
+
   // Idempotent upserts; versioned rows (plans) are never updated in place.
-  for (const m of MODELS) {
+  for (const m of models) {
     await db
       .insert(schema.modelCatalog)
       .values(m)
-      .onConflictDoUpdate({ target: schema.modelCatalog.id, set: m });
+      .onConflictDoUpdate({ target: schema.modelCatalog.id, set: { ...m, enabled: true } });
   }
+  await db
+    .update(schema.modelCatalog)
+    .set({ enabled: false })
+    .where(notInArray(schema.modelCatalog.id, modelIds));
   for (const p of PLANS) {
     await db.insert(schema.plans).values(p).onConflictDoNothing();
   }
@@ -259,36 +304,55 @@ export async function seed(db: PostgresJsDatabase<typeof schema>): Promise<SeedR
   const demoTenant = await db
     .insert(schema.tenants)
     .values({
-      slug: 'demo',
-      name: 'Demo A.Ş.',
+      slug: tenant.slug,
+      name: tenant.name,
       status: 'active',
       region: 'eu',
-      kvkkAddon: false,
+      kvkkAddon: tenant.kvkkAddon,
     })
-    .onConflictDoUpdate({ target: schema.tenants.slug, set: { name: 'Demo A.Ş.' } })
+    .onConflictDoUpdate({
+      target: schema.tenants.slug,
+      set: { name: tenant.name, kvkkAddon: tenant.kvkkAddon },
+    })
     .returning();
   const tenantId = demoTenant[0]!.id;
 
   await db
+    .delete(schema.seats)
+    .where(and(eq(schema.seats.tenantId, tenantId), ne(schema.seats.planCode, tenant.planCode)));
+  await db
     .insert(schema.seats)
-    .values({ tenantId, planCode: 'business', quantity: 10 })
-    .onConflictDoNothing();
+    .values({ tenantId, planCode: tenant.planCode, quantity: tenant.seats })
+    .onConflictDoUpdate({
+      target: [schema.seats.tenantId, schema.seats.planCode],
+      set: { quantity: tenant.seats },
+    });
 
   const demoUsers = [
-    { email: 'admin@demo.localhost', name: 'Demo Admin', role: 'admin', keycloakId: 'demo-admin' },
     {
-      email: 'manager@demo.localhost',
+      email: `admin@${tenant.slug}.localhost`,
+      name: 'Demo Admin',
+      role: 'admin',
+      keycloakId: `${tenant.slug}-admin`,
+    },
+    {
+      email: `manager@${tenant.slug}.localhost`,
       name: 'Demo Manager',
       role: 'manager',
-      keycloakId: 'demo-manager',
+      keycloakId: `${tenant.slug}-manager`,
     },
-    { email: 'user@demo.localhost', name: 'Demo User', role: 'user', keycloakId: 'demo-user' },
+    {
+      email: `user@${tenant.slug}.localhost`,
+      name: 'Demo User',
+      role: 'user',
+      keycloakId: `${tenant.slug}-user`,
+    },
   ];
   for (const u of demoUsers) {
     // Two unique constraints exist (tenant_id,email) and (keycloak_id); handle both.
     await db
       .insert(schema.users)
-      .values({ ...u, tenantId, seatPlanCode: 'business', status: 'active' })
+      .values({ ...u, tenantId, seatPlanCode: tenant.planCode, status: 'active' })
       .onConflictDoUpdate({
         target: [schema.users.tenantId, schema.users.email],
         set: { name: u.name, role: u.role, keycloakId: u.keycloakId },
@@ -299,7 +363,7 @@ export async function seed(db: PostgresJsDatabase<typeof schema>): Promise<SeedR
     tenants: 1,
     users: demoUsers.length,
     plans: PLANS.length,
-    models: MODELS.length,
+    models: models.length,
     rules: ROUTER_RULES.length,
   };
 }

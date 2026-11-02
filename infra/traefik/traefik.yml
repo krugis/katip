@@ -20,7 +20,7 @@ providers:
   docker:
     endpoint: 'unix:///var/run/docker.sock'
     exposedByDefault: false
-    network: sme-platform_edge
+    # Network: set per container with the traefik.docker.network label.
   file:
     directory: /etc/traefik/dynamic
     watch: true

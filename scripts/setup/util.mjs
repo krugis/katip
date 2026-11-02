@@ -138,6 +138,7 @@ export function parseEnvFile(text) {
     // strip inline comment (space + #), like docker compose env files
     const h = v.indexOf(' #');
     if (h !== -1) v = v.slice(0, h).trim();
+    if (v.startsWith('#')) v = '';
     out[t.slice(0, eq).trim()] = v;
   }
   return out;
@@ -147,6 +148,17 @@ export const genSecret = (bytes = 32) => randomBytes(bytes).toString('base64url'
 
 /** Gateway key format (LLD-02 §5): sk-sme-t-<secret>; secret's first 8 chars = lookup prefix. */
 export const genGatewayKey = () => `sk-sme-t-${randomBytes(24).toString('base64url')}`;
+
+const genHex = (bytes) => randomBytes(bytes).toString('hex');
+
+/** Secret generator for an AUTO key. LibreChat requires CREDS_KEY = 32 bytes and
+ * CREDS_IV = 16 bytes, both hex. */
+export function generatorFor(key) {
+  if (key === 'KATIP_DEMO_GATEWAY_KEY') return genGatewayKey;
+  if (key === 'KATIP_LC_CREDS_KEY') return () => genHex(32);
+  if (key === 'KATIP_LC_CREDS_IV') return () => genHex(16);
+  return () => genSecret(32);
+}
 
 /**
  * Ensure infra/env/katip.env exists with every key from the template.
@@ -161,7 +173,7 @@ export function ensureEnvFile(autoKeys, derive) {
   let changed = false;
   for (const k of Object.keys(out)) {
     if (autoKeys.has(k) && (!out[k] || out[k] === 'AUTO')) {
-      out[k] = k === 'KATIP_DEMO_GATEWAY_KEY' ? genGatewayKey() : genSecret(32);
+      out[k] = generatorFor(k)();
       changed = true;
     }
   }
@@ -298,10 +310,13 @@ export function clearInterruptPending() {
   interruptFlag = false;
 }
 
+/** Hides bearer tokens: command errors are shown on screen and written to logs. */
+export const redact = (s) => s.replace(/Bearer \S+/g, 'Bearer ***');
+
 export async function tryRun(cmd, args, opts = {}) {
   const r = await run(cmd, args, opts);
   if (r.code !== 0)
-    throw new Error(`${cmd} ${args.join(' ')} → exit ${r.code}\n${tail(r.out, 25)}`);
+    throw new Error(redact(`${cmd} ${args.join(' ')} → exit ${r.code}\n${tail(r.out, 25)}`));
   return r;
 }
 

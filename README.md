@@ -55,7 +55,8 @@ infra/
   compose/          Docker Compose: platform, dev overrides, tenant template
   traefik/          static + dynamic Traefik config, dev TLS certs (generated)
   litellm/          self-built LiteLLM (pinned + checksum), dev config template
-  env/              katip.example.env (template) — real env is generated, gitignored
+  presidio/         self-built Presidio analyzer (pinned + checksum) for name detection
+  env/              katip.example.env and tenant template — real env is generated, gitignored
 scripts/setup/      the one-stop bootstrap behind pnpm dev:up
 katip.config.yaml   master configuration (image pins, models, demo tenant)
 docs/               design, low-level designs, ADRs, tracker
@@ -76,7 +77,7 @@ pnpm lint && pnpm typecheck
 
 ### One-command dev stack
 
-`pnpm dev:up` brings up the whole platform — Traefik, Postgres (+pgvector), Keycloak, MongoDB, Meilisearch, Valkey, Mailpit, self-built LiteLLM (pinned + checksum-verified), the Kâtip policy gateway, the mock provider and a `demo` LibreChat tenant — with a progress TUI:
+`pnpm dev:up` brings up the whole platform — Traefik, Postgres (+pgvector), Keycloak, MongoDB, Meilisearch, Valkey, Mailpit, self-built LiteLLM (pinned + checksum-verified), Presidio (name detection), the Kâtip policy gateway, the mock provider and a `demo` LibreChat tenant — with a progress TUI:
 
 ```bash
 pnpm dev:up        # install or resume the bootstrap (Ctrl+C: keep or rollback)
@@ -85,7 +86,7 @@ pnpm dev:down      # stop everything (data kept)
 pnpm dev:rollback  # remove everything the bootstrap created
 ```
 
-- All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, models, tenant).
+- All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, names, domain, models, tenant). `pnpm dev:up` rejects unknown settings, and re-running it applies your edits. To change `project.name` or `tenant.slug`, run `pnpm dev:rollback` first.
 - All keys live in **infra/env/katip.env** — generated once from `katip.example.env` on first run; secrets are random and never overwritten. Real provider API keys (DeepInfra, OpenRouter, Anthropic) are optional: without them, everything routes to the mock provider.
 - An interrupted run keeps finished layers working; re-running resumes from where it stopped.
 - After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.

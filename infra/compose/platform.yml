@@ -1,8 +1,9 @@
 # Kâtip platform services (LLD-01 §2.1) — one set per environment.
 # Only traefik publishes host ports. Everything else is reachable only on the
 # internal `edge`/`backend` networks. `dev.yml` adds dev-only overrides and the
-# AI plane. Secrets come from infra/env/katip.env; versions from katip.config.yaml.
-name: sme-platform
+# AI plane. Secrets come from infra/env/katip.env; images, names and the domain
+# from katip.config.yaml (the bootstrap passes them as environment variables).
+name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
 
 x-default-logging: &default-logging
   driver: json-file
@@ -12,7 +13,7 @@ x-default-logging: &default-logging
 
 services:
   traefik:
-    image: traefik:v3.7.17
+    image: ${KATIP_IMAGE_TRAEFIK:?from katip.config.yaml}
     restart: unless-stopped
     command:
       - --configFile=/etc/traefik/traefik.yml
@@ -35,7 +36,7 @@ services:
     logging: *default-logging
 
   postgres:
-    image: pgvector/pgvector:0.8.7-pg16-trixie
+    image: ${KATIP_IMAGE_POSTGRES:?from katip.config.yaml}
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-katip}
@@ -57,7 +58,7 @@ services:
     logging: *default-logging
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1
+    image: ${KATIP_IMAGE_KEYCLOAK:?from katip.config.yaml}
     restart: unless-stopped
     command: ['start', '--http-enabled=true', '--http-port=8080', '--health-enabled=true']
     environment:
@@ -67,7 +68,7 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KC_DB_PASSWORD:?from katip.env}
-      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.localhost}
+      KC_HOSTNAME: auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: 'true'
     depends_on:
@@ -78,7 +79,8 @@ services:
       - backend
     labels:
       - traefik.enable=true
-      - traefik.http.routers.keycloak.rule=Host(`auth.localhost`)
+      - traefik.docker.network=${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
+      - traefik.http.routers.keycloak.rule=Host(`auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}`)
       - traefik.http.routers.keycloak.entrypoints=websecure
       - traefik.http.routers.keycloak.tls=true
       - traefik.http.services.keycloak.loadbalancer.server.port=8080
@@ -95,7 +97,7 @@ services:
     logging: *default-logging
 
   mongodb:
-    image: mongo:7.0.16
+    image: ${KATIP_IMAGE_MONGODB:?from katip.config.yaml}
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-katip}
@@ -117,7 +119,7 @@ services:
     logging: *default-logging
 
   meilisearch:
-    image: getmeili/meilisearch:v1.56.0
+    image: ${KATIP_IMAGE_MEILISEARCH:?from katip.config.yaml}
     restart: unless-stopped
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?from katip.env}
@@ -136,7 +138,7 @@ services:
     logging: *default-logging
 
   valkey:
-    image: valkey/valkey:8.0.12
+    image: ${KATIP_IMAGE_VALKEY:?from katip.config.yaml}
     restart: unless-stopped
     command: ['valkey-server', '--appendonly', 'yes']
     volumes:
@@ -152,14 +154,15 @@ services:
     logging: *default-logging
 
   mailpit:
-    image: axllent/mailpit:v1.33.0
+    image: ${KATIP_IMAGE_MAILPIT:?from katip.config.yaml}
     restart: unless-stopped
     networks:
       - edge
       - backend
     labels:
       - traefik.enable=true
-      - traefik.http.routers.mailpit.rule=Host(`mailpit.localhost`)
+      - traefik.docker.network=${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
+      - traefik.http.routers.mailpit.rule=Host(`mailpit.${KATIP_BASE_DOMAIN:?from katip.config.yaml}`)
       - traefik.http.routers.mailpit.entrypoints=websecure
       - traefik.http.routers.mailpit.tls=true
       - traefik.http.services.mailpit.loadbalancer.server.port=8025
@@ -173,10 +176,10 @@ services:
 
 networks:
   edge:
-    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_edge
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
     external: true
   backend:
-    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_backend
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_backend
     external: true
 
 volumes:

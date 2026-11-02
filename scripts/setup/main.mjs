@@ -10,7 +10,6 @@
  *
  * Flags: --fresh (ignore state), --redo <ids> (force steps), --yes (no prompts)
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import {
@@ -19,11 +18,18 @@ import {
   ensureEnvFile,
   loadState,
   saveState,
-  parseYaml,
   tryRun,
   requestInterrupt,
 } from './util.mjs';
-import { AUTO_KEYS, TENANT_PROJECT, composeEnv, deriveEnv, steps } from './steps.mjs';
+import { composeEnv, configHash, identityOf, loadConfig } from './config.mjs';
+import {
+  AUTO_KEYS,
+  KEEP_ON_CONFIG_CHANGE,
+  deriveEnv,
+  platformComposeArgs,
+  steps,
+  tenantComposeArgs,
+} from './steps.mjs';
 import { Tui, bold, dim, err, ok, warn } from './tui.mjs';
 
 const argv = process.argv.slice(2);
@@ -43,7 +49,7 @@ const yes = argv.includes('--yes');
 // context
 // ---------------------------------------------------------------------------
 function makeCtx() {
-  const config = parseYaml(readFileSync(join(ROOT, 'katip.config.yaml'), 'utf8'));
+  const config = loadConfig();
   let currentLog = null;
   const ctx = {
     config,
@@ -94,6 +100,8 @@ async function main() {
 async function cmdUp() {
   const state = loadState();
   const ctx = makeCtx();
+  ctx.ensureEnv();
+  if (!applyConfigChanges(ctx, state)) return;
   const tui = new Tui(steps.map((s) => ({ id: s.id, title: s.title, state: 'pending', note: '' })));
   ctx.tui = tui;
 
@@ -126,8 +134,6 @@ async function cmdUp() {
     stepState.state = 'running';
     tui.setStatus(step.title);
     tui.render();
-    // env must be loaded before any step runs (steps depend on ctx.env)
-    if (!ctx.env) ctx.ensureEnv();
     try {
       await runStep(step, ctx, state);
       stepState.state = 'done';
@@ -177,7 +183,44 @@ async function cmdUp() {
   }
 
   // success summary ---------------------------------------------------------
+  delete state.recreateAfterChange;
+  saveState(state);
   printSummary(ctx);
+}
+
+/**
+ * Compares the config + env with the last run, and marks what must re-apply if
+ * they changed. False when this run must stop.
+ */
+function applyConfigChanges(ctx, state) {
+  const anyDone = Object.values(state.steps ?? {}).includes('done');
+  const identity = identityOf(ctx.config);
+  if (!fresh && anyDone && state.identity) {
+    const { project, slug } = state.identity;
+    if (project !== identity.project || slug !== identity.slug) {
+      console.error(
+        err(
+          `project.name or tenant.slug changed (${project}/${slug} → ${identity.project}/${identity.slug}), and the running stack can't be renamed.`,
+        ),
+      );
+      console.error(dim('Restore the old values, run `pnpm dev:rollback`, then change them.'));
+      process.exitCode = 1;
+      return false;
+    }
+  }
+  const hash = configHash();
+  if (!fresh && anyDone && state.configHash && state.configHash !== hash) {
+    console.log(dim('katip.config.yaml or katip.env changed: re-applying.'));
+    for (const id of Object.keys(state.steps)) {
+      if (!KEEP_ON_CONFIG_CHANGE.has(id)) delete state.steps[id];
+    }
+    state.recreateAfterChange = true;
+  }
+  ctx.configChanged = Boolean(state.recreateAfterChange);
+  state.configHash = hash;
+  state.identity = identity;
+  saveState(state);
+  return true;
 }
 
 async function runStep(step, ctx, _state) {
@@ -187,7 +230,7 @@ async function runStep(step, ctx, _state) {
     await step.run(ctx);
     writeLog(step.id, logs);
   } catch (e) {
-    writeLog(step.id, logs);
+    writeLog(step.id, [...logs, `FAILED: ${e.message}`]);
     throw e;
   }
 }
@@ -218,19 +261,26 @@ async function rollbackAll(ctx, state) {
     }
   }
   state.steps = {};
+  delete state.configHash;
+  delete state.identity;
+  delete state.recreateAfterChange;
   saveState(state);
 }
 
 function printSummary(ctx) {
   const env = ctx.env ?? {};
+  const base = ctx.config.project.base_domain;
+  const { slug } = ctx.config.tenant;
   console.log('');
   console.log(ok(bold('  Kâtip dev stack is up.')));
   console.log('');
-  console.log(`    ${bold('Chat UI')}          https://demo.localhost  (LibreChat, demo tenant)`);
   console.log(
-    `    ${bold('Keycloak admin')}    https://auth.localhost  (user: ${env.KC_BOOTSTRAP_ADMIN_USER ?? 'katip-admin'})`,
+    `    ${bold('Chat UI')}          https://${slug}.${base}  (LibreChat, ${slug} tenant)`,
   );
-  console.log(`    ${bold('Mailpit')}           https://mailpit.localhost`);
+  console.log(
+    `    ${bold('Keycloak admin')}    https://auth.${base}  (user: ${env.KC_BOOTSTRAP_ADMIN_USER ?? 'katip-admin'})`,
+  );
+  console.log(`    ${bold('Mailpit')}           https://mailpit.${base}`);
   console.log(`    ${bold('Traefik dashboard')} http://127.0.0.1:9090`);
   console.log('');
   console.log(dim('    Gateway smoke passed: chat through policy-gateway → LiteLLM → mock.'));
@@ -267,18 +317,7 @@ async function cmdStatus() {
   try {
     const r = await tryRun(
       'docker',
-      [
-        'compose',
-        '--env-file',
-        'infra/env/katip.env',
-        '-f',
-        'infra/compose/platform.yml',
-        '-f',
-        'infra/compose/dev.yml',
-        'ps',
-        '--format',
-        'table {{.Service}}\t{{.Status}}',
-      ],
+      [...platformComposeArgs(), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
       {
         env: { ...process.env, ...ce },
       },
@@ -290,18 +329,7 @@ async function cmdStatus() {
   try {
     const r = await tryRun(
       'docker',
-      [
-        'compose',
-        '--env-file',
-        'infra/env/katip.env',
-        '-f',
-        'infra/compose/tenants/demo.yml',
-        '-p',
-        TENANT_PROJECT,
-        'ps',
-        '--format',
-        'table {{.Service}}\t{{.Status}}',
-      ],
+      [...tenantComposeArgs(ctx.config), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
       {
         env: { ...process.env, ...ce },
       },
@@ -317,41 +345,13 @@ async function cmdDown() {
   ctx.ensureEnv();
   const ce = composeEnv(ctx.config);
   console.log(dim('stopping tenant…'));
-  await tryRun(
-    'docker',
-    [
-      'compose',
-      '--env-file',
-      'infra/env/katip.env',
-      '-f',
-      'infra/compose/tenants/demo.yml',
-      '-p',
-      TENANT_PROJECT,
-      'down',
-      '--remove-orphans',
-    ],
-    {
-      env: { ...process.env, ...ce },
-    },
-  ).catch(() => {});
+  await tryRun('docker', [...tenantComposeArgs(ctx.config), 'down', '--remove-orphans'], {
+    env: { ...process.env, ...ce },
+  }).catch(() => {});
   console.log(dim('stopping platform…'));
-  await tryRun(
-    'docker',
-    [
-      'compose',
-      '--env-file',
-      'infra/env/katip.env',
-      '-f',
-      'infra/compose/platform.yml',
-      '-f',
-      'infra/compose/dev.yml',
-      'down',
-      '--remove-orphans',
-    ],
-    {
-      env: { ...process.env, ...ce },
-    },
-  ).catch(() => {});
+  await tryRun('docker', [...platformComposeArgs(), 'down', '--remove-orphans'], {
+    env: { ...process.env, ...ce },
+  }).catch(() => {});
   console.log(ok('stopped (data kept). `pnpm dev:up` restarts everything.'));
 }
 

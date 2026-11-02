@@ -26,7 +26,7 @@ librechat-sme/
 │  │  └─ tenants/          # rendered tenant files (gitignored in prod; generated)
 │  ├─ traefik/             # static config, dynamic middlewares (ipAllowList per tenant)
 │  ├─ keycloak/            # realm export, themes (TR/EN), organization config
-│  ├─ litellm/             # Dockerfile (pinned + checksum), config.yaml, hooks/
+│  ├─ litellm/             # Dockerfile (pinned + checksum), dev config template, hooks/
 │  ├─ presidio/            # analyzer config, TR recognizers (YAML), NLP model config
 │  ├─ librechat/           # librechat.tmpl.yaml, .env template
 │  ├─ monitoring/          # prometheus, grafana dashboards, loki, alert rules

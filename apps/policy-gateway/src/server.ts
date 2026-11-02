@@ -49,6 +49,8 @@ if (policySource) await policySource.start();
 // Presidio PERSON NER (P1-11): on failure, the tenant's pii.onDetectorFailure decides.
 const presidio = config.PRESIDIO_URL ? new PresidioClient({ baseUrl: config.PRESIDIO_URL }) : null;
 
+const catalogStore = useDb ? new DbCatalogStore(config.DATABASE_URL!) : null;
+
 const app = buildGateway({
   litellmBaseUrl: config.LITELLM_BASE_URL,
   litellmApiKey: config.LITELLM_API_KEY,
@@ -57,7 +59,13 @@ const app = buildGateway({
   quota,
   usage,
   ...(policySource ? { policySource } : {}),
-  ...(useDb ? { catalogStore: new DbCatalogStore(config.DATABASE_URL!) } : {}),
+  ...(catalogStore
+    ? {
+        catalogStore,
+        // Throws until migrated; empty until seeded. Either way: not ready.
+        ready: async () => (await catalogStore.getCatalog()).length > 0,
+      }
+    : {}),
   ...(presidio ? { piiDetector: (text) => presidio.detect(text) } : {}),
   logger: log,
 });

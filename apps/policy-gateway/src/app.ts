@@ -60,6 +60,8 @@ export interface GatewayDeps {
    * On failure the request follows the tenant's `pii.onDetectorFailure`.
    */
   piiDetector?: ExtraDetector;
+  /** Readiness beyond "the process is up", e.g. the governance DB is migrated. */
+  ready?: () => Promise<boolean>;
   upstreamTimeoutMs?: number;
   logger?: Logger;
   fetchImpl?: typeof fetch;
@@ -162,6 +164,11 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
   }
 
   app.get('/healthz', async () => ({ status: 'ok' }));
+
+  app.get('/readyz', async (_req, reply) => {
+    const ready = deps.ready ? await deps.ready().catch(() => false) : true;
+    return reply.code(ready ? 200 : 503).send({ status: ready ? 'ok' : 'not_ready' });
+  });
 
   app.get('/v1/models', async (req) => {
     const { tenant } = await authenticate(req);

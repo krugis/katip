@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export * from './schema.js';
 export { migrate, migrateWithClient } from './migrate.js';
-export { seed } from './seed.js';
+export { seed, type SeedOptions } from './seed.js';
 export { TENANT_OWNED_TABLES, tenantRlsSql, PROVIDER_ROLE_SQL } from './rls.js';

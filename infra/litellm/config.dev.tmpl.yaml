@@ -1,4 +1,4 @@
-# LiteLLM proxy config — DEV, rendered by scripts/setup.mjs from
+# LiteLLM proxy config — DEV, rendered by scripts/setup/ from
 # katip.config.yaml models list. For each model: if its provider API key
 # exists in infra/env/katip.env, the real provider is used; otherwise the
 # model routes to mock-llm (OpenAI-compatible echo with failure injection).

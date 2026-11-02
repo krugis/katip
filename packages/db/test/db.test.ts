@@ -174,3 +174,72 @@ describe('row-level security', () => {
     await app2.end();
   });
 });
+
+describe('seed options (values from katip.config.yaml)', () => {
+  const only = (id: string) => ({
+    id,
+    litellmName: id,
+    displayName: id,
+    class: 'standard',
+    provider: 'test',
+    region: 'global',
+    dataPolicy: 'zero_retention',
+    priceInUsdMicroPerM: 1,
+    priceOutUsdMicroPerM: 2,
+  });
+  const ruleModels = [
+    'tr-gpt-oss-120b',
+    'std-glm-5.3-flash',
+    'std-deepseek-v4-flash',
+    'prem-claude-sonnet-5.5',
+    'prem-gemini-4-argon',
+    'std-gemma-4-26b',
+  ];
+  const tenant = {
+    slug: 'acme-co',
+    name: 'Acme',
+    planCode: 'studio',
+    seats: 3,
+    kvkkAddon: true,
+  };
+
+  it('fails before writing when a router rule names a missing model', async () => {
+    await expect(seed(db, { models: [only('std-deepseek-v4-flash')] })).rejects.toThrow(
+      /router rule .* uses model/,
+    );
+  });
+
+  it('rejects an unknown plan', async () => {
+    await expect(seed(db, { tenant: { ...tenant, planCode: 'nope' } })).rejects.toThrow(
+      'unknown plan nope',
+    );
+  });
+
+  it('applies the tenant and catalog, disabling models that were removed', async () => {
+    await seed(db, { models: ruleModels.map(only), tenant });
+    const t = await db.execute<{ id: string; kvkk_addon: boolean }>(
+      sql`select id, kvkk_addon from tenants where slug = 'acme-co'`,
+    );
+    expect(t[0]!.kvkk_addon).toBe(true);
+    const seats = await db.execute<{ plan_code: string; quantity: number }>(
+      sql`select plan_code, quantity from seats where tenant_id = ${t[0]!.id}`,
+    );
+    expect([...seats]).toEqual([{ plan_code: 'studio', quantity: 3 }]);
+    const emb = await db.execute<{ enabled: boolean }>(
+      sql`select enabled from model_catalog where id = 'emb-bge-m3'`,
+    );
+    expect(emb[0]!.enabled).toBe(false);
+
+    // Seats follow a changed plan; the default seed re-enables the full catalog.
+    await seed(db, { models: ruleModels.map(only), tenant: { ...tenant, planCode: 'business' } });
+    const after = await db.execute<{ plan_code: string }>(
+      sql`select plan_code from seats where tenant_id = ${t[0]!.id}`,
+    );
+    expect(after.map((r) => r.plan_code)).toEqual(['business']);
+    await seed(db);
+    const again = await db.execute<{ enabled: boolean }>(
+      sql`select enabled from model_catalog where id = 'emb-bge-m3'`,
+    );
+    expect(again[0]!.enabled).toBe(true);
+  });
+});

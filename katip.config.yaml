@@ -1,21 +1,25 @@
 # ==============================================================================
 # Kâtip master configuration — the single file for all non-secret settings.
 #
-# Every rendered artifact (compose, traefik, LiteLLM, LibreChat, tenant env)
-# derives from this file + infra/env/katip.env (secrets). Secrets are
-# auto-generated once by `pnpm dev:up` and NEVER overwritten.
+# Everything the bootstrap renders or runs (compose, Traefik routes, LiteLLM,
+# LibreChat, the governance DB seed) derives from this file + infra/env/katip.env
+# (secrets). Secrets are auto-generated once by `pnpm dev:up` and NEVER overwritten.
+#
+# `pnpm dev:up` validates this file and rejects unknown settings. After an edit,
+# re-run it: it detects the change and re-applies. To change project.name or
+# tenant.slug, run `pnpm dev:rollback` first, because the old stack is not renamed.
 #
 # Licence: AGPL-3.0-only (this repo, see LICENSE)
 # ==============================================================================
 
 project:
-  name: sme-platform
-  # Dev base domain: services get <service>.<base_domain>; tenant demo → demo.localhost
+  # Docker Compose project and network prefix; the tenant project is <name>-<slug>.
+  name: katip
+  # Services get <service>.<base_domain>; tenant demo → demo.localhost
   base_domain: localhost
 
 # ------------------------------------------------------------------------------
-# Image pins. Never use :latest (CLAUDE.md §7). LiteLLM is self-built from a
-# checksum-verified wheel (ADR/CLAUDE.md: compromised releases in 2026).
+# Image pins. Never use :latest (CLAUDE.md §7).
 # ------------------------------------------------------------------------------
 images:
   traefik: traefik:v3.7.17
@@ -26,84 +30,133 @@ images:
   valkey: valkey/valkey:8.0.12
   mailpit: axllent/mailpit:v1.33.0
   librechat: ghcr.io/danny-avila/librechat:v0.7.8
+  # Used by the bootstrap's own network checks.
+  curl: curlimages/curl:8.8.0
   # Presidio analyzer (P1-11): upstream moved to GHCR (LLD-01 still says MCR).
-  # Self-built from infra/presidio/Dockerfile on top of this base.
+  # Self-built from infra/presidio/Dockerfile on top of this base, plus the spaCy
+  # model wheel; sha256 = wheel checksum from the spacy-models GitHub release.
   presidio_analyzer:
     registry: ghcr.io/data-privacy-stack/presidio-analyzer
     version: '2.2.366'
+    spacy_model_version: '3.8.0'
+    spacy_model_sha256: 6f3c4b853852ea9e9d2dc76cc950dddb10a7e4c42d813308caefe6c5e8be2f0a
   # Self-built from infra/litellm/Dockerfile; sha256 = wheel checksum from PyPI.
   litellm:
     version: '1.79.3'
     sha256: 16314049d109e5cadb2abdccaf2e07ea03d2caa3a9b3f54f34b5b825092b4eeb
 
 # ------------------------------------------------------------------------------
-# Service settings (dev). Only traefik publishes ports on the host.
-# ------------------------------------------------------------------------------
-services:
-  postgres:
-    # Databases created at first boot by infra/compose/initdb/00-init.sql
-    databases: [governance, keycloak, litellm]
-  keycloak:
-    realm: katip
-  traefik:
-    # Dev: dashboard on 127.0.0.1:8080 (host), see traefik.dev.yml rendering
-    dashboard: true
-
-# ------------------------------------------------------------------------------
-# LiteLLM models (dev). In dev everything routes to mock-llm; real providers
-# activate when their API keys exist in infra/env/katip.env. Model ids marked
-# (verify) must be checked against the provider before pilot.
+# Model catalog: feeds both LiteLLM and the governance DB (model_catalog).
+# A model uses its real provider once api_key_env is set in infra/env/katip.env;
+# without it, the model routes to mock-llm. litellm_params go to LiteLLM as they
+# are. Prices are micro-USD per 1M tokens. Model ids marked (verify) must be
+# checked against the provider before pilot. Router rules live in packages/db
+# (seed); the seed fails if a rule names a model missing here.
 # ------------------------------------------------------------------------------
 models:
   - alias: std-deepseek-v4-flash
+    display_name: DeepSeek V4 Flash
     class: standard
-    provider: mock # dev default; prod: deepinfra (verify id)
-    litellm_params:
-      model: deepinfra/deepseek-ai/DeepSeek-V4-Flash
+    provider: deepinfra
+    region: global
+    data_policy: zero_retention
+    price_in: 90000
+    price_out: 180000
     api_key_env: DEEPINFRA_API_KEY
+    litellm_params:
+      model: deepinfra/deepseek-ai/DeepSeek-V4-Flash # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
   - alias: std-glm-5.3-flash
+    display_name: GLM-5.3 Flash
     class: standard
-    provider: mock
-    litellm_params:
-      model: openrouter/z-ai/glm-5.3-flash
+    provider: z-ai
+    region: global
+    data_policy: zero_retention
+    price_in: 84000
+    price_out: 280000
     api_key_env: OPENROUTER_API_KEY
-  - alias: std-gemma-4-26b
-    class: standard
-    provider: mock
     litellm_params:
-      model: deepinfra/google/gemma-4-26b-a4b-it
+      model: openrouter/z-ai/glm-5.3-flash # OpenRouter account must deny training providers
+      api_key: os.environ/OPENROUTER_API_KEY
+  - alias: std-gemma-4-26b
+    display_name: Gemma 4 26B
+    class: standard
+    provider: deepinfra
+    region: global
+    data_policy: zero_retention
+    price_in: 70000
+    price_out: 340000
     api_key_env: DEEPINFRA_API_KEY
+    litellm_params:
+      model: deepinfra/google/gemma-4-26b-a4b-it # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
   - alias: prem-claude-sonnet-5.5
+    display_name: Claude Sonnet 5.5
     class: premium
-    provider: mock
+    provider: anthropic
+    region: global
+    data_policy: retention_30d
+    price_in: 2000000
+    price_out: 10000000
+    api_key_env: ANTHROPIC_API_KEY
     litellm_params:
       model: anthropic/claude-sonnet-5-5
-    api_key_env: ANTHROPIC_API_KEY
+      api_key: os.environ/ANTHROPIC_API_KEY
   - alias: prem-gemini-4-argon
+    display_name: Gemini 4 Argon
     class: premium
-    provider: mock
-    litellm_params:
-      model: vertex_ai/gemini-4-argon
+    provider: vertex_ai
+    region: eu
+    data_policy: zero_retention
+    price_in: 2000000
+    price_out: 10000000
     api_key_env: GCP_VERTEX_KEY
-  - alias: emb-bge-m3
-    class: embedding
-    provider: mock
     litellm_params:
-      model: deepinfra/BAAI/bge-m3
+      model: vertex_ai/gemini-4-argon # (verify)
+      vertex_project: os.environ/GCP_PROJECT
+      vertex_location: europe-west3
+  - alias: tr-gpt-oss-120b
+    display_name: gpt-oss-120b (Türkiye)
+    class: tr
+    provider: vllm-tr
+    region: tr
+    data_policy: zero_retention
+    price_in: 150000
+    price_out: 600000
+    api_key_env: VLLM_TR_KEY
+    litellm_params:
+      model: openai/gpt-oss-120b
+      api_base: http://vllm-tr:8000/v1
+      api_key: os.environ/VLLM_TR_KEY
+  - alias: emb-bge-m3
+    display_name: BGE-M3 embeddings
+    class: embedding
+    provider: deepinfra
+    region: global
+    data_policy: zero_retention
+    price_in: 10000
+    price_out: 0
     api_key_env: DEEPINFRA_API_KEY
+    litellm_params:
+      model: deepinfra/BAAI/bge-m3 # (verify)
+      api_key: os.environ/DEEPINFRA_API_KEY
 
 # ------------------------------------------------------------------------------
 # Demo tenant (rendered by the bootstrap; the provisioner CLI lands in P1-21).
 # ------------------------------------------------------------------------------
 tenant:
   slug: demo
+  name: Demo A.Ş.
   plan: business
   seats: 10
   kvkk_addon: false
-  # Gateway key for the demo tenant is auto-generated into katip.env
-  # (KATIP_DEMO_GATEWAY_KEY) and its SHA-256 into the gateway dev-tenants file.
+  # Gateway key for this tenant is auto-generated into katip.env
+  # (KATIP_DEMO_GATEWAY_KEY); only its argon2id hash goes to the DB.
   limits:
     standard: 68000000
     premium: 2000000
   pii:
     mode: mask
+    # When the name detector (Presidio) fails: allow (send with structured masking
+    # only) or block (reject the request). See LLD-03 §5.
+    on_detector_failure: allow
