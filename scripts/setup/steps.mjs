@@ -11,7 +11,9 @@ import {
   identityInput,
   renderLiteLLMModels,
   seedInput,
+  tenantNetworkName,
   tenantSecretName,
+  tenantSubnet,
 } from './config.mjs';
 import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
 
@@ -24,6 +26,7 @@ export const AUTO_KEYS = new Set([
   'LITELLM_MASTER_KEY',
   'MOCK_LLM_KEY',
   'KATIP_PII_TOKEN_KEY',
+  'VALKEY_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -126,7 +129,7 @@ async function traefikEdgeIp(ctx) {
     [
       'inspect',
       '-f',
-      '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',
+      `{{(index .NetworkSettings.Networks "${edgeNetwork(ctx.config)}").IPAddress}}`,
       `${ctx.config.project.name}-traefik-1`,
     ],
     {},
@@ -182,10 +185,10 @@ async function curlEdge(ctx, host, path, extra = []) {
 }
 
 /**
- * Runs a scripts/setup/*.mjs file on the edge network, reaching Keycloak and the
- * tenant through Traefik as a browser would. Uses the gateway image as a node runtime.
+ * Runs a scripts/setup/*.mjs file on a network with Traefik on it (default: edge), reaching
+ * Keycloak and the tenant as a browser would. Uses the gateway image as a node runtime.
  */
-function runOnEdge(ctx, t, script, extraEnv = {}) {
+function runOnEdge(ctx, t, script, extraEnv = {}, network = edgeNetwork(ctx.config)) {
   const env = {
     KC_URL: `https://auth.${ctx.config.project.base_domain}`,
     KC_ADMIN_USER: ctx.env.KC_BOOTSTRAP_ADMIN_USER,
@@ -196,7 +199,7 @@ function runOnEdge(ctx, t, script, extraEnv = {}) {
   return dockerRun(
     [
       '--network',
-      edgeNetwork(ctx.config),
+      network,
       ...Object.keys(env).flatMap((k) => ['-e', k]),
       '-e',
       'NODE_EXTRA_CA_CERTS=/certs/dev-ca.crt',
@@ -262,8 +265,23 @@ const ipallowFile = (ctx, t) => join(ctx.infra, 'traefik', 'dynamic', `${t.slug}
  */
 function renderPlatformOverlay(ctx) {
   const base = ctx.config.project.base_domain;
-  const aliases = [`auth.${base}`, ...ctx.config.tenants.map((t) => `${t.slug}.${base}`)];
-  const overlay = { services: { traefik: { networks: { edge: { aliases } } } } };
+  const overlay = {
+    services: {
+      traefik: { networks: { edge: { aliases: [`auth.${base}`] } } },
+      'policy-gateway': { networks: {} },
+      mongodb: { networks: {} },
+    },
+    networks: {},
+  };
+  // Each tenant's network holds its LibreChat and search, plus only the platform
+  // services a tenant may use. Postgres, Valkey, LiteLLM and other tenants aren't on it.
+  for (const t of ctx.config.tenants) {
+    const key = `t_${t.slug}`;
+    overlay.networks[key] = { name: tenantNetworkName(ctx.config, t), external: true };
+    overlay.services.traefik.networks[key] = { aliases: [`auth.${base}`, `${t.slug}.${base}`] };
+    overlay.services['policy-gateway'].networks[key] = {};
+    overlay.services.mongodb.networks[key] = {};
+  }
   mkdirSync(join(ROOT, 'infra', 'compose', 'rendered'), { recursive: true });
   // JSON is valid YAML.
   writeFileSync(join(ROOT, RENDERED_COMPOSE), `${JSON.stringify(overlay, null, 2)}\n`);
@@ -465,15 +483,24 @@ export const steps = [
   },
   {
     id: 'networks',
-    title: 'Networks (edge, backend)',
+    title: 'Networks (edge, backend, one per tenant)',
     async run(ctx) {
-      for (const name of [edgeNetwork(ctx.config), backendNetwork(ctx.config)]) {
+      const wanted = [
+        [edgeNetwork(ctx.config)],
+        [backendNetwork(ctx.config)],
+        ...ctx.config.tenants.map((t) => [
+          tenantNetworkName(ctx.config, t),
+          '--subnet',
+          tenantSubnet(ctx.config, t),
+        ]),
+      ];
+      for (const [name, ...options] of wanted) {
         const exists = await tryRun('docker', ['network', 'inspect', name], {}).then(
           () => true,
           () => false,
         );
         if (!exists) {
-          await tryRun('docker', ['network', 'create', name], {});
+          await tryRun('docker', ['network', 'create', ...options, name], {});
           ctx.log(`created network ${name}`);
         } else {
           ctx.log(`network ${name} present`);
@@ -481,7 +508,12 @@ export const steps = [
       }
     },
     async rollback(ctx) {
-      for (const name of [edgeNetwork(ctx.config), backendNetwork(ctx.config)]) {
+      const names = [
+        edgeNetwork(ctx.config),
+        backendNetwork(ctx.config),
+        ...ctx.config.tenants.map((t) => tenantNetworkName(ctx.config, t)),
+      ];
+      for (const name of names) {
         await tryRun('docker', ['network', 'rm', name], {}).catch(() => {});
       }
     },
@@ -722,7 +754,13 @@ export const steps = [
         if (!models.includes('auto')) {
           throw new Error(`gateway /v1/models failed for ${t.slug}: ${models.slice(0, 200)}`);
         }
-        const { out } = await runOnEdge(ctx, t, 'oidc-smoke.mjs');
+        const { out } = await runOnEdge(
+          ctx,
+          t,
+          'oidc-smoke.mjs',
+          {},
+          tenantNetworkName(ctx.config, t),
+        );
         await checkUsageRecorded(ctx, t, out);
       }
       ctx.log('e2e smoke ok (models, login with MFA, chat headers, non-member refused)');

@@ -123,13 +123,24 @@ services:
   valkey:
     image: ${KATIP_IMAGE_VALKEY:?from katip.config.yaml}
     restart: unless-stopped
-    command: ['valkey-server', '--appendonly', 'yes']
+    command:
+      [
+        'valkey-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        '${VALKEY_PASSWORD:?from katip.env}',
+      ]
+    environment:
+      # Read by valkey-cli, for the health check.
+      REDISCLI_AUTH: ${VALKEY_PASSWORD:?from katip.env}
     volumes:
       - valkey:/data
     networks:
       - backend
     healthcheck:
-      test: ['CMD', 'valkey-cli', 'ping']
+      # Checks the reply: valkey-cli exits 0 even on an auth error.
+      test: ['CMD-SHELL', 'valkey-cli ping | grep -q PONG']
       interval: 10s
       timeout: 5s
       retries: 12
