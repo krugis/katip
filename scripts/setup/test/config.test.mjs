@@ -11,6 +11,7 @@ import {
   seedInput,
   tenantSecretName,
   tenantSecretNames,
+  tenantSubnet,
   validateConfig,
 } from '../config.mjs';
 import { totp } from '../kc-lib.mjs';
@@ -193,6 +194,28 @@ describe('tenants', () => {
     expect(generatorFor('KATIP_T_ACME_LC_CREDS_KEY')()).toMatch(/^[0-9a-f]{64}$/);
     expect(generatorFor('KATIP_T_ACME_LC_CREDS_IV')()).toMatch(/^[0-9a-f]{32}$/);
     expect(generatorFor('KATIP_T_ACME_GATEWAY_KEY')()).toMatch(/^sk-sme-t-/);
+  });
+
+  it('derives each subnet from the slug, not the list order, and rejects clashes', () => {
+    const [a, b] = config.tenants;
+    expect(tenantSubnet(config, a)).toMatch(/^10\.77\.\d+\.0\/24$/);
+    expect(tenantSubnet(config, a)).not.toBe(tenantSubnet(config, b));
+    const c = clone();
+    c.tenants.reverse();
+    expect(tenantSubnet(c, a)).toBe(tenantSubnet(config, a));
+    expect(validateConfig(config)).toEqual([]);
+  });
+
+  it('keeps LibreChat off the shared networks', () => {
+    const compose = read('compose', 'tenant.tmpl.yml');
+    expect(compose).not.toMatch(/^\s+- (edge|backend)$/m);
+    expect(compose).toContain('traefik.docker.network=${KATIP_COMPOSE_PROJECT}_t_${KATIP_SLUG}');
+  });
+
+  it('protects Valkey with a password', () => {
+    expect(read('compose', 'platform.yml')).toContain('--requirepass');
+    expect(read('compose', 'platform.yml')).toContain('grep -q PONG');
+    expect(read('compose', 'dev.yml')).toContain('redis://:${VALKEY_PASSWORD');
   });
 
   it('gives each tenant its own search and a Mongo login scoped to its database', () => {

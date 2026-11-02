@@ -35,6 +35,14 @@ const MODEL_FIELDS = [
 
 /** Returns every problem found, so one run reports them all. Unknown settings are
  * errors: a setting nothing reads must not look like it does something. */
+export const tenantNetworkName = (config, t) => `${config.project.name}_t_${t.slug}`;
+
+/** Derived from the slug, so it doesn't depend on the order of the tenant list. */
+export function tenantSubnet(config, t) {
+  const n = createHash('sha256').update(t.slug).digest().readUInt16BE(0) % 254;
+  return `${config.project?.tenant_network_prefix}.${n + 1}.0/24`;
+}
+
 export function validateConfig(c) {
   const errors = [];
   const isInt = (v) => Number.isInteger(v) && v >= 0;
@@ -46,7 +54,7 @@ export function validateConfig(c) {
 
   unknown(c, ['project', 'identity', 'images', 'models', 'tenants'], 'config');
 
-  unknown(c.project, ['name', 'base_domain'], 'project');
+  unknown(c.project, ['name', 'base_domain', 'tenant_network_prefix'], 'project');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(c.project?.name ?? '')) {
     errors.push('project.name: must match ^[a-z0-9][a-z0-9-]*$');
   }
@@ -54,6 +62,9 @@ export function validateConfig(c) {
     errors.push('project.base_domain: must be a domain name');
   }
 
+  if (!/^\d{1,3}\.\d{1,3}$/.test(c.project?.tenant_network_prefix ?? '')) {
+    errors.push('project.tenant_network_prefix: must look like 10.77');
+  }
   unknown(c.identity, ['realm', 'default_locale', 'locales'], 'identity');
   if (!/^[a-z0-9-]+$/.test(c.identity?.realm ?? '')) {
     errors.push('identity.realm: must match ^[a-z0-9-]+$');
@@ -118,6 +129,7 @@ export function validateConfig(c) {
     errors.push('tenants: at least one tenant is required');
   }
   const slugs = new Set();
+  const subnets = new Map();
   for (const [i, t] of (Array.isArray(c.tenants) ? c.tenants : []).entries()) {
     const where = `tenants[${t?.slug ?? i}]`;
     unknown(t, ['slug', 'name', 'plan', 'seats', 'kvkk_addon', 'limits', 'pii'], where);
@@ -126,6 +138,11 @@ export function validateConfig(c) {
     }
     if (slugs.has(t?.slug)) errors.push(`${where}: duplicate slug`);
     slugs.add(t?.slug);
+    const subnet = typeof t?.slug === 'string' ? tenantSubnet(c, t) : null;
+    if (subnet && subnets.has(subnet)) {
+      errors.push(`${where}: its network subnet clashes with tenant ${subnets.get(subnet)}`);
+    }
+    if (subnet) subnets.set(subnet, t.slug);
     if (!t?.name) errors.push(`${where}.name: required`);
     if (!t?.plan) errors.push(`${where}.plan: required`);
     if (!Number.isInteger(t?.seats) || t.seats < 1) {
