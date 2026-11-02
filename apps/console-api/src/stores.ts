@@ -110,7 +110,20 @@ export interface AccessRulesView extends AccessRulesInput {
   mfaRequired: boolean;
 }
 
+export type UsageGroup = 'user' | 'dept' | 'model' | 'day';
+
+export interface UsageRow {
+  /** What it's grouped by. Null only for "no department". */
+  key: string | null;
+  label: string;
+  standard: number;
+  premium: number;
+  total: number;
+}
+
 export interface ConsoleStore {
+  /** Inclusive UTC days. */
+  usage(tenantId: string, group: UsageGroup, from: string, to: string): Promise<UsageRow[]>;
   accessRules(tenantId: string): Promise<AccessRulesView | null>;
   /** If `applyIdentity` throws, nothing changes. */
   saveAccessRules(
@@ -646,6 +659,75 @@ export class DbConsoleStore implements ConsoleStore {
       );
       const [department] = await this.departmentRows(tx, tenantId, id);
       return department!;
+    });
+  }
+
+  async usage(tenantId: string, group: UsageGroup, from: string, to: string): Promise<UsageRow[]> {
+    return this.inTenant(tenantId, async (tx) => {
+      await tx.execute(
+        sql`select refresh_usage_daily(${tenantId}::uuid, ${from}::date, ${to}::date)`,
+      );
+      const d = schema.usageDaily;
+      const key = {
+        user: sql`${d.userId}::text`,
+        dept: sql`${d.departmentId}::text`,
+        model: sql`${d.modelId}`,
+        day: sql`to_char(${d.day}, 'YYYY-MM-DD')`,
+      }[group];
+      const rows = (await tx
+        .select({
+          key: sql<string | null>`${key}`.as('key'),
+          premium: sql<string>`coalesce(sum(${d.inputTokens} + ${d.outputTokens}) filter (where ${d.class} = 'premium'), 0)`,
+          standard: sql<string>`coalesce(sum(${d.inputTokens} + ${d.outputTokens}) filter (where ${d.class} <> 'premium'), 0)`,
+        })
+        .from(d)
+        .where(
+          and(
+            eq(d.tenantId, tenantId),
+            sql`${d.day} >= ${from}::date`,
+            sql`${d.day} <= ${to}::date`,
+          ),
+        )
+        .groupBy(key)) as { key: string | null; premium: string; standard: string }[];
+
+      const ids = rows.map((r) => r.key).filter((k): k is string => k !== null);
+      const labels = new Map<string, string>();
+      if (group === 'user' && ids.length > 0) {
+        const people = await tx
+          .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+          .from(schema.users)
+          .where(and(eq(schema.users.tenantId, tenantId), inArray(schema.users.id, ids)));
+        for (const p of people) labels.set(p.id, `${p.name} (${p.email})`);
+      } else if (group === 'dept' && ids.length > 0) {
+        const departments = await tx
+          .select({ id: schema.departments.id, name: schema.departments.name })
+          .from(schema.departments)
+          .where(
+            and(eq(schema.departments.tenantId, tenantId), inArray(schema.departments.id, ids)),
+          );
+        for (const dep of departments) labels.set(dep.id, dep.name);
+      } else if (group === 'model' && ids.length > 0) {
+        const models = await tx
+          .select({ id: schema.modelCatalog.id, name: schema.modelCatalog.displayName })
+          .from(schema.modelCatalog)
+          .where(inArray(schema.modelCatalog.id, ids));
+        for (const m of models) labels.set(m.id, m.name);
+      }
+
+      const out = rows.map((r) => {
+        const standard = Number(r.standard);
+        const premium = Number(r.premium);
+        return {
+          key: r.key,
+          label: (r.key && labels.get(r.key)) ?? r.key ?? '',
+          standard,
+          premium,
+          total: standard + premium,
+        };
+      });
+      return group === 'day'
+        ? out.sort((x, y) => (x.key ?? '').localeCompare(y.key ?? ''))
+        : out.sort((x, y) => y.total - x.total);
     });
   }
 

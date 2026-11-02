@@ -16,6 +16,16 @@ export class ApiError extends Error {
   }
 }
 
+/** A file's contents. */
+export async function apiFetchText(path: string, getToken: GetToken): Promise<string> {
+  const token = await getToken();
+  const res = await fetch(`/api/v1${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, 'unknown');
+  return res.text();
+}
+
 /** A request that changes something. */
 export async function apiSend<T = unknown>(
   method: 'POST' | 'PATCH' | 'PUT',

@@ -2,7 +2,7 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
-**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), and access rules (P1-28). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), and usage and reports (P1-30). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
 
 **How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
 
@@ -77,7 +77,8 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | GET/PUT | `/api/v1/tenants/:tid/policy` | tenant_admin | The company's policy (zod `PolicySchema`), and the catalog without prices. PUT needs the version it read, and refuses a stale one. Residency and `tr-local` need the KVKK add-on. Publishes `policy.changed`; if that fails, the gateway's cache expires within 30 s anyway |
 | GET/PUT | `/api/v1/tenants/:tid/access-rules` | tenant_admin | Refuses a list that leaves out the caller's address unless `force` is set (LLD-02 §6) |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/departments` | tenant_admin | |
-| GET | `/api/v1/tenants/:tid/usage?groupBy=user|dept|model|day&from&to` | tenant_admin, dept_manager (own dept) | From `usage_daily` |
+| GET | `/api/v1/tenants/:tid/usage?groupBy=user\|dept\|model\|day&from&to` | tenant_admin | Tokens from `usage_daily`, rolled up from the events on each request, so the numbers always match them. UTC days, up to 400. Never cost |
+| GET | `/api/v1/tenants/:tid/usage/export?…` | tenant_admin | The same as CSV, with a byte order mark and semicolons for Excel in Turkish, and cells that can't run as formulas |
 | GET | `/api/v1/tenants/:tid/audit?…` | tenant_admin | |
 | POST | `/api/v1/admin/tenants` | provider_admin | Calls the provisioner |
 | PUT | `/api/v1/admin/models/:id`, `/api/v1/admin/router-rules` | provider_admin | Publishes `policy.changed` |

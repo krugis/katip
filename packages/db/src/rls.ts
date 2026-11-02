@@ -101,6 +101,27 @@ const CONSOLE_READS = [
   'tenant_limits',
 ];
 
+/**
+ * Rolls usage_events up into usage_daily, cost included. It runs with its owner's rights, so
+ * the console can ask for a roll-up without being able to read cost itself. Run for a whole
+ * range each time, so the totals always match the events.
+ */
+export const USAGE_ROLLUP_SQL = `CREATE OR REPLACE FUNCTION refresh_usage_daily(p_tenant uuid, p_from date, p_to date)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  DELETE FROM usage_daily WHERE tenant_id = p_tenant AND day BETWEEN p_from AND p_to;
+  INSERT INTO usage_daily
+    (tenant_id, day, user_id, department_id, class, model_id, input_tokens, output_tokens, cost_usd_micro)
+  SELECT tenant_id, (ts AT TIME ZONE 'UTC')::date, user_id,
+         (array_agg(department_id ORDER BY ts DESC))[1], class, model_id,
+         sum(input_tokens), sum(output_tokens), sum(cost_usd_micro)
+  FROM usage_events
+  WHERE tenant_id = p_tenant
+    AND ts >= p_from::timestamp AT TIME ZONE 'UTC'
+    AND ts < (p_to + 1)::timestamp AT TIME ZONE 'UTC'
+  GROUP BY tenant_id, (ts AT TIME ZONE 'UTC')::date, user_id, class, model_id;
+$fn$;
+REVOKE ALL ON FUNCTION refresh_usage_daily(uuid, date, date) FROM PUBLIC;`;
+
 /** The console API's own role: not a superuser and bound by RLS, with no lookup exception. */
 export const CONSOLE_ROLE_SQL = `DO $$
 BEGIN
@@ -113,6 +134,8 @@ GRANT SELECT ON ${CONSOLE_READS.join(', ')} TO katip_console;
 GRANT INSERT ON users, audit_log, departments, department_managers TO katip_console;
 GRANT UPDATE (name, budget_usd_micro) ON departments TO katip_console;
 GRANT DELETE ON department_managers TO katip_console;
+GRANT SELECT (tenant_id, day, user_id, department_id, class, model_id, input_tokens, output_tokens) ON usage_daily TO katip_console;
+GRANT EXECUTE ON FUNCTION refresh_usage_daily(uuid, date, date) TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
 GRANT SELECT, INSERT ON access_rules TO katip_console;
 GRANT UPDATE (ip_allowlist, countries, session_idle_min, session_max_h, updated_at) ON access_rules TO katip_console;

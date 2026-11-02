@@ -24,6 +24,7 @@ import { registerUserRoutes } from './users.js';
 import { registerCompanyRoutes } from './company.js';
 import { registerPolicyRoutes } from './policy.js';
 import { registerAccessRoutes } from './access.js';
+import { registerUsageRoutes } from './usage.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -199,6 +200,7 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
 
   registerUserRoutes(app as unknown as FastifyInstance, deps, API_PREFIX, callerOf);
   registerCompanyRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
+  registerUsageRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX);
   registerAccessRoutes(
     app as unknown as FastifyInstance,
     deps.store,
