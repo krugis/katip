@@ -799,14 +799,13 @@ try {
   check(auditText.includes(owner), 'and who did it');
   check(auditText.includes('Sistem'), 'and what the system did, such as creating the company');
   await admin.getByTestId('audit-action').selectOption('policy.update');
+  // Other rows go once the filtered list arrives.
   await admin
-    .locator('[data-testid=audit-table] tr[data-action=policy\\.update]')
+    .locator('[data-testid=audit-table] tbody tr:not([data-action="policy.update"])')
     .first()
-    .waitFor();
+    .waitFor({ state: 'detached' });
   check(
-    (await admin
-      .locator('[data-testid=audit-table] tbody tr:not([data-action=policy\\.update])')
-      .count()) === 0,
+    (await admin.locator('[data-testid=audit-table] tr[data-action="policy.update"]').count()) > 0,
     'it can be narrowed to one kind of event',
   );
   await shot(admin, 'audit');
