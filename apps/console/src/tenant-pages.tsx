@@ -17,6 +17,7 @@ interface Overview {
   seats: SeatRow[];
   limits: { standard: number; premium: number; research: number } | null;
   used: { standard: number; premium: number; research: number };
+  alerts: { class: string; threshold: number }[];
 }
 interface UserRow {
   [key: string]: unknown;
@@ -72,7 +73,35 @@ const useOverview = (tenantId: string, getToken: GetToken) =>
     queryFn: () => apiFetch<Overview>(`/tenants/${tenantId}/overview`, getToken),
   });
 
-// ---- overview -----------------------------------------------------------------------------
+/** On every screen, so an admin can't miss it. */
+export function UsageBanner({ me, getToken }: { me: Me; getToken: GetToken }) {
+  const { t } = useTranslation();
+  const overview = useQuery({
+    queryKey: ['overview', me.tenant!.id],
+    queryFn: () => apiFetch<Overview>(`/tenants/${me.tenant!.id}/overview`, getToken),
+    refetchInterval: 60_000,
+  });
+  const alerts = overview.data?.alerts ?? [];
+  if (alerts.length === 0) return null;
+  return (
+    <div
+      className="mb-4 rounded-lg border border-danger bg-surface p-3 text-sm"
+      role="status"
+      data-testid="usage-banner"
+    >
+      {alerts.map((a) => (
+        <p key={a.class}>
+          {t(a.threshold >= 100 ? 'overview.alertFull' : 'overview.alert', {
+            kind: t(`overview.${a.class}`),
+            threshold: a.threshold,
+          })}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// ---- overview ----------------------------------------------------------------------------
 
 function Meter({
   label,

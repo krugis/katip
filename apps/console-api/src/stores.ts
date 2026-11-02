@@ -58,6 +58,8 @@ export interface Overview {
   seats: { planCode: string; quantity: number; used: number }[];
   limits: { standard: number; premium: number; research: number } | null;
   used: { standard: number; premium: number; research: number };
+  /** The highest threshold told so far this month, per kind of token. */
+  alerts: { class: string; threshold: number }[];
 }
 
 export interface Department {
@@ -180,6 +182,17 @@ export interface AuditQuery {
 }
 
 export interface ConsoleStore {
+  /**
+   * Records the thresholds not told yet, and calls `tell` with the admins' addresses. If it
+   * throws, nothing is recorded. False when there was nothing new.
+   */
+  recordAlerts(
+    tenantId: string,
+    month: string,
+    cls: string,
+    thresholds: number[],
+    tell: (admins: string[]) => Promise<void>,
+  ): Promise<boolean>;
   auditPage(
     tenantId: string,
     query: AuditQuery,
@@ -615,8 +628,23 @@ export class DbConsoleStore implements ConsoleStore {
             sql`${schema.usageEvents.ts} < ${end.toISOString()}::timestamptz`,
           ),
         );
+      const told = await tx
+        .select({
+          scopeId: schema.budgetAlerts.scopeId,
+          threshold: sql<number>`max(${schema.budgetAlerts.threshold})`,
+        })
+        .from(schema.budgetAlerts)
+        .where(
+          and(
+            eq(schema.budgetAlerts.tenantId, tenantId),
+            eq(schema.budgetAlerts.month, month),
+            eq(schema.budgetAlerts.scope, 'tenant'),
+          ),
+        )
+        .groupBy(schema.budgetAlerts.scopeId);
       return {
         month,
+        alerts: told.map((a) => ({ class: a.scopeId, threshold: Number(a.threshold) })),
         seats: seats.map((seat) => ({
           ...seat,
           used: used.find((u) => u.planCode === seat.planCode)?.n ?? 0,
@@ -1218,6 +1246,43 @@ export class DbConsoleStore implements ConsoleStore {
         'request',
       );
       return { ...row.view, status, decidedAt: decidedAt.toISOString() };
+    });
+  }
+
+  async recordAlerts(
+    tenantId: string,
+    month: string,
+    cls: string,
+    thresholds: number[],
+    tell: (admins: string[]) => Promise<void>,
+  ): Promise<boolean> {
+    return this.inTenant(tenantId, async (tx) => {
+      const added = await tx
+        .insert(schema.budgetAlerts)
+        .values(
+          thresholds.map((threshold) => ({
+            tenantId,
+            scope: 'tenant',
+            scopeId: cls,
+            month,
+            threshold,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ threshold: schema.budgetAlerts.threshold });
+      if (added.length === 0) return false;
+      const admins = await tx
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.tenantId, tenantId),
+            eq(schema.users.role, 'tenant_admin'),
+            eq(schema.users.status, 'active'),
+          ),
+        );
+      await tell(admins.map((a) => a.email));
+      return true;
     });
   }
 

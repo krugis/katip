@@ -85,7 +85,9 @@
     "research": "Deep research",
     "usedOf": "{{used}} of {{limit}} used",
     "nearLimit": "Close to the limit.",
-    "noLimits": "No quota is set for this month."
+    "noLimits": "No quota is set for this month.",
+    "alert": "{{threshold}}% of this month’s {{kind}} are used.",
+    "alertFull": "This month’s {{kind}} have run out. Choose what happens then on the Models and policies screen."
   },
   "roles": {
     "user": "User",

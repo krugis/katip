@@ -175,7 +175,7 @@ Rules:
 - Limits come from seats × plan quota (DESIGN §5) plus purchased packs, cached in `tenant_limits`.
 - A Lua script performs **check-and-reserve** atomically. Settlement adjusts by the delta.
 - A nightly job reconciles Valkey with the Postgres `usage_events` sums; Postgres is the source of truth.
-- Thresholds 50/80/100% raise events: `budget.threshold` → notifications (email + console banner).
+- Thresholds 50/80/100% of a company's monthly tokens tell its active admins by email, and show a banner on every console screen. `console-api` checks about once a minute, and records each in `budget_alerts`, so each is told once. If the email fails, the next check retries. Department budgets are in USD, so they wait for a customer price to compare with (P1-37).
 
 ## 7. Observability
 

@@ -104,7 +104,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-30 | `usage_daily` job + usage API + usage screens + CSV export | 04, 05 | P0 | done | P1-14 | Numbers match `usage_events` sums | Rolled up per request rather than nightly. Tokens only. The monthly PDF and charts in LLD-04 aren't built |
 | P1-31 | Department manager area | 04 | P1 | done | P1-30 | Other departments 404 | Approving records the decision and doesn't change access yet. Budget alerts come with P1-41; people raise requests from P1-32 |
 | P1-32 | User portal: my usage, requests, sessions/MFA links, privacy export | 04 | P0 | done | P1-30 | Usage visible within 1 min of a chat | Export covers the governance database, not chats (P1-68). Deletion is a request the admin carries out by hand (P1-69). Default alias isn't built |
-| P1-33 | Audit log API + screen (tenant + provider) | 04, 05 | P1 | review | P1-20 | All mutations audited | Client IPs aren't recorded yet. Our provider admins' own log entries with no company aren't shown |
+| P1-33 | Audit log API + screen (tenant + provider) | 04, 05 | P1 | done | P1-20 | All mutations audited | Client IPs aren't recorded yet. Our provider admins' own log entries with no company aren't shown |
 | P1-34 | M2 e2e (Playwright): invite → login → chat → usage visible → policy change effective | 04 | P0 | todo | P1-26…33 | Green in CI against dev stack | |
 
 ### M3 Billing, security, operations (S6–S7)
@@ -117,7 +117,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-38 | `EInvoiceProvider` interface + manual mode (+ provider adapter when decided) | 06 | P1 | blocked | e-Fatura decision | Draft PDF in TRY with FX rate | Manual mode can ship first |
 | P1-39 | Payment adapter (iyzico / PayTR) + dunning | 06 | P1 | blocked | payment decision | Recurring charge in sandbox | |
 | P1-40 | TCMB FX rate daily job (`fx_rates`) | 06 | P1 | todo | P1-17 | Rate stored daily; alert if missing | |
-| P1-41 | Budget threshold alerts (50/80/100%): email + console banner | 03, 06 | P0 | todo | P1-09 | One alert per threshold per month | |
+| P1-41 | Budget threshold alerts (50/80/100%): email + console banner | 03, 06 | P0 | review | P1-09 | One alert per threshold per month | A company's tokens. Department budgets wait for a customer price (P1-37). Needs a real email sender to reach anyone in production |
 | P1-42 | Backups: wal-g/pg_dump, mongodump per tenant, restic → Storage Box; monthly restore test | 10 | P0 | todo | P0-09 | Restore test passes; alert if skipped | |
 | P1-43 | Monitoring: Prometheus, Grafana, Loki, exporters, alert rules (LLD-10 §5) | 10 | P0 | todo | P0-09 | Alerts reach phone in test | Must alert on the gateway's `pii_detector_failed` log event (P1-11); until then it is only an error log |
 | P1-44 | Edge hardening: Cloudflare WAF, rate limits, origin certs, security headers | 10 | P0 | todo | P0-09 | External scan: 443 only; headers A-grade | |

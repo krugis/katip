@@ -791,6 +791,38 @@ try {
   await shot(person, 'user-disabled');
   await userContext.close();
 
+  console.log('usage alerts, from real usage');
+  const tenantForAlerts = sql(`select id from tenants where slug = '${slug}'`);
+  check((await admin.getByTestId('usage-banner').count()) === 0, 'no banner at first');
+  const usedSoFar = Number(
+    sql(
+      `select coalesce(sum(input_tokens + output_tokens), 0) from usage_events where tenant_id = '${tenantForAlerts}' and class <> 'premium'`,
+    ),
+  );
+  // The real tokens above, against a limit that makes them just over 80%.
+  sql(
+    `update tenant_limits set std_tokens = ${Math.ceil(usedSoFar * 1.2)} where tenant_id = '${tenantForAlerts}'`,
+  );
+  await admin.goto(`${consoleUrl}/tenant/overview`);
+  const alerted = await withinAsync(40, async () => {
+    await admin.reload();
+    await admin.getByTestId('seats-business').waitFor();
+    return (await admin.getByTestId('usage-banner').count()) > 0;
+  });
+  check(alerted !== null, `the banner appears (took ${alerted} s)`);
+  check(
+    (await admin.getByTestId('usage-banner').textContent()).includes('%80'),
+    'and says how far along it is',
+  );
+  await shot(admin, 'usage-banner');
+  const alertMails = mailpit(
+    `/api/v1/search?query=${encodeURIComponent(`bcc:${owner} subject:kota`)}`,
+  );
+  check(alertMails.messages_count === 1, 'the admin got one email');
+  await admin.waitForTimeout(12_000);
+  const again = mailpit(`/api/v1/search?query=${encodeURIComponent(`bcc:${owner} subject:kota`)}`);
+  check(again.messages_count === 1, 'and no second one on the next check');
+
   console.log('the audit log');
   await admin.goto(`${consoleUrl}/tenant/audit`);
   await admin.getByTestId('audit-table').waitFor();
