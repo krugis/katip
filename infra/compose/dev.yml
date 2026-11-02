@@ -1,0 +1,145 @@
+# Dev overrides + AI plane (LLD-01 §2, dev environment). Laptop use only.
+# Extends platform.yml: mock provider, self-built LiteLLM (mock-routed config),
+# policy-gateway with dev tenants file. LibreChat runs from the rendered tenant
+# file (infra/compose/tenants/demo.yml), not here.
+name: sme-platform
+
+services:
+  traefik:
+    # dev: dev TLS certs + dashboard on 127.0.0.1:8080 (host)
+    ports: !override
+      - '80:80'
+      - '443:443'
+      # dashboard moved to 9090: 8080 often taken by local dev servers
+      - '127.0.0.1:9090:8080'
+    volumes: !override
+      - ../traefik/traefik.dev.yml:/etc/traefik/traefik.yml:ro
+      - ../traefik/dynamic:/etc/traefik/dynamic:ro
+      - ../traefik/dev-certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+
+  postgres:
+    # dev: expose on localhost for psql / IDE access while developing.
+    ports:
+      - '127.0.0.1:5432:5432'
+
+  keycloak:
+    environment:
+      KC_LOG_LEVEL: INFO
+
+  mongodb:
+    ports:
+      - '127.0.0.1:27017:27017'
+
+  meilisearch:
+    ports:
+      - '127.0.0.1:7700:7700'
+
+  valkey:
+    ports:
+      - '127.0.0.1:6379:6379'
+
+  mailpit:
+    ports:
+      - '127.0.0.1:8025:8025'
+
+  # ---- AI plane (dev-only services) ----
+
+  mock-llm:
+    image: ghcr.io/krugis/mock-llm:dev
+    build:
+      context: ../..
+      dockerfile: apps/mock-llm/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: '8080'
+    networks:
+      - backend
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  litellm:
+    build:
+      context: ../litellm
+      args:
+        LITELLM_VERSION: ${LITELLM_VERSION:-1.79.3}
+        LITELLM_SHA256: ${LITELLM_SHA256:?from katip.env/config}
+    image: ghcr.io/krugis/litellm:${LITELLM_VERSION:-1.79.3}
+    restart: unless-stopped
+    volumes:
+      - ../litellm/rendered/config.dev.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
+      MOCK_LLM_KEY: ${MOCK_LLM_KEY:?from katip.env}
+    entrypoint: ['litellm', '--config', '/app/config.yaml', '--port', '4000']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python3 -c "import urllib.request;urllib.request.urlopen(''http://127.0.0.1:4000/health/liveliness'')"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  policy-gateway:
+    image: ghcr.io/krugis/policy-gateway:dev
+    build:
+      context: ../..
+      dockerfile: apps/policy-gateway/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: '8080'
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
+      DEV_TENANTS_FILE: /config/dev-tenants.json
+      LOG_LEVEL: info
+    volumes:
+      - ../../.katip/gateway/dev-tenants.json:/config/dev-tenants.json:ro
+    networks:
+      - backend
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+networks:
+  edge:
+    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_edge
+    external: true
+  backend:
+    name: ${KATIP_COMPOSE_PROJECT:-sme-platform}_backend
+    external: true

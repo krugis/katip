@@ -14,8 +14,10 @@ function walk(dir) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p);
     else if (/\.(ts|tsx|mts|js|mjs)$/.test(name) && !name.endsWith('.d.ts')) {
-      const first = readFileSync(p, 'utf8').split('\n', 1)[0];
-      if (first.trim() !== HEADER) missing.push(p);
+      const lines = readFileSync(p, 'utf8').split('\n');
+      const first = lines[0]?.trim() ?? '';
+      const header = first === HEADER || (first.startsWith('#!') && lines[1]?.trim() === HEADER);
+      if (!header) missing.push(p);
     }
   }
 }

@@ -48,6 +48,8 @@ export function buildMockApp(
   const chunkSize = opts.chunkSize ?? 6;
   app.requests = [];
 
+  app.get('/healthz', async () => ({ status: 'ok' }));
+
   app.get('/v1/models', async () => ({
     object: 'list',
     data: [{ id: 'mock', object: 'model', owned_by: 'katip' }],

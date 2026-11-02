@@ -1,0 +1,9 @@
+# Pass-through ipallow middleware for tenant "demo" (LLD-02 §6): no allowlist
+# configured yet; the provisioner rewrites this when access rules land (P1-28).
+http:
+  middlewares:
+    demo-ipallow:
+      ipAllowList:
+        sourceRange:
+          - 0.0.0.0/0
+          - ::/0

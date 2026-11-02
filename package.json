@@ -17,7 +17,11 @@
     "test": "turbo run test",
     "spdx:check": "node scripts/check-spdx.mjs",
     "secrets:check": "secretlint \"**/*\"",
-    "licenses:check": "node scripts/check-licenses.mjs"
+    "licenses:check": "node scripts/check-licenses.mjs",
+    "dev:up": "node scripts/setup/main.mjs up",
+    "dev:down": "node scripts/setup/main.mjs down",
+    "dev:status": "node scripts/setup/main.mjs status",
+    "dev:rollback": "node scripts/setup/main.mjs rollback"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

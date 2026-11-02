@@ -1,0 +1,45 @@
+# Per-tenant compose template (LLD-01 §2.2, LLD-07). Rendered by the bootstrap
+# (dev) or provisioner (dev/test/pilot) to infra/compose/tenants/<slug>.yml
+# with project name sme-<slug>. Only traefik + LibreChat touch the edge network.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  lc-${KATIP_SLUG}:
+    image: ghcr.io/danny-avila/librechat:${KATIP_LIBRECHAT_VERSION}
+    restart: unless-stopped
+    env_file:
+      - ../../env/tenants/${KATIP_SLUG}.env
+    volumes:
+      - ../../librechat/rendered/${KATIP_SLUG}.librechat.yaml:/app/librechat.yaml:ro
+      - lc-uploads-${KATIP_SLUG}:/app/uploads
+    networks:
+      - edge
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: ${KATIP_TENANT_MEMORY:-1g}
+          cpus: '${KATIP_TENANT_CPUS:-1.0}'
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${KATIP_SLUG}.rule=Host(`${KATIP_SLUG}.${KATIP_BASE_DOMAIN}`)
+      - traefik.http.routers.${KATIP_SLUG}.entrypoints=websecure
+      - traefik.http.routers.${KATIP_SLUG}.tls=true
+      - traefik.http.routers.${KATIP_SLUG}.middlewares=${KATIP_SLUG}-ipallow@file,ratelimit-user@file,secure-headers@file
+      - traefik.http.services.${KATIP_SLUG}.loadbalancer.server.port=3080
+    logging: *default-logging
+
+volumes:
+  lc-uploads-${KATIP_SLUG}: {}
+
+networks:
+  edge:
+    name: ${KATIP_COMPOSE_PROJECT}_edge
+    external: true
+  backend:
+    name: ${KATIP_COMPOSE_PROJECT}_backend
+    external: true

@@ -1,0 +1,104 @@
+# ==============================================================================
+# Kâtip master configuration — the single file for all non-secret settings.
+#
+# Every rendered artifact (compose, traefik, LiteLLM, LibreChat, tenant env)
+# derives from this file + infra/env/katip.env (secrets). Secrets are
+# auto-generated once by `pnpm dev:up` and NEVER overwritten.
+#
+# Licence: AGPL-3.0-only (this repo, see LICENSE)
+# ==============================================================================
+
+project:
+  name: sme-platform
+  # Dev base domain: services get <service>.<base_domain>; tenant demo → demo.localhost
+  base_domain: localhost
+
+# ------------------------------------------------------------------------------
+# Image pins. Never use :latest (CLAUDE.md §7). LiteLLM is self-built from a
+# checksum-verified wheel (ADR/CLAUDE.md: compromised releases in 2026).
+# ------------------------------------------------------------------------------
+images:
+  traefik: traefik:v3.7.17
+  postgres: pgvector/pgvector:0.8.7-pg16-trixie
+  keycloak: quay.io/keycloak/keycloak:26.8.1
+  mongodb: mongo:7.0.16
+  meilisearch: getmeili/meilisearch:v1.56.0
+  valkey: valkey/valkey:8.0.12
+  mailpit: axllent/mailpit:v1.33.0
+  librechat: ghcr.io/danny-avila/librechat:v0.7.8
+  # Self-built from infra/litellm/Dockerfile; sha256 = wheel checksum from PyPI.
+  litellm:
+    version: '1.79.3'
+    sha256: 16314049d109e5cadb2abdccaf2e07ea03d2caa3a9b3f54f34b5b825092b4eeb
+
+# ------------------------------------------------------------------------------
+# Service settings (dev). Only traefik publishes ports on the host.
+# ------------------------------------------------------------------------------
+services:
+  postgres:
+    # Databases created at first boot by infra/compose/initdb/00-init.sql
+    databases: [governance, keycloak, litellm]
+  keycloak:
+    realm: katip
+  traefik:
+    # Dev: dashboard on 127.0.0.1:8080 (host), see traefik.dev.yml rendering
+    dashboard: true
+
+# ------------------------------------------------------------------------------
+# LiteLLM models (dev). In dev everything routes to mock-llm; real providers
+# activate when their API keys exist in infra/env/katip.env. Model ids marked
+# (verify) must be checked against the provider before pilot.
+# ------------------------------------------------------------------------------
+models:
+  - alias: std-deepseek-v4-flash
+    class: standard
+    provider: mock # dev default; prod: deepinfra (verify id)
+    litellm_params:
+      model: deepinfra/deepseek-ai/DeepSeek-V4-Flash
+    api_key_env: DEEPINFRA_API_KEY
+  - alias: std-glm-5.3-flash
+    class: standard
+    provider: mock
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash
+    api_key_env: OPENROUTER_API_KEY
+  - alias: std-gemma-4-26b
+    class: standard
+    provider: mock
+    litellm_params:
+      model: deepinfra/google/gemma-4-26b-a4b-it
+    api_key_env: DEEPINFRA_API_KEY
+  - alias: prem-claude-sonnet-5.5
+    class: premium
+    provider: mock
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+    api_key_env: ANTHROPIC_API_KEY
+  - alias: prem-gemini-4-argon
+    class: premium
+    provider: mock
+    litellm_params:
+      model: vertex_ai/gemini-4-argon
+    api_key_env: GCP_VERTEX_KEY
+  - alias: emb-bge-m3
+    class: embedding
+    provider: mock
+    litellm_params:
+      model: deepinfra/BAAI/bge-m3
+    api_key_env: DEEPINFRA_API_KEY
+
+# ------------------------------------------------------------------------------
+# Demo tenant (rendered by the bootstrap; the provisioner CLI lands in P1-21).
+# ------------------------------------------------------------------------------
+tenant:
+  slug: demo
+  plan: business
+  seats: 10
+  kvkk_addon: false
+  # Gateway key for the demo tenant is auto-generated into katip.env
+  # (KATIP_DEMO_GATEWAY_KEY) and its SHA-256 into the gateway dev-tenants file.
+  limits:
+    standard: 68000000
+    premium: 2000000
+  pii:
+    mode: mask

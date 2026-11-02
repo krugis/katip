@@ -3,3 +3,8 @@ dist
 coverage
 LICENSE
 docs/
+.katip/
+infra/litellm/rendered/
+infra/litellm/config.dev.tmpl.yaml
+infra/env/katip.env
+infra/traefik/dev-certs/

@@ -10,10 +10,15 @@ coverage/
 *.env
 !*.example.env
 !*.enc.env
+infra/env/katip.env
 infra/env/tenants/*.env
 !infra/env/tenants/*.enc.env
 
-# rendered tenant files
+# bootstrap state, logs, dev certs and rendered files
+.katip/
+infra/traefik/dev-certs/
+infra/litellm/rendered/
+infra/policy-gateway/
 infra/compose/tenants/*.yml
 infra/librechat/rendered/
 
