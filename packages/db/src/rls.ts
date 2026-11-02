@@ -92,7 +92,14 @@ DROP POLICY IF EXISTS gateway_key_lookup ON gateway_keys;
 CREATE POLICY gateway_key_lookup ON gateway_keys FOR SELECT TO katip_gateway USING (true);`;
 
 /** Tables the console API may read so far. Each new endpoint adds only what it needs. */
-const CONSOLE_READS = ['tenants', 'users', 'seats', 'departments'];
+const CONSOLE_READS = [
+  'tenants',
+  'users',
+  'seats',
+  'departments',
+  'department_managers',
+  'tenant_limits',
+];
 
 /** The console API's own role: not a superuser and bound by RLS, with no lookup exception. */
 export const CONSOLE_ROLE_SQL = `DO $$
@@ -103,5 +110,10 @@ BEGIN
 END $$;
 GRANT USAGE ON SCHEMA public TO katip_console;
 GRANT SELECT ON ${CONSOLE_READS.join(', ')} TO katip_console;
-GRANT INSERT ON users, audit_log TO katip_console;
+GRANT INSERT ON users, audit_log, departments, department_managers TO katip_console;
+GRANT UPDATE (name, budget_usd_micro) ON departments TO katip_console;
+GRANT DELETE ON department_managers TO katip_console;
+GRANT SELECT, INSERT, UPDATE ON jobs TO katip_console;
+-- Token counts only: cost is our margin, and prompts' metadata isn't the console's business.
+GRANT SELECT (tenant_id, ts, class, source, input_tokens, output_tokens) ON usage_events TO katip_console;
 GRANT UPDATE (name, role, department_id, seat_plan_code, status, updated_at) ON users TO katip_console;`;

@@ -75,5 +75,84 @@
     "forbidden": "Hesabınız tek bir şirkete bağlı değil veya şirketiniz askıya alındı. Şirket yöneticinize başvurun.",
     "unavailable": "Sunucuya şu anda ulaşılamıyor. Biraz sonra tekrar deneyin.",
     "signInFailed": "Giriş tamamlanamadı. Lütfen tekrar deneyin."
+  },
+  "overview": {
+    "seats": "Koltuklar",
+    "quota": "Bu ayki kullanım",
+    "standard": "Standart jeton",
+    "premium": "Premium jeton",
+    "research": "Derin araştırma",
+    "usedOf": "{{limit}} içinden {{used}} kullanıldı",
+    "nearLimit": "Sınıra yaklaşıldı.",
+    "noLimits": "Bu ay için kota tanımlı değil."
+  },
+  "roles": {
+    "user": "Kullanıcı",
+    "dept_manager": "Departman yöneticisi",
+    "tenant_admin": "Şirket yöneticisi"
+  },
+  "users": {
+    "invite": "Kullanıcı davet et",
+    "import": "CSV ile içe aktar",
+    "email": "E-posta",
+    "name": "Ad soyad",
+    "role": "Rol",
+    "department": "Departman",
+    "noDepartment": "Departman yok",
+    "tier": "Seviye",
+    "sendInvite": "Davet gönder",
+    "invited": "Davet gönderildi.",
+    "invitedNoEmail": "Kullanıcı eklendi, ancak e-posta gönderilemedi. Daveti yeniden gönderin.",
+    "person": "Kişi",
+    "statusLabel": "Durum",
+    "actions": "İşlemler",
+    "resend": "Yeniden gönder",
+    "resent": "Davet yeniden gönderildi.",
+    "disable": "Devre dışı bırak",
+    "enable": "Etkinleştir",
+    "confirmDisable": "{{email}} devre dışı bırakılsın mı? Oturumları hemen kapanır.",
+    "status": {
+      "active": "Etkin",
+      "disabled": "Devre dışı"
+    },
+    "importLabel": "CSV dosyası seçin",
+    "importHelp": "Sütunlar: email, name, department, tier. En fazla 1000 kişi. Departmanlar önceden oluşturulmuş olmalıdır.",
+    "importStatus": {
+      "running": "İçe aktarılıyor: {{total}} satırın {{done}} tanesi tamamlandı…",
+      "done": "İçe aktarma tamamlandı.",
+      "failed": "İçe aktarma durdu. Dosyayı yeniden yükleyebilirsiniz; eklenmiş kişiler atlanır.",
+      "interrupted": "İçe aktarma yarıda kesildi. Dosyayı yeniden yükleyebilirsiniz; eklenmiş kişiler atlanır."
+    },
+    "importCounts": "{{created}} eklendi, {{skipped}} atlandı, {{failed}} başarısız.",
+    "importNotInvited": "{{count}} kişiye e-posta gönderilemedi. Davetlerini yeniden gönderin.",
+    "importRow": "Satır {{row}}"
+  },
+  "departments": {
+    "name": "Departman adı",
+    "budget": "Aylık bütçe (USD)",
+    "create": "Departman oluştur",
+    "empty": "Henüz departman yok. Yukarıdan ilk departmanı oluşturun.",
+    "edit": "Düzenle",
+    "save": "Kaydet",
+    "cancel": "Vazgeç",
+    "managers": "Yöneticiler",
+    "noManagers": "Önce bir kullanıcıya Departman yöneticisi rolü verin.",
+    "noManagerYet": "Yönetici atanmadı",
+    "noBudget": "Bütçe yok",
+    "people_one": "{{count}} kişi",
+    "people_other": "{{count}} kişi"
+  },
+  "errors": {
+    "generic": "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
+    "user_exists": "Bu kullanıcı zaten şirkette.",
+    "email_in_use": "Bu e-posta adresi davet edilemiyor.",
+    "no_seats": "Boş koltuk kalmadı.",
+    "last_admin": "Şirkette en az bir etkin yönetici kalmalıdır.",
+    "bad_request": "Girdiğiniz bilgileri kontrol edin.",
+    "identity_unavailable": "Kimlik hizmetine şu anda ulaşılamıyor. Biraz sonra tekrar deneyin.",
+    "department_exists": "Bu adda bir departman zaten var.",
+    "import_running": "Bu şirket için zaten bir içe aktarma sürüyor.",
+    "invalid_row": "E-posta veya ad geçersiz",
+    "unknown_department": "Departman bulunamadı"
   }
 }

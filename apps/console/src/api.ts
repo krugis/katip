@@ -9,6 +9,35 @@ export class ApiError extends Error {
     super(`${status} ${code}`);
     this.name = 'ApiError';
   }
+
+  /** What Refine calls the status. */
+  get statusCode(): number {
+    return this.status;
+  }
+}
+
+/** A request that changes something. */
+export async function apiSend<T = unknown>(
+  method: 'POST' | 'PATCH',
+  path: string,
+  getToken: GetToken,
+  body?: unknown,
+  contentType = 'application/json',
+): Promise<T> {
+  const token = await getToken();
+  const res = await fetch(`/api/v1${path}`, {
+    method,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(body === undefined ? {} : { 'content-type': contentType }),
+    },
+    ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+  });
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => null)) as { code?: string } | null;
+    throw new ApiError(res.status, problem?.code ?? 'unknown');
+  }
+  return (await res.json()) as T;
 }
 
 export interface Me {

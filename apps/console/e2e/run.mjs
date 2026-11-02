@@ -148,6 +148,47 @@ const tokenOf = (page) =>
     return JSON.parse(sessionStorage.getItem(key)).access_token;
   });
 
+/** The link in the one invite this person should have. */
+const inviteLink = (email) => {
+  const found = mailpit(`/api/v1/search?query=to:${email}`);
+  if (found.messages_count < 1) return null;
+  const mail = mailpit(`/api/v1/message/${found.messages[0].ID}`);
+  return /https:\/\/auth\.[^\s"<]+action-token[^\s"<]+/.exec(mail.Text)?.[0] ?? null;
+};
+
+/** As the invited person: sets a password, enrols MFA, signs in, and reaches LibreChat. */
+async function followInvite(browser, email, link, screenshot) {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'tr-TR' });
+  const page = await context.newPage();
+  await page.goto(link.replaceAll('&amp;', '&'));
+  for (let i = 0; i < 8 && onAuth(page); i += 1) {
+    await page.waitForLoadState('domcontentloaded');
+    if (await page.locator('input[name=password-new]').count()) {
+      await page.locator('input[name=password-new]').fill(password);
+      await page.locator('input[name=password-confirm]').fill(password);
+      await clickSubmit(page);
+    } else if (!(await mfaStep(page, email))) {
+      const proceed = page.locator('a[href*="action-token"], #kc-info-message a').first();
+      if (!(await proceed.count())) break;
+      await proceed.click();
+    }
+    await page.waitForTimeout(500);
+  }
+  check(secrets.has(email), `${email} sets a password and enrols MFA`);
+  await page.goto(`https://${slug}.${base}/oauth/openid`);
+  // Keycloak then asks them to sign in, with what they just set.
+  await signIn(page, email, `${slug}.${base}`);
+  await page.waitForURL((u) => !u.pathname.startsWith('/oauth'), { timeout: 30_000 });
+  await page.waitForLoadState('networkidle').catch(() => undefined);
+  if (screenshot) await shot(page, `${screenshot}-librechat`);
+  const landed = new URL(page.url());
+  check(
+    !landed.pathname.startsWith('/login'),
+    `${email} is signed in to LibreChat (${landed.pathname})`,
+  );
+  await context.close();
+}
+
 console.log(`Console on tenant ${slug}`);
 const browser = await chromium.launch();
 const cspErrors = [];
@@ -179,7 +220,7 @@ try {
     '--plan',
     'business',
     '--seats',
-    '5',
+    '10',
     '--admin-email',
     `it@${domain}`,
   );
@@ -187,41 +228,10 @@ try {
   const owner = `it@${domain}`;
 
   console.log('the real invite email');
-  const found = mailpit(`/api/v1/search?query=to:${owner}`);
-  check(found.messages_count === 1, 'the tenant admin got one invite');
-  const mail = mailpit(`/api/v1/message/${found.messages[0].ID}`);
-  const link = /https:\/\/auth\.[^\s"<]+action-token[^\s"<]+/.exec(mail.Text)?.[0];
-  check(link, 'it holds a link');
+  const link = inviteLink(owner);
+  check(link, 'the tenant admin got an invite with a link');
 
-  const inviteContext = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'tr-TR' });
-  const invite = await inviteContext.newPage();
-  await invite.goto(link.replaceAll('&amp;', '&'));
-  for (let i = 0; i < 8 && onAuth(invite); i += 1) {
-    await invite.waitForLoadState('domcontentloaded');
-    if (await invite.locator('input[name=password-new]').count()) {
-      await invite.locator('input[name=password-new]').fill(password);
-      await invite.locator('input[name=password-confirm]').fill(password);
-      await clickSubmit(invite);
-    } else if (!(await mfaStep(invite, owner))) {
-      const proceed = invite.locator('a[href*="action-token"], #kc-info-message a').first();
-      if (!(await proceed.count())) break;
-      await proceed.click();
-    }
-    await invite.waitForTimeout(500);
-  }
-  check(secrets.has(owner), 'following it sets a password and enrols MFA');
-  await shot(invite, 'invite-finished');
-  // Keycloak then asks them to sign in, with what they just set.
-  await signIn(invite, owner, `${slug}.${base}`);
-  await invite.waitForURL((u) => !u.pathname.startsWith('/oauth'), { timeout: 30_000 });
-  await invite.waitForLoadState('networkidle').catch(() => undefined);
-  await shot(invite, 'invite-librechat');
-  const landed = new URL(invite.url());
-  check(
-    !landed.pathname.startsWith('/login'),
-    `the invited admin is signed in to LibreChat (${landed.pathname})`,
-  );
-  await inviteContext.close();
+  await followInvite(browser, owner, link, 'invite');
 
   console.log('tenant admin');
   const { context: adminContext, page: admin } = await openConsole(browser, owner, cspErrors);
@@ -255,7 +265,7 @@ try {
   await shot(admin, 'tenant-admin-en');
   await admin.getByTestId('language').selectOption('tr');
   await admin.getByTestId('nav-tenant-users').click();
-  await admin.getByTestId('coming-soon').waitFor();
+  await admin.getByTestId('users-table').waitFor();
   check(new URL(admin.url()).pathname === '/tenant/users', 'can move between screens');
   for (const path of ['/provider/tenants', '/department/overview']) {
     await admin.goto(`${consoleUrl}${path}`);
@@ -265,6 +275,129 @@ try {
   await admin.goto(`${consoleUrl}/tenant/usage`);
   await admin.getByTestId('coming-soon').waitFor();
   check(new URL(admin.url()).pathname === '/tenant/usage', 'a deep link survives the redirects');
+
+  console.log('departments');
+  await admin.getByTestId('nav-tenant-departments').click();
+  await admin.getByTestId('departments-empty').waitFor();
+  check(true, 'an empty list says what to do');
+  const departmentForm = admin.getByTestId('department-form');
+  await departmentForm.locator('input[name=name]').fill('Satış');
+  await departmentForm.locator('input[name=budget]').fill('250');
+  await admin.getByTestId('department-create').click();
+  await admin.getByTestId('department-Satış').waitFor();
+  check(
+    (await admin.getByTestId('department-Satış').textContent()).includes('250'),
+    'a department is created, with its budget',
+  );
+  await departmentForm.locator('input[name=name]').fill('Satış');
+  await admin.getByTestId('department-create').click();
+  await admin.getByTestId('form-error').waitFor();
+  check(
+    (await admin.getByTestId('form-error').textContent()).includes('zaten'),
+    'a taken name is refused, in Turkish',
+  );
+
+  console.log('invite 3 users through the screen');
+  await admin.getByTestId('nav-tenant-users').click();
+  await admin.getByTestId('open-invite').click();
+  const started = Date.now();
+  const form = admin.getByTestId('invite-form');
+  const newPeople = [
+    [`ayse@${domain}`, 'Ayşe Yılmaz', 'user'],
+    [`mehmet@${domain}`, 'Mehmet Öz', 'dept_manager'],
+    [`zeynep@${domain}`, 'Zeynep Kaya', 'user'],
+  ];
+  for (const [email, name, role] of newPeople) {
+    await form.locator('input[name=email]').fill(email);
+    await form.locator('input[name=name]').fill(name);
+    await form.locator('select[name=role]').selectOption(role);
+    await form.locator('select[name=departmentId]').selectOption({ label: 'Satış' });
+    await admin.getByTestId('invite-submit').click();
+    await admin.getByTestId(`user-${email}`).waitFor();
+  }
+  check(true, 'three invites appear in the table');
+  await shot(admin, 'users');
+  for (const [email] of newPeople) {
+    const invitedLink = inviteLink(email);
+    check(invitedLink, `${email} got an email`);
+    await followInvite(browser, email, invitedLink);
+  }
+  const took = Math.round((Date.now() - started) / 1000);
+  check(took < 120, `all three are in LibreChat within 2 minutes (it took ${took} s)`);
+
+  console.log('changing users on the screen');
+  const fits = (selector) =>
+    admin.evaluate((sel) => {
+      const box = document.querySelector(sel)?.parentElement;
+      return Boolean(box) && box.scrollWidth <= box.clientWidth;
+    }, selector);
+  await admin.goto(`${consoleUrl}/tenant/users`);
+  const ayse = admin.getByTestId(`user-ayse@${domain}`);
+  await ayse.waitFor();
+  check(
+    (await ayse.getByTestId('department').locator('option:checked').textContent()) === 'Satış',
+    'the department was kept',
+  );
+  check(await fits('[data-testid=users-table]'), 'the table fits a laptop screen');
+  admin.once('dialog', (d) => void d.accept());
+  await ayse.getByTestId('disable').click();
+  await ayse.locator('[data-status=disabled]').waitFor();
+  check(true, 'a user can be disabled, after confirming');
+  await ayse.getByTestId('enable').click();
+  await ayse.locator('[data-status=active]').waitFor();
+  check(true, 'and enabled again');
+  await ayse.getByTestId('role').selectOption('dept_manager');
+  await admin.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith('/users'));
+  check(
+    sql(`select role from users where email = 'ayse@${domain}'`) === 'dept_manager',
+    'a role change is saved',
+  );
+  await ayse.getByTestId('role').selectOption('user');
+  await admin.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith('/users'));
+  const self = admin.getByTestId(`user-${owner}`);
+  check((await self.getByTestId('disable').count()) === 0, 'you cannot disable yourself');
+  check(await self.getByTestId('role').isDisabled(), 'nor change your own role');
+
+  console.log('import a CSV');
+  await admin.getByTestId('open-import').click();
+  await admin.getByTestId('import-file').setInputFiles({
+    name: 'kisiler.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      `email;name;department\r\ncan@${domain};Can Demir;Satış\r\nbad-address;Hatalı;\r\nyok@${domain};Yok;Olmayan\r\n`,
+    ),
+  });
+  await admin.locator('[data-testid=import-result][data-status=done]').waitFor({ timeout: 60_000 });
+  const importText = await admin.getByTestId('import-result').textContent();
+  check(
+    importText.includes('1 eklendi') && importText.includes('2 başarısız'),
+    'it reports what happened',
+  );
+  await admin.getByTestId(`user-can@${domain}`).waitFor();
+  check(true, 'the new person appears without a reload');
+  await shot(admin, 'users-import');
+
+  console.log('managers and the overview');
+  await admin.getByTestId('nav-tenant-departments').click();
+  const satis = admin.getByTestId('department-Satış');
+  await satis.getByTestId('department-edit').click();
+  await admin.getByTestId(`manager-mehmet@${domain}`).check();
+  await admin.getByTestId('department-save').click();
+  await admin.getByTestId('department-edit').waitFor();
+  check(
+    (await satis.getByTestId('department-managers').textContent()).includes('Mehmet'),
+    'a manager can be assigned',
+  );
+  await shot(admin, 'departments');
+  await admin.getByTestId('nav-tenant-overview').click();
+  await admin.getByTestId('seats-business').waitFor();
+  check(
+    (await admin.getByTestId('seats-business').textContent()).includes('10'),
+    'the overview shows real seats',
+  );
+  await admin.getByTestId('quota-standard').waitFor();
+  check(!/\$|USD/.test(await admin.locator('main').textContent()), 'and no cost');
+  await shot(admin, 'overview');
 
   const token = await tokenOf(admin);
   const tid = sql(`select id from tenants where slug = '${slug}'`);

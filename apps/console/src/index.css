@@ -35,3 +35,20 @@ body {
     Roboto,
     sans-serif;
 }
+
+/* The browser's default is its own green, so meters follow the theme here. */
+progress {
+  appearance: none;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--color-line);
+}
+progress::-webkit-progress-bar {
+  background: var(--color-line);
+}
+progress::-webkit-progress-value {
+  background: var(--color-accent);
+}
+progress::-moz-progress-bar {
+  background: var(--color-accent);
+}

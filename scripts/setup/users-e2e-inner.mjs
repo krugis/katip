@@ -110,9 +110,16 @@ const csv = [
   `carol@${domain};Carol;;`,
 ].join('\r\n');
 r = await call(adminToken, 'POST', `${users}/import`, csv, 'text/csv');
-const imported = await r.json();
-check(r.status === 200 && imported.created.length === 1, 'a good row is invited');
-check(imported.skipped.length === 1, 'an existing user is skipped');
+check(r.status === 202, 'an import starts in the background');
+const { id: importId } = await r.json();
+let imported;
+for (let i = 0; i < 60; i += 1) {
+  imported = await (await call(adminToken, 'GET', `${users}/imports/${importId}`)).json();
+  if (imported.status !== 'running') break;
+  await new Promise((done) => setTimeout(done, 500));
+}
+check(imported.status === 'done' && imported.created === 1, 'a good row is invited');
+check(imported.skipped === 1, 'an existing user is skipped');
 const reasons = imported.failed.map((f) => f.reason).sort();
 check(reasons.join() === 'invalid_row,no_seats', 'a bad row and the row past the seat limit fail');
 const bob = (await (await call(adminToken, 'GET', users)).json()).users.find((u) =>

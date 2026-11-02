@@ -14,9 +14,13 @@ import type { AppConfig } from './config';
 import { dataProviderFor } from './data-provider';
 import { setLanguage, type Language } from './i18n';
 import { AccountProblem, ComingSoon, NoAccess, ProviderTenants } from './pages';
+import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
 
-const SCREENS: Record<string, () => React.ReactNode> = {
+const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> = {
   '/provider/tenants': () => <ProviderTenants />,
+  '/tenant/overview': (me, getToken) => <TenantOverview me={me} getToken={getToken} />,
+  '/tenant/users': (me, getToken) => <TenantUsers me={me} getToken={getToken} />,
+  '/tenant/departments': (me) => <TenantDepartments me={me} />,
 };
 
 function Loading() {
@@ -28,7 +32,7 @@ function Loading() {
   );
 }
 
-function CurrentScreen({ me }: { me: Me }) {
+function CurrentScreen({ me, getToken }: { me: Me; getToken: GetToken }) {
   const { pathname } = useLocation();
   const home = homeOf(me);
   if (pathname === '/' || pathname === '/callback') {
@@ -36,7 +40,7 @@ function CurrentScreen({ me }: { me: Me }) {
   }
   if (!canOpen(me, pathname)) return <NoAccess home={home} />;
   const screen = SCREENS[pathname];
-  if (screen) return screen();
+  if (screen) return screen(me, getToken);
   const item = ALL_AREAS.flatMap((a) => a.items).find((i) => i.path === pathname);
   return <ComingSoon labelKey={item?.labelKey ?? 'page.soonTitle'} />;
 }
@@ -82,7 +86,7 @@ function Signed({ config, getToken }: { config: AppConfig; getToken: GetToken })
       onSignOut={() => void auth.signoutRedirect()}
     >
       <Routes>
-        <Route path="*" element={<CurrentScreen me={me.data} />} />
+        <Route path="*" element={<CurrentScreen me={me.data} getToken={getToken} />} />
       </Routes>
     </Shell>
   );

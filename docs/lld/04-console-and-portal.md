@@ -2,7 +2,7 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
-**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. The provider's company list uses the real API; every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users and departments (P1-26). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
 
 **How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
 
@@ -71,7 +71,9 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | POST | `/api/v1/me/privacy/export` | any | Async job; returns job id |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/users` | tenant_admin | Invite, change tier/department/role, disable |
 | POST | `/api/v1/tenants/:tid/users/:uid/invite` | tenant_admin | Send the invite again |
-| POST | `/api/v1/tenants/:tid/users/import` | tenant_admin | CSV (email, name, department, tier); comma or semicolon. Up to 1000 rows, each reported as created, skipped or failed |
+| POST | `/api/v1/tenants/:tid/users/import` | tenant_admin | CSV (email, name, department, tier); comma or semicolon. Up to 1000 rows. Runs in the background and answers 202 with a job id |
+| GET | `/api/v1/tenants/:tid/users/imports/:jid` | tenant_admin | Progress, with failed rows by number and reason. The job holds no addresses |
+| GET | `/api/v1/tenants/:tid/overview` | tenant_admin | Seats, and this month's tokens against the pooled limit. Never cost: that's our margin, and the console's role can't read it |
 | GET/PUT | `/api/v1/tenants/:tid/policy` | tenant_admin | Effective policy JSON (zod `TenantPolicy`) |
 | GET/PUT | `/api/v1/tenants/:tid/access-rules` | tenant_admin | Validates lock-out (§LLD-02 6) |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/departments` | tenant_admin | |
