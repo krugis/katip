@@ -15,10 +15,12 @@
   "dependencies": {
     "@fastify/swagger": "9.9.3",
     "@katip/db": "workspace:*",
+    "@katip/policy-engine": "workspace:*",
     "@katip/shared": "workspace:*",
     "drizzle-orm": "0.44.6",
     "fastify": "5.12.7",
     "fastify-type-provider-zod": "4.0.2",
+    "ioredis": "6.0.0",
     "jose": "6.2.15",
     "postgres": "3.4.7",
     "zod": "3.25.76"

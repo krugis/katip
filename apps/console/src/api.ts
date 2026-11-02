@@ -18,7 +18,7 @@ export class ApiError extends Error {
 
 /** A request that changes something. */
 export async function apiSend<T = unknown>(
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PATCH' | 'PUT',
   path: string,
   getToken: GetToken,
   body?: unknown,

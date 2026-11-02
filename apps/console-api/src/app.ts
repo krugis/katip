@@ -3,7 +3,7 @@
 // problem+json errors and OpenAPI generated from Zod. Screens' endpoints arrive with
 // their own tasks; each one must declare who may use it, or the server won't start.
 import swagger from '@fastify/swagger';
-import { AppError, createLogger, Errors, type Logger } from '@katip/shared';
+import { AppError, createLogger, Errors, type Logger, type PolicyPublisher } from '@katip/shared';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -22,6 +22,7 @@ import type { IdentityClient } from './identity.js';
 import type { ConsoleStore } from './stores.js';
 import { registerUserRoutes } from './users.js';
 import { registerCompanyRoutes } from './company.js';
+import { registerPolicyRoutes } from './policy.js';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -37,6 +38,8 @@ declare module 'fastify' {
 export interface ConsoleDeps {
   store: ConsoleStore;
   identity: IdentityClient;
+  /** Tells the gateways a policy changed. Without it, they notice within 30 s anyway. */
+  events?: PolicyPublisher;
   verifyToken: TokenVerifier;
   logger?: Logger;
   /** Routes added after the access check is in place; for testing that check. */
@@ -195,6 +198,14 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
 
   registerUserRoutes(app as unknown as FastifyInstance, deps, API_PREFIX, callerOf);
   registerCompanyRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
+  registerPolicyRoutes(
+    app as unknown as FastifyInstance,
+    deps.store,
+    deps.events,
+    API_PREFIX,
+    callerOf,
+    log,
+  );
 
   deps.extraRoutes?.(app as unknown as FastifyInstance);
   await app.ready();

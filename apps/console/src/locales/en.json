@@ -153,6 +153,50 @@
     "department_exists": "A department with this name already exists.",
     "import_running": "An import is already running for this company.",
     "invalid_row": "Invalid email or name",
-    "unknown_department": "Department not found"
+    "unknown_department": "Department not found",
+    "policy_changed": "Someone else changed this policy just now. Reload the page and try again."
+  },
+  "policy": {
+    "aliases": "Model options",
+    "aliasesHelp": "The options people can see in chat.",
+    "alias": {
+      "auto": "Automatic: picks a model for the task",
+      "fast": "Fast: for everyday work",
+      "best": "Best: for hard work",
+      "trLocal": "Turkey: domestic model only"
+    },
+    "userChoice": "Let people choose the model themselves",
+    "models": "Allowed models",
+    "modelsAll": "None selected: every enabled model can be used.",
+    "modelsSome": "Only the selected models can be used.",
+    "class": {
+      "standard": "Standard",
+      "premium": "Premium tier",
+      "tr": "Turkey"
+    },
+    "atLimit": "When the monthly quota runs out",
+    "limit": {
+      "downgrade": "Move to a cheaper model",
+      "block": "Stop requests",
+      "overage": "Carry on and bill the overage"
+    },
+    "pii": "Personal data (KVKK)",
+    "piiMode": {
+      "mask": "Mask: hide it before it reaches a model (recommended)",
+      "block": "Block: stop any request holding personal data",
+      "off": "Off: personal data reaches the model as it is"
+    },
+    "piiOffWarning": "While this is off, personal data goes to the model provider. Responsibility under KVKK for this choice is your company’s.",
+    "confirmPiiOff": "Turn off personal data protection? Data goes to the model provider as it is.",
+    "detectorBlock": "Stop requests if the personal data check isn’t working",
+    "residency": "Data location",
+    "residencyValue": {
+      "ANY_APPROVED": "Any approved region",
+      "EU_ONLY": "EU only",
+      "TR_ONLY": "Turkey only"
+    },
+    "residencyAddon": "Choosing a data location comes with the KVKK add-on.",
+    "save": "Save",
+    "saved": "Saved. It takes effect within 30 seconds."
   }
 }

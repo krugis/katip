@@ -15,6 +15,8 @@ export const ConfigSchema = z.object({
   /** The internal identity service, which holds the Keycloak rights this API must not. */
   IDENTITY_URL: z.string().url(),
   IDENTITY_TOKEN: z.string().min(32),
+  /** For telling the gateways a policy changed. */
+  VALKEY_URL: z.string().url().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

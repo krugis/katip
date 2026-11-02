@@ -148,6 +148,46 @@ const tokenOf = (page) =>
     return JSON.parse(sessionStorage.getItem(key)).access_token;
   });
 
+/** Calls the real gateway from inside the backend network, as a company's LibreChat would. */
+const gateway = (email, path, body) => {
+  const key = readFileSync(join(ROOT, `infra/env/tenants/${slug}.secrets.env`), 'utf8')
+    .split('\n')
+    .find((l) => l.includes('_GATEWAY_KEY='))
+    .split('=')
+    .slice(1)
+    .join('=');
+  const script = `fetch('http://policy-gateway:8080/v1' + process.env.P, {
+      method: process.env.B ? 'POST' : 'GET',
+      headers: { authorization: 'Bearer ' + process.env.K, 'x-user-email': process.env.E, 'content-type': 'application/json' },
+      ...(process.env.B ? { body: process.env.B } : {}),
+    }).then(async (r) => console.log(JSON.stringify({ status: r.status, body: await r.text() })))`;
+  const out = sh('docker', [
+    'exec',
+    '-e',
+    `K=${key}`,
+    '-e',
+    `E=${email}`,
+    '-e',
+    `P=${path}`,
+    '-e',
+    `B=${body ? JSON.stringify(body) : ''}`,
+    `${project}-console-api-1`,
+    'node',
+    '-e',
+    script,
+  ]);
+  return JSON.parse(out);
+};
+/** How long a condition takes to come true on the real gateway. */
+const within = async (seconds, condition) => {
+  const started = Date.now();
+  while (Date.now() - started < seconds * 1000) {
+    if (condition()) return Math.round((Date.now() - started) / 1000);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return null;
+};
+
 /** The link in the one invite this person should have. */
 const inviteLink = (email) => {
   const found = mailpit(`/api/v1/search?query=to:${email}`);
@@ -398,6 +438,56 @@ try {
   await admin.getByTestId('quota-standard').waitFor();
   check(!/\$|USD/.test(await admin.locator('main').textContent()), 'and no cost');
   await shot(admin, 'overview');
+
+  console.log('policies, through to the real gateway');
+  await admin.getByTestId('nav-tenant-policies').click();
+  const policyForm = admin.getByTestId('policy-form');
+  await policyForm.waitFor();
+  check(await admin.getByTestId('residency').isDisabled(), 'residency waits for the KVKK add-on');
+  check((await admin.getByTestId('alias-tr-local').count()) === 0, 'and so does the Turkish model');
+  const models = () => gateway(owner, '/models').body;
+  check(models().includes('"best"'), 'the gateway offers best at first');
+  await admin.getByTestId('alias-best').uncheck();
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+  const offered = await within(30, () => !models().includes('"best"'));
+  check(offered !== null, `turning it off reaches the gateway within 30 s (took ${offered} s)`);
+  await admin.getByTestId('alias-best').check();
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+
+  const chat = () =>
+    gateway(owner, '/chat/completions', {
+      model: 'fast',
+      messages: [{ role: 'user', content: 'Adresim ayse.yilmaz@ornek.com.tr' }],
+      max_tokens: 16,
+    });
+  check(chat().status === 200, 'a message with an email address goes through, masked');
+  check(!chat().body.includes('ayse.yilmaz@ornek.com.tr'), 'and the model never sees the address');
+  await admin.getByTestId('pii-mode').selectOption('block');
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+  const blocked = await within(30, () => chat().status === 400);
+  check(blocked !== null, `blocking personal data takes effect within 30 s (took ${blocked} s)`);
+  check(chat().body.includes('pii_blocked'), 'and says why');
+  await admin.getByTestId('pii-mode').selectOption('off');
+  check(
+    await admin.getByTestId('pii-off-warning').isVisible(),
+    'turning protection off warns first',
+  );
+  admin.once('dialog', (d) => void d.dismiss());
+  await admin.getByTestId('policy-save').click();
+  check(
+    !sql(
+      `select policy->'pii'->>'mode' from tenant_policies p join tenants t on t.id = p.tenant_id where t.slug = '${slug}'`,
+    ).includes('off'),
+    'and dismissing the question saves nothing',
+  );
+  await admin.getByTestId('pii-mode').selectOption('mask');
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+  check((await within(30, () => chat().status === 200)) !== null, 'masking comes back');
+  await shot(admin, 'policies');
 
   const token = await tokenOf(admin);
   const tid = sql(`select id from tenants where slug = '${slug}'`);
