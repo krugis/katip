@@ -316,7 +316,7 @@ try {
   await admin.getByTestId('nav-tenant-users').click();
   await admin.getByTestId('users-table').waitFor();
   check(new URL(admin.url()).pathname === '/tenant/users', 'can move between screens');
-  for (const path of ['/provider/tenants', '/department/overview']) {
+  for (const path of ['/provider/tenants', '/nowhere']) {
     await admin.goto(`${consoleUrl}${path}`);
     await admin.getByTestId('no-access').waitFor();
     check(true, `going straight to ${path} says no access`);
@@ -614,7 +614,86 @@ try {
   await manager.getByTestId('no-access').waitFor();
   check(true, 'not the company screens');
   await shot(manager, 'department-manager-no-access');
+  await manager.goto(`${consoleUrl}/department/overview`);
+  await manager.getByTestId('no-department').waitFor();
+  check(true, 'with no department yet, it says so');
   await managerContext.close();
+
+  console.log('a manager with a department');
+  const mehmetEmail = `mehmet@${domain}`;
+  const ayseId = sql(`select id from users where email = 'ayse@${domain}'`);
+  const tidForManager = sql(`select id from tenants where slug = '${slug}'`);
+  const satisId = sql(
+    `select id from departments where tenant_id = '${tidForManager}' and name = 'Satış'`,
+  );
+  const otherDept = await fetch(`${consoleUrl}/api/v1/tenants/${tidForManager}/departments`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Başka' }),
+  }).then((r) => r.json());
+  gateway(`ayse@${domain}`, '/chat/completions', {
+    model: 'fast',
+    messages: [{ role: 'user', content: 'merhaba' }],
+    max_tokens: 8,
+  });
+  sql(
+    `insert into requests (tenant_id, user_id, type, payload) values ('${tidForManager}', '${ayseId}', 'premium_access', '{"reason":"Raporlar için"}'::jsonb)`,
+  );
+  const { context: mehmetContext, page: mehmet } = await openConsole(
+    browser,
+    mehmetEmail,
+    cspErrors,
+  );
+  check(
+    (await visibleAreas(mehmet)).join() === 'department,account',
+    'sees their department and account',
+  );
+  await mehmet.getByTestId('department-summary').waitFor();
+  check(
+    (await mehmet.getByTestId('department-summary').textContent()).includes('Satış'),
+    'starts on it',
+  );
+  await mehmet.getByTestId('nav-department-users').click();
+  await mehmet.getByTestId('department-users').waitFor();
+  check(
+    (await mehmet.getByTestId('department-users').textContent()).includes(`ayse@${domain}`),
+    'sees its people',
+  );
+  await mehmet.getByTestId('nav-department-usage').click();
+  await mehmet.getByTestId('usage-table').waitFor();
+  check(
+    (await mehmet.getByTestId('usage-table').textContent()).includes(`ayse@${domain}`),
+    'and its usage',
+  );
+  await shot(mehmet, 'department-usage');
+  const mehmetToken = await tokenOf(mehmet);
+  const otherStatus = (
+    await fetch(`${consoleUrl}/api/v1/tenants/${tidForManager}/departments/${otherDept.id}/usage`, {
+      headers: { authorization: `Bearer ${mehmetToken}` },
+    })
+  ).status;
+  check(otherStatus === 404, 'another department answers 404');
+  const satisStatus = (
+    await fetch(`${consoleUrl}/api/v1/tenants/${tidForManager}/departments/${satisId}/usage`, {
+      headers: { authorization: `Bearer ${mehmetToken}` },
+    })
+  ).status;
+  check(satisStatus === 200, 'with the same token that reads their own');
+  await mehmet.getByTestId('nav-department-requests').click();
+  const request = mehmet.getByTestId(`request-ayse@${domain}`);
+  await request.waitFor();
+  check((await request.textContent()).includes('Raporlar için'), 'sees a request and its reason');
+  await request.getByTestId('approve').click();
+  await request.getByTestId('decision').waitFor();
+  check(
+    sql(`select status from requests where user_id = '${ayseId}'`) === 'approved',
+    'and can approve it',
+  );
+  await shot(mehmet, 'department-requests');
+  await mehmet.goto(`${consoleUrl}/tenant/users`);
+  await mehmet.getByTestId('no-access').waitFor();
+  check(true, 'but not the company screens');
+  await mehmetContext.close();
 
   console.log('user');
   const userEmail = `user@${domain}`;

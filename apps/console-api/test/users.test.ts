@@ -410,6 +410,8 @@ describe('the console role', () => {
     ['read provider cost', `select cost_usd_micro from usage_events`],
     ['read list price', `select price_usd_micro from usage_events`],
     ['read daily cost', `select cost_usd_micro from usage_daily`],
+    ['rewrite a request', `update requests set payload = '{}'`],
+    ['delete a request', `delete from requests`],
     ['write daily usage', `delete from usage_daily`],
     ['read model prices', `select price_in_usd_micro_per_m from model_catalog`],
     ['change the catalog', `update model_catalog set enabled = false`],
@@ -1069,6 +1071,174 @@ describe('usage reports', () => {
       const res = await send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=user`);
       expect(res.body).toContain(`"'=HYPERLINK(""http://evil.test"") (evil@a.test)"`);
     });
+  });
+});
+
+describe('a department manager', () => {
+  const asManager = () => token('m@a.test', 'tenant-a', ['dept_manager']);
+  const path = (dept: string, rest = '') => `/api/v1/tenants/${a}/departments/${dept}${rest}`;
+  let mine: string;
+  let theirs: string;
+  let managerId: string;
+  let memberId: string;
+
+  const addRequest = async (userId: string) =>
+    (
+      await admin`insert into requests (tenant_id, user_id, type, payload)
+        values (${a}, ${userId}, 'model', ${JSON.stringify({ reason: 'Raporlar için' })}::jsonb) returning id`
+    )[0]!['id'] as string;
+  const addUsage = async (user: string, dept: string, tokens: number) => {
+    const [m] = await admin`select id from model_catalog limit 1`;
+    await admin.unsafe(
+      `insert into usage_events (id, tenant_id, user_id, department_id, alias, model_id, class, input_tokens, output_tokens, cost_usd_micro, price_usd_micro, source)
+       values ('${randomUUID()}', '${a}', '${user}', '${dept}', 'fast', '${m!['id']}', 'standard', ${tokens}, 0, 1, 1, 'chat')`,
+    );
+  };
+
+  beforeEach(async () => {
+    const add = async (name: string) =>
+      (
+        await admin`insert into departments (tenant_id, name) values (${a}, ${name}) returning id`
+      )[0]!['id'] as string;
+    mine = await add('Satış');
+    theirs = await add('Destek');
+    managerId = await addUser(a, 'm@a.test', 'dept_manager');
+    memberId = await addUser(a, 'member@a.test');
+    await admin`insert into department_managers (tenant_id, department_id, user_id) values (${a}, ${mine}, ${managerId})`;
+    await admin`update users set department_id = ${mine} where id = ${memberId}`;
+  });
+
+  it('lists only the departments they manage', async () => {
+    const res = await send(
+      'GET',
+      `/api/v1/tenants/${a}/my-departments`,
+      undefined,
+      await asManager(),
+    );
+    expect(res.json().departments.map((d: { name: string }) => d.name)).toEqual(['Satış']);
+  });
+
+  it('a company admin sees them all', async () => {
+    const res = await send('GET', `/api/v1/tenants/${a}/my-departments`);
+    expect(res.json().departments).toHaveLength(2);
+    expect((await send('GET', path(theirs, '/users'))).statusCode).toBe(200);
+  });
+
+  it("sees their department's people and usage, and nobody else's", async () => {
+    const other = await addUser(a, 'other@a.test');
+    await admin`update users set department_id = ${theirs} where id = ${other}`;
+    await addUsage(memberId, mine, 5);
+    await addUsage(other, theirs, 999);
+    const bearer = await asManager();
+    const people = await send('GET', path(mine, '/users'), undefined, bearer);
+    expect(people.json().users.map((u: { email: string }) => u.email)).toEqual(['member@a.test']);
+    const usage = await send('GET', path(mine, '/usage?groupBy=user'), undefined, bearer);
+    expect(usage.json().rows).toHaveLength(1);
+    expect(usage.json().rows[0]).toMatchObject({ key: memberId, total: 5 });
+  });
+
+  it.each([
+    ['users', '/users'],
+    ['usage', '/usage'],
+    ['the export', '/usage/export'],
+    ['requests', '/requests'],
+  ])("answers 404 for another department's %s", async (_label, rest) => {
+    expect((await send('GET', path(theirs, rest), undefined, await asManager())).statusCode).toBe(
+      404,
+    );
+  });
+
+  it('answers 404 for a department that does not exist', async () => {
+    expect(
+      (await send('GET', path(randomUUID(), '/users'), undefined, await asManager())).statusCode,
+    ).toBe(404);
+  });
+
+  it("can't reach another company's department, even as its admin's path", async () => {
+    const [d] =
+      await admin`insert into departments (tenant_id, name) values (${b}, 'Theirs') returning id`;
+    expect((await send('GET', path(d!['id'] as string, '/users'))).statusCode).toBe(404);
+  });
+
+  it('a manager removed from a department loses it at once', async () => {
+    const bearer = await asManager();
+    expect((await send('GET', path(mine, '/users'), undefined, bearer)).statusCode).toBe(200);
+    await admin`delete from department_managers where user_id = ${managerId}`;
+    expect((await send('GET', path(mine, '/users'), undefined, bearer)).statusCode).toBe(404);
+  });
+
+  it('decides a request, once, and audits it without the reason', async () => {
+    const id = await addRequest(memberId);
+    const bearer = await asManager();
+    const listed = await send('GET', path(mine, '/requests'), undefined, bearer);
+    expect(listed.json().requests[0]).toMatchObject({
+      id,
+      type: 'model',
+      reason: 'Raporlar için',
+      status: 'pending',
+      userEmail: 'member@a.test',
+    });
+    const res = await send('PATCH', path(mine, `/requests/${id}`), { status: 'approved' }, bearer);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('approved');
+    const [row] = await admin`select status, decided_by from requests where id = ${id}`;
+    expect(row).toMatchObject({ status: 'approved', decided_by: managerId });
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'request.decide', actor_id: managerId });
+    expect(JSON.stringify(entry)).not.toContain('Raporlar');
+    const again = await send(
+      'PATCH',
+      path(mine, `/requests/${id}`),
+      { status: 'rejected' },
+      bearer,
+    );
+    expect(again.statusCode).toBe(409);
+    expect(again.json().code).toBe('already_decided');
+  });
+
+  it('cannot decide their own request', async () => {
+    await admin`update users set department_id = ${mine} where id = ${managerId}`;
+    const id = await addRequest(managerId);
+    const res = await send(
+      'PATCH',
+      path(mine, `/requests/${id}`),
+      { status: 'approved' },
+      await asManager(),
+    );
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('own_request');
+  });
+
+  it("can't decide a request from another department, through their own path", async () => {
+    const other = await addUser(a, 'other@a.test');
+    await admin`update users set department_id = ${theirs} where id = ${other}`;
+    const id = await addRequest(other);
+    const res = await send(
+      'PATCH',
+      path(mine, `/requests/${id}`),
+      { status: 'approved' },
+      await asManager(),
+    );
+    expect(res.statusCode).toBe(404);
+    const [row] = await admin`select status from requests where id = ${id}`;
+    expect(row!['status']).toBe('pending');
+  });
+
+  it.each([{ status: 'pending' }, { status: 'approved', decided_by: 'x' }, {}])(
+    'refuses the body %j',
+    async (body) => {
+      const id = await addRequest(memberId);
+      const res = await send('PATCH', path(mine, `/requests/${id}`), body, await asManager());
+      expect(res.statusCode).toBe(400);
+    },
+  );
+
+  it('still cannot use company screens', async () => {
+    const bearer = await asManager();
+    for (const route of ['users', 'overview', 'policy', 'access-rules', 'usage', 'departments']) {
+      const res = await send('GET', `/api/v1/tenants/${a}/${route}`, undefined, bearer);
+      expect(res.statusCode, route).toBe(403);
+    }
   });
 });
 

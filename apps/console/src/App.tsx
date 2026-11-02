@@ -15,6 +15,12 @@ import { dataProviderFor } from './data-provider';
 import { setLanguage, type Language } from './i18n';
 import { AccountProblem, ComingSoon, NoAccess, ProviderTenants } from './pages';
 import { TenantAccessRules } from './access-page';
+import {
+  DepartmentOverview,
+  DepartmentRequests,
+  DepartmentUsage,
+  DepartmentUsers,
+} from './department-page';
 import { TenantPolicies } from './policy-page';
 import { TenantUsage } from './usage-page';
 import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
@@ -27,6 +33,10 @@ const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> =
   '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
   '/tenant/access': (me, getToken) => <TenantAccessRules me={me} getToken={getToken} />,
   '/tenant/usage': (me, getToken) => <TenantUsage me={me} getToken={getToken} />,
+  '/department/overview': (me, getToken) => <DepartmentOverview me={me} getToken={getToken} />,
+  '/department/users': (me, getToken) => <DepartmentUsers me={me} getToken={getToken} />,
+  '/department/usage': (me, getToken) => <DepartmentUsage me={me} getToken={getToken} />,
+  '/department/requests': (me, getToken) => <DepartmentRequests me={me} getToken={getToken} />,
 };
 
 function Loading() {

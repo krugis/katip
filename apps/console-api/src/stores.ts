@@ -121,9 +121,48 @@ export interface UsageRow {
   total: number;
 }
 
+export interface DepartmentPerson {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  status: string;
+  seatPlanCode: string | null;
+}
+
+export interface RequestView {
+  id: string;
+  type: string;
+  reason: string;
+  status: string;
+  userName: string;
+  userEmail: string;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
 export interface ConsoleStore {
-  /** Inclusive UTC days. */
-  usage(tenantId: string, group: UsageGroup, from: string, to: string): Promise<UsageRow[]>;
+  /** Inclusive UTC days. With a department, only what's counted to it. */
+  usage(
+    tenantId: string,
+    group: UsageGroup,
+    from: string,
+    to: string,
+    departmentId?: string,
+  ): Promise<UsageRow[]>;
+  /** With a manager, whether they manage it. Without, whether it exists in this company. */
+  canSeeDepartment(tenantId: string, id: string, managerId: string | null): Promise<boolean>;
+  departmentUsers(tenantId: string, id: string): Promise<DepartmentPerson[]>;
+  departmentRequests(tenantId: string, id: string): Promise<RequestView[]>;
+  /** null: not a request from this department. Throws if decided, or if it's the decider's own. */
+  decideRequest(
+    tenantId: string,
+    departmentId: string,
+    id: string,
+    status: 'approved' | 'rejected',
+    actor: Actor,
+    deciderId: string | null,
+  ): Promise<RequestView | null>;
   accessRules(tenantId: string): Promise<AccessRulesView | null>;
   /** If `applyIdentity` throws, nothing changes. */
   saveAccessRules(
@@ -662,7 +701,13 @@ export class DbConsoleStore implements ConsoleStore {
     });
   }
 
-  async usage(tenantId: string, group: UsageGroup, from: string, to: string): Promise<UsageRow[]> {
+  async usage(
+    tenantId: string,
+    group: UsageGroup,
+    from: string,
+    to: string,
+    departmentId?: string,
+  ): Promise<UsageRow[]> {
     return this.inTenant(tenantId, async (tx) => {
       await tx.execute(
         sql`select refresh_usage_daily(${tenantId}::uuid, ${from}::date, ${to}::date)`,
@@ -684,6 +729,7 @@ export class DbConsoleStore implements ConsoleStore {
         .where(
           and(
             eq(d.tenantId, tenantId),
+            departmentId ? eq(d.departmentId, departmentId) : undefined,
             sql`${d.day} >= ${from}::date`,
             sql`${d.day} <= ${to}::date`,
           ),
@@ -728,6 +774,124 @@ export class DbConsoleStore implements ConsoleStore {
       return group === 'day'
         ? out.sort((x, y) => (x.key ?? '').localeCompare(y.key ?? ''))
         : out.sort((x, y) => y.total - x.total);
+    });
+  }
+
+  async canSeeDepartment(tenantId: string, id: string, managerId: string | null): Promise<boolean> {
+    return this.inTenant(tenantId, async (tx) => {
+      const [department] = await tx
+        .select({ id: schema.departments.id })
+        .from(schema.departments)
+        .where(and(eq(schema.departments.tenantId, tenantId), eq(schema.departments.id, id)));
+      if (!department) return false;
+      if (managerId === null) return true;
+      const managing = await tx
+        .select({ userId: schema.departmentManagers.userId })
+        .from(schema.departmentManagers)
+        .where(
+          and(
+            eq(schema.departmentManagers.tenantId, tenantId),
+            eq(schema.departmentManagers.departmentId, id),
+            eq(schema.departmentManagers.userId, managerId),
+          ),
+        );
+      return managing.length > 0;
+    });
+  }
+
+  departmentUsers(tenantId: string, id: string): Promise<DepartmentPerson[]> {
+    return this.inTenant(tenantId, (tx) =>
+      tx
+        .select({
+          id: schema.users.id,
+          email: schema.users.email,
+          name: schema.users.name,
+          role: schema.users.role,
+          status: schema.users.status,
+          seatPlanCode: schema.users.seatPlanCode,
+        })
+        .from(schema.users)
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.departmentId, id)))
+        .orderBy(asc(schema.users.name)),
+    );
+  }
+
+  private async requestRows(tx: Tx, tenantId: string, departmentId: string, only?: string) {
+    const rows = await tx
+      .select({
+        id: schema.requests.id,
+        userId: schema.requests.userId,
+        type: schema.requests.type,
+        payload: schema.requests.payload,
+        status: schema.requests.status,
+        createdAt: schema.requests.createdAt,
+        decidedAt: schema.requests.decidedAt,
+        userName: schema.users.name,
+        userEmail: schema.users.email,
+      })
+      .from(schema.requests)
+      .innerJoin(schema.users, eq(schema.users.id, schema.requests.userId))
+      .where(
+        and(
+          eq(schema.requests.tenantId, tenantId),
+          eq(schema.users.departmentId, departmentId),
+          only ? eq(schema.requests.id, only) : undefined,
+        ),
+      )
+      .orderBy(desc(schema.requests.createdAt));
+    return rows.map((r) => ({
+      userId: r.userId,
+      view: {
+        id: r.id,
+        type: r.type,
+        reason: String((r.payload as { reason?: unknown } | null)?.reason ?? ''),
+        status: r.status,
+        userName: r.userName,
+        userEmail: r.userEmail,
+        createdAt: r.createdAt.toISOString(),
+        decidedAt: r.decidedAt?.toISOString() ?? null,
+      },
+    }));
+  }
+
+  async departmentRequests(tenantId: string, id: string): Promise<RequestView[]> {
+    const rows = await this.inTenant(tenantId, (tx) => this.requestRows(tx, tenantId, id));
+    return rows.map((r) => r.view);
+  }
+
+  async decideRequest(
+    tenantId: string,
+    departmentId: string,
+    id: string,
+    status: 'approved' | 'rejected',
+    actor: Actor,
+    deciderId: string | null,
+  ): Promise<RequestView | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [row] = await this.requestRows(tx, tenantId, departmentId, id);
+      if (!row) return null;
+      if (row.view.status !== 'pending') {
+        throw Errors.conflict('already_decided', 'This request has already been decided');
+      }
+      if (deciderId !== null && row.userId === deciderId) {
+        throw Errors.conflict('own_request', 'You cannot decide your own request');
+      }
+      const decidedAt = new Date();
+      await tx
+        .update(schema.requests)
+        .set({ status, decidedAt, decidedBy: deciderId })
+        .where(and(eq(schema.requests.tenantId, tenantId), eq(schema.requests.id, id)));
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'request.decide',
+        id,
+        { status, type: row.view.type },
+        'request',
+      );
+      return { ...row.view, status, decidedAt: decidedAt.toISOString() };
     });
   }
 

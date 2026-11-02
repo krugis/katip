@@ -76,6 +76,19 @@ const store: ConsoleStore = {
   }),
   listDepartments: async () => [],
   usage: async () => [],
+  canSeeDepartment: async () => true,
+  departmentUsers: async () => [],
+  departmentRequests: async () => [],
+  decideRequest: async () => ({
+    id: USER_ID,
+    type: 'model',
+    reason: '',
+    status: 'approved',
+    userName: 'A',
+    userEmail: 'a@acme.test',
+    createdAt: new Date(0).toISOString(),
+    decidedAt: new Date(0).toISOString(),
+  }),
   policy: async () => policyView,
   accessRules: async () => accessView,
   saveAccessRules: async () => accessView,
@@ -183,6 +196,7 @@ const asRole = (role: Who): TokenOptions =>
 
 /** Expected status for each role, on own tenant and another tenant's. */
 const ADMIN_ONLY = { dept_manager: 403, user: 403, none: 403 };
+const MANAGERS = { tenant_admin: 200, dept_manager: 200, user: 403, none: 403 };
 const OTHER_TENANT = { tenant_admin: 404, dept_manager: 404, user: 404, none: 404 };
 const MATRIX: {
   route: string;
@@ -289,6 +303,34 @@ const MATRIX: {
     route: '/api/v1/tenants/:tid/usage/export',
     url: (t) => `/api/v1/tenants/${t}/usage/export`,
     own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  ...[
+    ['my-departments', '/api/v1/tenants/:tid/my-departments', 'my-departments'],
+    ['users', '/api/v1/tenants/:tid/departments/:did/users', `departments/${USER_ID}/users`],
+    ['usage', '/api/v1/tenants/:tid/departments/:did/usage', `departments/${USER_ID}/usage`],
+    [
+      'usage/export',
+      '/api/v1/tenants/:tid/departments/:did/usage/export',
+      `departments/${USER_ID}/usage/export`,
+    ],
+    [
+      'requests',
+      '/api/v1/tenants/:tid/departments/:did/requests',
+      `departments/${USER_ID}/requests`,
+    ],
+  ].map(([, route, path]) => ({
+    route: route!,
+    url: (t: string) => `/api/v1/tenants/${t}/${path}`,
+    own: { provider_admin: 200, ...MANAGERS },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  })),
+  {
+    route: '/api/v1/tenants/:tid/departments/:did/requests/:rid',
+    method: 'PATCH',
+    body: { status: 'approved' },
+    url: (t) => `/api/v1/tenants/${t}/departments/${USER_ID}/requests/${USER_ID}`,
+    own: { provider_admin: 200, ...MANAGERS },
     other: { provider_admin: 200, ...OTHER_TENANT },
   },
   {

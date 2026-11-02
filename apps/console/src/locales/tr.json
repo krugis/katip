@@ -154,7 +154,9 @@
     "import_running": "Bu şirket için zaten bir içe aktarma sürüyor.",
     "invalid_row": "E-posta veya ad geçersiz",
     "unknown_department": "Departman bulunamadı",
-    "policy_changed": "Bu politikayı az önce başka biri değiştirdi. Sayfayı yenileyip tekrar deneyin."
+    "policy_changed": "Bu politikayı az önce başka biri değiştirdi. Sayfayı yenileyip tekrar deneyin.",
+    "already_decided": "Bu istek için zaten karar verildi.",
+    "own_request": "Kendi isteğiniz için karar veremezsiniz."
   },
   "policy": {
     "aliases": "Model seçenekleri",
@@ -228,5 +230,25 @@
     "none": "Departman yok",
     "empty": "Bu aralıkta kullanım yok.",
     "badRange": "Bu tarih aralığı kullanılamıyor. En fazla 400 gün seçin; başlangıç bitişten sonra olamaz."
+  },
+  "department": {
+    "choose": "Departman:",
+    "none": "Size henüz bir departman atanmadı. Şirket yöneticinize başvurun.",
+    "noPeople": "Bu departmanda henüz kimse yok.",
+    "budget": "Aylık bütçe: {{amount}}",
+    "noRequests": "Bu departmandan bekleyen istek yok.",
+    "requestsHelp": "Onay kararınızı kaydeder. Erişimdeki değişikliği şirket yöneticisi uygular.",
+    "approve": "Onayla",
+    "reject": "Reddet",
+    "requestType": {
+      "premium_access": "Premium erişim",
+      "budget": "Bütçe artışı",
+      "model": "Yeni model"
+    },
+    "status": {
+      "approved": "Onaylandı",
+      "rejected": "Reddedildi",
+      "pending": "Bekliyor"
+    }
   }
 }
