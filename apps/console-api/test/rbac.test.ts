@@ -37,6 +37,15 @@ const managed: ManagedUser = {
   seatPlanCode: 'business',
   lastSeenAt: null,
 };
+const policyDocument = {
+  aliases: { auto: true, fast: true, best: true, 'tr-local': false },
+  allowUserModelChoice: false,
+  allowedModels: [],
+  atQuotaLimit: 'downgrade' as const,
+  residency: 'ANY_APPROVED' as const,
+  pii: { mode: 'mask' as const },
+};
+const policyView = { policy: policyDocument, version: 1, kvkkAddon: false, catalog: [] };
 const department = {
   id: USER_ID,
   name: 'Sales',
@@ -58,6 +67,8 @@ const store: ConsoleStore = {
     used: { standard: 0, premium: 0, research: 0 },
   }),
   listDepartments: async () => [],
+  policy: async () => policyView,
+  savePolicy: async () => policyView,
   createDepartment: async () => department,
   updateDepartment: async () => department,
   startImport: async () => USER_ID,
@@ -163,7 +174,7 @@ const ADMIN_ONLY = { dept_manager: 403, user: 403, none: 403 };
 const OTHER_TENANT = { tenant_admin: 404, dept_manager: 404, user: 404, none: 404 };
 const MATRIX: {
   route: string;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT';
   body?: object | string;
   url: (tenant: string) => string;
   own: Record<Who, number>;
@@ -225,6 +236,20 @@ const MATRIX: {
   {
     route: '/api/v1/tenants/:tid/users/imports/:jid',
     url: (t) => `/api/v1/tenants/${t}/users/imports/${USER_ID}`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/policy',
+    url: (t) => `/api/v1/tenants/${t}/policy`,
+    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 200, ...OTHER_TENANT },
+  },
+  {
+    route: '/api/v1/tenants/:tid/policy',
+    method: 'PUT',
+    body: { policy: policyDocument, version: 1 },
+    url: (t) => `/api/v1/tenants/${t}/policy`,
     own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
     other: { provider_admin: 200, ...OTHER_TENANT },
   },

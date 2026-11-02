@@ -31,6 +31,8 @@ let ownerId: string;
 let otherId: string;
 
 const calls: string[] = [];
+const announced: string[] = [];
+let failAnnounce = false;
 let failInvite: AppError | null = null;
 let failEmail = false;
 let failEnabled = false;
@@ -66,7 +68,7 @@ const token = (email: string, organization: string, roles: string[] = ['tenant_a
 const asOwner = () => token('owner@a.test', 'tenant-a');
 const url = (tenant: string, rest = '') => `/api/v1/tenants/${tenant}/users${rest}`;
 const send = async (
-  method: 'GET' | 'POST' | 'PATCH',
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT',
   path: string,
   payload?: object | string,
   bearer?: string,
@@ -114,6 +116,13 @@ beforeAll(async () => {
   api = await buildApi({
     store,
     identity,
+    events: {
+      publish: async (channel, message) => {
+        if (failAnnounce) throw new Error('valkey down');
+        announced.push(`${channel} ${message}`);
+        return 1;
+      },
+    },
     verifyToken: createVerifier({
       issuer: ISSUER,
       audience: 'console-api',
@@ -132,6 +141,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   calls.length = 0;
+  announced.length = 0;
+  failAnnounce = false;
   failInvite = null;
   failEmail = false;
   failEnabled = false;
@@ -392,6 +403,10 @@ describe('the console role', () => {
     ['change seats', `update seats set quantity = 100`],
     ['read provider cost', `select cost_usd_micro from usage_events`],
     ['read list price', `select price_usd_micro from usage_events`],
+    ['read model prices', `select price_in_usd_micro_per_m from model_catalog`],
+    ['change the catalog', `update model_catalog set enabled = false`],
+    ['rewrite policy history', `update policy_history set version = 0`],
+    ['delete a policy', `delete from tenant_policies`],
     ['read conversation ids', `select conversation_id from usage_events`],
     ['read who used what', `select user_id from usage_events`],
     ['change limits', `update tenant_limits set std_tokens = 1`],
@@ -667,6 +682,119 @@ describe('departments', () => {
     const entries = await audit(a);
     expect(entries.map((e) => e['action'])).toEqual(['department.update', 'department.create']);
     expect(JSON.stringify(entries)).not.toContain('Gizli');
+  });
+});
+
+describe('the policy', () => {
+  const path = (tenant: string) => `/api/v1/tenants/${tenant}/policy`;
+  const read = async () => (await send('GET', path(a))).json();
+  const save = async (change: object, version?: number) => {
+    const current = await read();
+    return send('PUT', path(a), {
+      policy: { ...current.policy, ...change },
+      version: version ?? current.version,
+    });
+  };
+
+  it('starts from the defaults, masking personal data', async () => {
+    const body = await read();
+    expect(body).toMatchObject({
+      version: 0,
+      kvkkAddon: false,
+      policy: { atQuotaLimit: 'downgrade', residency: 'ANY_APPROVED', pii: { mode: 'mask' } },
+    });
+    expect(body.catalog.length).toBeGreaterThan(0);
+  });
+
+  it('never shows prices, which are our cost', async () => {
+    const text = JSON.stringify(await read());
+    expect(text).not.toMatch(/price|cost/i);
+    expect(text).not.toMatch(/litellm/i);
+  });
+
+  it('saves, counts the version, keeps history, audits, and tells the gateways', async () => {
+    const res = await save({ atQuotaLimit: 'block', pii: { mode: 'block' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ version: 1, policy: { atQuotaLimit: 'block' } });
+    expect((await read()).policy.pii.mode).toBe('block');
+    expect(announced).toEqual([`policy.changed ${a}`]);
+    const [saved] =
+      await admin`select version, updated_by from tenant_policies where tenant_id = ${a}`;
+    expect(saved).toMatchObject({ version: 1, updated_by: ownerId });
+    const history = await admin`select version from policy_history where tenant_id = ${a}`;
+    expect(history).toHaveLength(1);
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'policy.update', actor_id: ownerId });
+    expect(entry!['details']).toEqual({
+      version: 1,
+      changed: ['atQuotaLimit', 'pii'],
+      piiMode: 'block',
+    });
+  });
+
+  it('is what the gateway reads: the same shape in the same column', async () => {
+    await save({
+      allowedModels: [],
+      aliases: { auto: true, fast: true, best: false, 'tr-local': false },
+    });
+    const [row] = await admin`select policy from tenant_policies where tenant_id = ${a}`;
+    expect(row!['policy']).toMatchObject({ aliases: { best: false }, pii: { mode: 'mask' } });
+  });
+
+  it('keeps per-entity choices it does not show', async () => {
+    await save({ pii: { mode: 'mask', entities: { PERSON: 'off' } } });
+    const res = await save({ atQuotaLimit: 'overage' });
+    expect(res.json().policy.pii.entities).toEqual({ PERSON: 'off' });
+  });
+
+  it('refuses a save over someone else’s', async () => {
+    await save({ atQuotaLimit: 'block' });
+    const res = await save({ atQuotaLimit: 'overage' }, 0);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('policy_changed');
+    expect((await read()).policy.atQuotaLimit).toBe('block');
+  });
+
+  it('still saves if the announcement fails, as the cache expires anyway', async () => {
+    failAnnounce = true;
+    expect((await save({ atQuotaLimit: 'block' })).statusCode).toBe(200);
+  });
+
+  it.each([
+    ['no aliases', { aliases: { auto: false, fast: false, best: false, 'tr-local': false } }],
+    [
+      'the Turkish model without the add-on',
+      { aliases: { auto: true, fast: true, best: true, 'tr-local': true } },
+    ],
+    ['residency without the add-on', { residency: 'TR_ONLY' }],
+    ['an unknown model', { allowedModels: ['nope'] }],
+    ['an unknown behaviour', { atQuotaLimit: 'explode' }],
+    ['an unknown PII mode', { pii: { mode: 'sometimes' } }],
+    ['an unknown setting', { storePrompts: true }],
+  ])('refuses %s, and changes nothing', async (_label, change) => {
+    const res = await save(change);
+    expect(res.statusCode).toBe(400);
+    expect((await read()).version).toBe(0);
+    expect(announced).toEqual([]);
+  });
+
+  it('lets a company with the add-on use residency and the Turkish model', async () => {
+    await admin`update tenants set kvkk_addon = true where id = ${a}`;
+    const res = await save({
+      residency: 'TR_ONLY',
+      aliases: { auto: true, fast: true, best: true, 'tr-local': true },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("can't reach another company's policy", async () => {
+    await admin`insert into tenant_policies (tenant_id, policy) values (${b}, ${JSON.stringify({ pii: { mode: 'off' } })}::jsonb)`;
+    expect((await send('GET', path(b))).statusCode).toBe(404);
+    const res = await send('PUT', path(b), { policy: (await read()).policy, version: 1 });
+    expect(res.statusCode).toBe(404);
+    const [row] = await admin`select policy from tenant_policies where tenant_id = ${b}`;
+    expect(row!['policy']).toEqual({ pii: { mode: 'off' } });
+    expect(announced).toEqual([]);
   });
 });
 

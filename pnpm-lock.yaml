@@ -120,6 +120,9 @@ importers:
       '@katip/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@katip/policy-engine':
+        specifier: workspace:*
+        version: link:../../packages/policy-engine
       '@katip/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -132,6 +135,9 @@ importers:
       fastify-type-provider-zod:
         specifier: 4.0.2
         version: 4.0.2(fastify@5.12.7)(zod@3.25.76)
+      ioredis:
+        specifier: 6.0.0
+        version: 6.0.0
       jose:
         specifier: 6.2.15
         version: 6.2.15

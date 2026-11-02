@@ -14,6 +14,7 @@ import type { AppConfig } from './config';
 import { dataProviderFor } from './data-provider';
 import { setLanguage, type Language } from './i18n';
 import { AccountProblem, ComingSoon, NoAccess, ProviderTenants } from './pages';
+import { TenantPolicies } from './policy-page';
 import { TenantDepartments, TenantOverview, TenantUsers } from './tenant-pages';
 
 const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> = {
@@ -21,6 +22,7 @@ const SCREENS: Record<string, (me: Me, getToken: GetToken) => React.ReactNode> =
   '/tenant/overview': (me, getToken) => <TenantOverview me={me} getToken={getToken} />,
   '/tenant/users': (me, getToken) => <TenantUsers me={me} getToken={getToken} />,
   '/tenant/departments': (me) => <TenantDepartments me={me} />,
+  '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
 };
 
 function Loading() {

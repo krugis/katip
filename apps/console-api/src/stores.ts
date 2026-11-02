@@ -3,10 +3,12 @@
 // binds, so tenant data is only reachable inside withTenant (LLD-05 §1).
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
+import { DEFAULT_POLICY } from '@katip/policy-engine';
 import { Errors } from '@katip/shared';
 import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import type { PolicyDocument } from './policy.js';
 
 export interface TenantRecord {
   id: string;
@@ -90,7 +92,22 @@ export interface ImportJob extends ImportProgress {
 const STALE_IMPORT_MS = 5 * 60_000;
 const IMPORT_JOB = 'users.import';
 
+export interface PolicyView {
+  policy: PolicyDocument;
+  version: number;
+  kvkkAddon: boolean;
+  catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
+}
+
 export interface ConsoleStore {
+  policy(tenantId: string): Promise<PolicyView | null>;
+  /** null: no such company. Throws if someone else saved since `version` was read. */
+  savePolicy(
+    tenantId: string,
+    policy: PolicyDocument,
+    version: number,
+    actor: Actor,
+  ): Promise<PolicyView | null>;
   overview(tenantId: string, month: string): Promise<Overview>;
   listDepartments(tenantId: string): Promise<Department[]>;
   createDepartment(
@@ -608,6 +625,97 @@ export class DbConsoleStore implements ConsoleStore {
       );
       const [department] = await this.departmentRows(tx, tenantId, id);
       return department!;
+    });
+  }
+
+  private async policyView(tx: Tx, tenantId: string): Promise<PolicyView | null> {
+    const [tenant] = await tx
+      .select({ kvkkAddon: schema.tenants.kvkkAddon })
+      .from(schema.tenants)
+      .where(eq(schema.tenants.id, tenantId));
+    if (!tenant) return null;
+    const [row] = await tx
+      .select({ policy: schema.tenantPolicies.policy, version: schema.tenantPolicies.version })
+      .from(schema.tenantPolicies)
+      .where(eq(schema.tenantPolicies.tenantId, tenantId));
+    const stored = (row?.policy ?? {}) as Partial<PolicyDocument>;
+    const catalog = await tx
+      .select({
+        id: schema.modelCatalog.id,
+        displayName: schema.modelCatalog.displayName,
+        class: schema.modelCatalog.class,
+        region: schema.modelCatalog.region,
+        dataPolicy: schema.modelCatalog.dataPolicy,
+      })
+      .from(schema.modelCatalog)
+      .where(and(eq(schema.modelCatalog.enabled, true), ne(schema.modelCatalog.class, 'embedding')))
+      .orderBy(asc(schema.modelCatalog.displayName));
+    return {
+      policy: {
+        ...DEFAULT_POLICY,
+        ...stored,
+        pii: { mode: 'mask', ...stored.pii },
+      } as PolicyDocument,
+      version: row?.version ?? 0,
+      kvkkAddon: tenant.kvkkAddon,
+      catalog,
+    };
+  }
+
+  policy(tenantId: string): Promise<PolicyView | null> {
+    return this.inTenant(tenantId, (tx) => this.policyView(tx, tenantId));
+  }
+
+  async savePolicy(
+    tenantId: string,
+    policy: PolicyDocument,
+    version: number,
+    actor: Actor,
+  ): Promise<PolicyView | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const current = await this.policyView(tx, tenantId);
+      if (!current) return null;
+      if (current.version !== version) {
+        throw Errors.conflict('policy_changed', 'Someone else changed this policy just now');
+      }
+      // Residency and the Turkish model are the KVKK add-on (LLD-04 §1.2).
+      if (!current.kvkkAddon) {
+        if (policy.aliases['tr-local'] || policy.residency !== 'ANY_APPROVED') {
+          throw Errors.badRequest('This needs the KVKK add-on');
+        }
+      }
+      const known = new Set(current.catalog.map((m) => m.id));
+      if (policy.allowedModels.some((m) => !known.has(m))) {
+        throw Errors.badRequest('Unknown model');
+      }
+
+      const next = version + 1;
+      const now = new Date();
+      const updatedBy = actor.type === 'user' ? actor.id : null;
+      await tx
+        .insert(schema.tenantPolicies)
+        .values({ tenantId, policy, version: next, updatedBy, updatedAt: now })
+        .onConflictDoUpdate({
+          target: schema.tenantPolicies.tenantId,
+          set: { policy, version: next, updatedBy, updatedAt: now },
+        });
+      await tx
+        .insert(schema.policyHistory)
+        .values({ tenantId, version: next, policy, changedBy: updatedBy });
+      const changed = (Object.keys(policy) as (keyof PolicyDocument)[]).filter(
+        (k) => JSON.stringify(policy[k]) !== JSON.stringify(current.policy[k]),
+      );
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'policy.update',
+        tenantId,
+        { version: next, changed, piiMode: policy.pii.mode },
+        'policy',
+      );
+      return { ...current, policy, version: next };
     });
   }
 

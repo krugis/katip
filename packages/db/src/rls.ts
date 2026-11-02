@@ -113,6 +113,10 @@ GRANT SELECT ON ${CONSOLE_READS.join(', ')} TO katip_console;
 GRANT INSERT ON users, audit_log, departments, department_managers TO katip_console;
 GRANT UPDATE (name, budget_usd_micro) ON departments TO katip_console;
 GRANT DELETE ON department_managers TO katip_console;
+GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
+GRANT SELECT, INSERT ON policy_history TO katip_console;
+-- Without prices: those are our cost.
+GRANT SELECT (id, display_name, class, region, data_policy, enabled) ON model_catalog TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON jobs TO katip_console;
 -- Token counts only: cost is our margin, and prompts' metadata isn't the console's business.
 GRANT SELECT (tenant_id, ts, class, source, input_tokens, output_tokens) ON usage_events TO katip_console;

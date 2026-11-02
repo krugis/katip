@@ -230,6 +230,7 @@ services:
       DATABASE_URL: postgres://katip_console:${KATIP_CONSOLE_DB_PASSWORD:?from katip.env}@postgres:5432/governance
       OIDC_ISSUER: https://auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}/realms/${KATIP_REALM:?from katip.config.yaml}
       OIDC_JWKS_URL: http://keycloak:8080/realms/${KATIP_REALM:?from katip.config.yaml}/protocol/openid-connect/certs
+      VALKEY_URL: redis://:${VALKEY_PASSWORD:?from katip.env}@valkey:6379
       IDENTITY_URL: http://identity:8090
       IDENTITY_TOKEN: ${KATIP_IDENTITY_TOKEN:?from katip.env}
       LOG_LEVEL: info

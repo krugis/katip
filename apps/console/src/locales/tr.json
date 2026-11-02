@@ -153,6 +153,50 @@
     "department_exists": "Bu adda bir departman zaten var.",
     "import_running": "Bu şirket için zaten bir içe aktarma sürüyor.",
     "invalid_row": "E-posta veya ad geçersiz",
-    "unknown_department": "Departman bulunamadı"
+    "unknown_department": "Departman bulunamadı",
+    "policy_changed": "Bu politikayı az önce başka biri değiştirdi. Sayfayı yenileyip tekrar deneyin."
+  },
+  "policy": {
+    "aliases": "Model seçenekleri",
+    "aliasesHelp": "Kullanıcıların sohbette görebileceği seçenekler.",
+    "alias": {
+      "auto": "Otomatik: göreve uygun modeli seçer",
+      "fast": "Hızlı: günlük işler için",
+      "best": "En iyi: zor işler için",
+      "trLocal": "Türkiye: yalnızca yurt içi model"
+    },
+    "userChoice": "Kullanıcılar modeli kendileri seçebilsin",
+    "models": "İzin verilen modeller",
+    "modelsAll": "Hiçbiri seçili değil: etkin tüm modeller kullanılabilir.",
+    "modelsSome": "Yalnızca seçili modeller kullanılabilir.",
+    "class": {
+      "standard": "Standart",
+      "premium": "Premium",
+      "tr": "Türkiye"
+    },
+    "atLimit": "Aylık kota dolunca",
+    "limit": {
+      "downgrade": "Daha uygun bir modele geç",
+      "block": "İstekleri durdur",
+      "overage": "Devam et ve aşımı faturala"
+    },
+    "pii": "Kişisel veriler (KVKK)",
+    "piiMode": {
+      "mask": "Maskele: modele gitmeden önce gizle (önerilen)",
+      "block": "Engelle: kişisel veri içeren isteği durdur",
+      "off": "Kapalı: kişisel veriler modele olduğu gibi gider"
+    },
+    "piiOffWarning": "Kapalıyken kişisel veriler model sağlayıcısına gider. Bu kararın KVKK sorumluluğu şirketinize aittir.",
+    "confirmPiiOff": "Kişisel veri koruması kapatılsın mı? Veriler model sağlayıcısına olduğu gibi gider.",
+    "detectorBlock": "Kişisel veri denetimi çalışmıyorsa istekleri durdur",
+    "residency": "Veri konumu",
+    "residencyValue": {
+      "ANY_APPROVED": "Onaylı tüm bölgeler",
+      "EU_ONLY": "Yalnızca AB",
+      "TR_ONLY": "Yalnızca Türkiye"
+    },
+    "residencyAddon": "Veri konumu seçimi KVKK eklentisiyle gelir.",
+    "save": "Kaydet",
+    "saved": "Kaydedildi. 30 saniye içinde geçerli olur."
   }
 }
