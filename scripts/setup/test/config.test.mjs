@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  CHAT_ENDPOINT,
   composeEnv,
   identityInput,
   loadConfig,
@@ -143,6 +144,17 @@ describe('identity', () => {
     const tmpl = read('env', 'tenant.example.env');
     expect(tmpl).toContain('OPENID_CLIENT_SECRET=${KATIP_LC_OIDC_CLIENT_SECRET}');
     expect(tmpl).toContain('ALLOW_EMAIL_LOGIN=false');
+  });
+
+  it('uses the same chat endpoint name in the smoke test and LibreChat config', () => {
+    const tmpl = read('librechat', 'librechat.tmpl.yaml');
+    expect(tmpl).toContain(`- name: ${CHAT_ENDPOINT}`);
+    expect(tmpl).toContain("X-User-Email: '{{LIBRECHAT_USER_EMAIL}}'");
+    expect(identityInput(config).chatEndpoint).toBe(CHAT_ENDPOINT);
+  });
+
+  it('gives the DB and Keycloak the same smoke user', () => {
+    expect(seedInput(config).smokeEmail).toBe(identityInput(config).smokeEmail);
   });
 
   it('makes LibreChat wait for the issuer before it starts', () => {

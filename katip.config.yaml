@@ -38,7 +38,8 @@ images:
   meilisearch: getmeili/meilisearch:v1.56.0
   valkey: valkey/valkey:8.0.12
   mailpit: axllent/mailpit:v1.33.0
-  librechat: ghcr.io/danny-avila/librechat:v0.7.8
+  # v0.8.0+ fills user and body placeholders in custom endpoint headers (P1-05).
+  librechat: ghcr.io/danny-avila/librechat:v0.8.7
   # Used by the bootstrap's own network checks.
   curl: curlimages/curl:8.8.0
   # Presidio analyzer (P1-11): upstream moved to GHCR (LLD-01 still says MCR).

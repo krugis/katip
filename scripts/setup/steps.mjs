@@ -219,6 +219,31 @@ function runOnEdge(ctx, script, extraEnv = {}) {
   );
 }
 
+/**
+ * The gateway's usage row is the proof that LibreChat's headers arrived: its user comes
+ * from X-User-Email and its conversation id from X-Conversation-Id (P1-05).
+ */
+async function checkUsageRecorded(ctx, smokeOutput) {
+  const id = smokeOutput.match(/chat-conversation=([\w-]+)/)?.[1];
+  if (!id) throw new Error('the smoke test reported no conversation id');
+  const { smokeEmail } = identityInput(ctx.config);
+  const sql =
+    `select count(*) from usage_events e join users u on u.id = e.user_id ` +
+    `where e.conversation_id = '${id}' and u.email = '${smokeEmail}'`;
+  await waitUntil(
+    async () => {
+      const { out } = await platformCompose(
+        ['exec', '-T', 'postgres', 'psql', '-U', 'katip', '-d', 'governance', '-At', '-c', sql],
+        ctx,
+      );
+      return parseInt(out.trim(), 10) > 0;
+    },
+    { timeoutMs: 30_000, intervalMs: 2000 },
+  ).catch(() => {
+    throw new Error('the gateway recorded no usage for this user and conversation');
+  });
+}
+
 // ---------------------------------------------------------------------------
 // renderers
 // ---------------------------------------------------------------------------
@@ -618,8 +643,9 @@ export const steps = [
       ]);
       if (!models.includes('auto'))
         throw new Error(`gateway /v1/models failed: ${models.slice(0, 200)}`);
-      await runOnEdge(ctx, 'oidc-smoke.mjs');
-      ctx.log('e2e smoke ok (models, login with MFA, non-member refused)');
+      const { out } = await runOnEdge(ctx, 'oidc-smoke.mjs');
+      await checkUsageRecorded(ctx, out);
+      ctx.log('e2e smoke ok (models, login with MFA, chat headers, non-member refused)');
     },
   },
 ];
