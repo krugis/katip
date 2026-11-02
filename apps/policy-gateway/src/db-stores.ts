@@ -101,7 +101,8 @@ function tenantFromRow(r: TenantRow): Tenant {
   return {
     id: r.id,
     slug: r.slug,
-    status: r.status === 'suspended' ? 'suspended' : 'active',
+    // A deleted tenant is refused too: only an active one is served.
+    status: r.status === 'active' ? 'active' : 'suspended',
     policy: { ...DEFAULT_POLICY, ...(r.policy as Partial<TenantPolicy>) },
     pii: (r.pii as PiiPolicy | null) ?? { mode: 'mask' },
     kvkkAddon: r.kvkkAddon,

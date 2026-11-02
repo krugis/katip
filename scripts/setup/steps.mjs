@@ -92,7 +92,7 @@ const platformCompose = (args, ctx) =>
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
-const tenantCompose = (args, ctx, t) =>
+export const tenantCompose = (args, ctx, t) =>
   tryRun('docker', [...tenantComposeArgs(ctx.config, t), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
@@ -171,7 +171,7 @@ const curlBackend = (ctx, path, extra = []) =>
 
 /** curl via traefik from the edge network. curl resolves *.localhost to
  * 127.0.0.1 (RFC 6761), so we hit the traefik IP directly with a Host header. */
-async function curlEdge(ctx, host, path, extra = []) {
+export async function curlEdge(ctx, host, path, extra = []) {
   const ip = await traefikEdgeIp(ctx);
   return dockerRun(
     [
@@ -366,7 +366,7 @@ function renderPlatformOverlay(ctx) {
   writeFileSync(join(ROOT, RENDERED_COMPOSE), `${JSON.stringify(overlay, null, 2)}\n`);
 }
 
-function renderTenantFiles(ctx, t) {
+export function renderTenantFiles(ctx, t) {
   const { slug } = t;
   const base = ctx.config.project.base_domain;
   const envDir = join(ctx.infra, 'env', 'tenants');
@@ -473,8 +473,8 @@ async function connectPlatformToTenant(ctx, t) {
   }
 }
 
-/** Runs one stage of the provisioner. The Docker work stays here, on the host. */
-async function runProvisioner(ctx, t, action, extra = {}) {
+/** Runs one action of the provisioner. The Docker work stays here, on the host. */
+async function runProvisionerWith(ctx, action, input, extra = {}) {
   const env = {
     DATABASE_URL: `postgres://katip_provider:${ctx.env.KATIP_PROVIDER_DB_PASSWORD}@postgres:5432/governance`,
     KEYCLOAK_URL: 'http://keycloak:8080',
@@ -483,10 +483,7 @@ async function runProvisioner(ctx, t, action, extra = {}) {
     KEYCLOAK_CLIENT_SECRET: ctx.env.KATIP_PROVISIONER_KC_SECRET,
     MONGO_ROOT_URI: `mongodb://${ctx.env.MONGO_USER}:${ctx.env.MONGO_PASSWORD}@mongodb:27017/?authSource=admin`,
     TENANT_ACTION: action,
-    TENANT_INPUT: JSON.stringify(provisionInput(ctx.config, t)),
-    TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
-    TENANT_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
-    TENANT_MONGO_PASSWORD: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+    TENANT_INPUT: JSON.stringify(input),
     ...extra,
   };
   const { out } = await dockerRun(
@@ -504,6 +501,53 @@ async function runProvisioner(ctx, t, action, extra = {}) {
   return JSON.parse(line.slice('provision-result='.length));
 }
 
+const runProvisioner = (ctx, t, action, extra = {}) =>
+  runProvisionerWith(ctx, action, provisionInput(ctx.config, t), {
+    TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
+    TENANT_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
+    TENANT_MONGO_PASSWORD: tenantSecret(ctx, t, 'MONGO_PASSWORD'),
+    ...extra,
+  });
+
+/** suspend, resume, delete and purge need only the slug, and no tenant secrets. */
+export const runTenantAction = (ctx, action, slug) => runProvisionerWith(ctx, action, { slug });
+
+/** Compose by project name, which works without the tenant's rendered file. */
+export const tenantProjectCompose = (ctx, slug, args) =>
+  tryRun('docker', ['compose', '-p', tenantProject(ctx.config, { slug }), ...args]);
+
+/** Each tenant's status. The database is the source of truth. */
+export async function tenantStatuses(ctx) {
+  const { out } = await tryRun('docker', [
+    'exec',
+    `${ctx.config.project.name}-postgres-1`,
+    'psql',
+    '-U',
+    ctx.env.POSTGRES_USER,
+    '-d',
+    'governance',
+    '-Atc',
+    'select slug, status from tenants',
+  ]);
+  return Object.fromEntries(
+    out
+      .split('\n')
+      .filter((l) => l.includes('|'))
+      .map((l) => l.trim().split('|')),
+  );
+}
+
+/** Why this tenant can't be created, if it can't. */
+async function refuseIfNotActive(ctx, slug) {
+  const status = (await tenantStatuses(ctx))[slug];
+  if (status === 'suspended') {
+    throw new Error(`tenant ${slug} is suspended: use pnpm tenant:resume --slug ${slug}`);
+  }
+  if (status && status !== 'active') {
+    throw new Error(`tenant ${slug} is ${status}, and a slug is never reused`);
+  }
+}
+
 /** The tenant's data, login client, network and gateway key. Its LibreChat comes next. */
 export async function provisionTenant(ctx, t) {
   const errors = tenantInputErrors(t);
@@ -518,7 +562,7 @@ export async function provisionTenant(ctx, t) {
 }
 
 /** Renders the tenant's files and starts its search and LibreChat, behind Traefik. */
-async function startTenant(ctx, t, { recreate = false } = {}) {
+export async function startTenant(ctx, t, { recreate = false } = {}) {
   const base = ctx.config.project.base_domain;
   renderTenantFiles(ctx, t);
   await tenantCompose(
@@ -536,7 +580,7 @@ async function startTenant(ctx, t, { recreate = false } = {}) {
   ctx.log(`tenant healthy at https://${t.slug}.${base}`);
 }
 
-const gatewayStatus = async (ctx, t, headers = []) =>
+export const gatewayStatus = async (ctx, t, headers = []) =>
   (
     await curlBackend(ctx, '/v1/models', [
       '-o',
@@ -550,7 +594,7 @@ const gatewayStatus = async (ctx, t, headers = []) =>
   ).trim();
 
 /** What the tenant depends on: login can be discovered, and the gateway knows its key. */
-async function smokeTenant(ctx, t) {
+export async function smokeTenant(ctx, t) {
   const { base_domain: base } = ctx.config.project;
   const discovery = (
     await curlEdge(
@@ -606,6 +650,12 @@ async function undoNewTenant(ctx, t, failedStep) {
   await attempt('governance rows', () => runDbSeed(ctx, 'forget', t.slug));
   if (problems.length > 0) return problems;
 
+  await removeTenantFromHost(ctx, t);
+  return problems;
+}
+
+/** The tenant's network, files and secrets. Its containers and volumes must be gone first. */
+export async function removeTenantFromHost(ctx, t) {
   const network = tenantNetworkName(ctx.config, t);
   for (const service of ['traefik', 'policy-gateway', 'mongodb']) {
     const container = `${ctx.config.project.name}-${service}-1`;
@@ -624,7 +674,6 @@ async function undoNewTenant(ctx, t, failedStep) {
     rmSync(file, { force: true });
   }
   renderPlatformOverlay(ctx);
-  return problems;
 }
 
 /**
@@ -634,6 +683,7 @@ async function undoNewTenant(ctx, t, failedStep) {
 export async function createAndStartTenant(ctx, t) {
   const errors = tenantInputErrors(t);
   if (errors.length > 0) throw new Error(`tenant ${t.slug}: ${errors.join('; ')}`);
+  await refuseIfNotActive(ctx, t.slug);
   const isNew = !existsSync(tenantSecretsFile(ctx.infra, t.slug));
   let step = 'provision';
   try {
@@ -963,6 +1013,7 @@ export const steps = [
     title: 'Tenants (through the provisioner: rows, Keycloak, Mongo, network, gateway key)',
     async run(ctx) {
       for (const t of ctx.config.tenants) {
+        await refuseIfNotActive(ctx, t.slug);
         const r = await provisionTenant(ctx, t);
         (ctx.provisioned ??= {})[t.slug] = r.changedSteps;
         ctx.log(`${t.slug}: ${r.alreadyExists ? 'already exists' : r.changedSteps.join(', ')}`);
@@ -1017,7 +1068,10 @@ export const steps = [
     id: 'tenant',
     title: 'Tenants (LibreChat, Meilisearch, traefik route, smoke, invite)',
     async run(ctx) {
+      const statuses = await tenantStatuses(ctx);
       for (const t of allTenants(ctx)) {
+        // Suspended and deleted tenants stay stopped.
+        if (statuses[t.slug] !== 'active') continue;
         await startTenant(ctx, t, { recreate: ctx.configChanged });
         await smokeTenant(ctx, t);
         // A tenant made with `pnpm tenant:create` has done this already.

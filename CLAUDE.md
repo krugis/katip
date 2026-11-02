@@ -52,6 +52,7 @@ pnpm lint && pnpm typecheck
 pnpm db:generate       # drizzle migration from schema changes
 pnpm db:migrate
 pnpm tenant:create --slug acme --name "ACME A.Ş." --plan business --seats 10 --admin-email it@acme.com.tr   # provisioner CLI
+pnpm test:lifecycle    # a real tenant through its whole lifecycle, on the running stack
 ```
 
 ## Conventions

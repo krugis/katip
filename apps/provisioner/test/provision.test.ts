@@ -43,6 +43,7 @@ class FakeIdentity implements IdentityAdmin {
     this.admins += 1;
     return { id: `kc-${this.admins}-${Math.random().toString(16).slice(2)}` };
   }
+  async purgeTenantIdentity(): Promise<void> {}
   async removeTenantIdentity(input: { slug: string }): Promise<void> {
     this.orgs.delete(input.slug);
   }
@@ -329,6 +330,9 @@ describe('the provisioner role', () => {
     ['delete tenants', `delete from tenants`],
     ['change the audit log', `update audit_log set action = 'x'`],
     ['delete users', `delete from users`],
+    ['rename a tenant', `update tenants set name = 'x'`],
+    ['change a user role', `update users set role = 'x'`],
+    ['read request contents', `select payload from requests`],
     ['drop a table', `drop table users`],
   ])('is denied: %s', async (_label, statement) => {
     await expect(provider.unsafe(statement)).rejects.toThrow(/permission denied|must be owner/);

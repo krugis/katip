@@ -83,7 +83,8 @@ export class KeycloakAdmin implements IdentityAdmin {
     if (!(await this.organization(input.slug))) {
       await this.api('POST', '/organizations', {
         alias: input.slug,
-        name: input.name,
+        // Keycloak wants unique names, and two companies may well share one.
+        name: `${input.name} (${input.slug})`,
         enabled: true,
         domains: [{ name: `${input.slug}.${input.baseDomain}`, verified: false }],
       });
@@ -188,6 +189,27 @@ export class KeycloakAdmin implements IdentityAdmin {
     if (client) await this.api('DELETE', `/clients/${client.id}`);
     const org = await this.organization(input.slug);
     if (org) await this.api('DELETE', `/organizations/${org.id}`);
+  }
+
+  /** After a purge no LibreChat knows these users, so the usual rule against deleting ends. */
+  async purgeTenantIdentity(slug: string): Promise<void> {
+    const org = await this.organization(slug);
+    if (org) {
+      const members =
+        (await this.api<Named[]>('GET', `/organizations/${org.id}/members?max=10000`)) ?? [];
+      for (const member of members) {
+        const orgs = await this.api<{ alias: string }[]>(
+          'GET',
+          `/organizations/members/${member.id}/organizations`,
+        );
+        if (!orgs?.some((o) => o.alias !== slug)) {
+          await this.api('DELETE', `/users/${member.id}`);
+        }
+      }
+      await this.api('DELETE', `/organizations/${org.id}`);
+    }
+    const client = await this.client(clientIdOf(slug));
+    if (client) await this.api('DELETE', `/clients/${client.id}`);
   }
 
   async sendInvite(userId: string, input: TenantInput): Promise<void> {
