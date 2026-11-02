@@ -26,12 +26,18 @@ export const TENANT_OWNED_TABLES = [
   'invoices',
 ] as const;
 
+/**
+ * No tenant context means no rows, rather than an error. NULLIF because a setting made
+ * with SET LOCAL reads as '' once its transaction ends, on a pooled connection.
+ */
+const TENANT_CONTEXT = `NULLIF(current_setting('app.tenant_id', true), '')::uuid`;
+
 export function tenantRlsSql(table: string): string {
   return `ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${table} FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON ${table}
-  USING (tenant_id = current_setting('app.tenant_id')::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid);`;
+  USING (tenant_id = ${TENANT_CONTEXT})
+  WITH CHECK (tenant_id = ${TENANT_CONTEXT});`;
 }
 
 /** Provider endpoints and jobs connect with this role; it bypasses RLS by design. */
@@ -44,3 +50,33 @@ BEGIN
 END $$;
 -- audit_log is append-only for app roles (LLD-05 §2): revoke UPDATE/DELETE from PUBLIC.
 REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC;`;
+
+/** Tables the gateway may read. Tenant-owned ones among them are still limited by RLS. */
+const GATEWAY_READS = [
+  'tenants',
+  'gateway_keys',
+  'users',
+  'departments',
+  'tenant_policies',
+  'tenant_limits',
+  'model_catalog',
+  'router_rules',
+];
+
+/**
+ * The gateway's own role: not a superuser and bound by RLS, so a query that misses a
+ * tenant filter still can't cross tenants. It looks up keys before it knows the tenant,
+ * so gateway_keys alone is readable without a tenant context; a key hash can't be used
+ * to log in. Its password is set by whoever deploys it.
+ */
+export const GATEWAY_ROLE_SQL = `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'katip_gateway') THEN
+    CREATE ROLE katip_gateway LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO katip_gateway;
+GRANT SELECT ON ${GATEWAY_READS.join(', ')} TO katip_gateway;
+GRANT INSERT ON usage_events TO katip_gateway;
+DROP POLICY IF EXISTS gateway_key_lookup ON gateway_keys;
+CREATE POLICY gateway_key_lookup ON gateway_keys FOR SELECT TO katip_gateway USING (true);`;

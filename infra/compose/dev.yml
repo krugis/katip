@@ -121,7 +121,8 @@ services:
       PORT: '8080'
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?from katip.env}
-      DATABASE_URL: postgres://katip:${POSTGRES_PASSWORD:?from katip.env}@postgres:5432/governance
+      # Not the admin role: katip_gateway is bound by row-level security (LLD-05 §1).
+      DATABASE_URL: postgres://katip_gateway:${KATIP_GATEWAY_DB_PASSWORD:?from katip.env}@postgres:5432/governance
       VALKEY_URL: redis://:${VALKEY_PASSWORD:?from katip.env}@valkey:6379
       PRESIDIO_URL: http://presidio-analyzer:3000
       PII_TOKEN_KEY: ${KATIP_PII_TOKEN_KEY:?from katip.env}

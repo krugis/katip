@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Postgres + Valkey implementations of the gateway store interfaces (P1-02).
 // Tenants/users/policies come from the governance DB; key lookups are cached
-// in Valkey for 60 s (LLD-03 §2 step 1-2). RLS is bypassed here on purpose:
-// the gateway resolves tenants itself before any user-context query.
+// in Valkey for 60 s (LLD-03 §2 step 1-2). The gateway connects as katip_gateway, which
+// RLS binds: tenant data is only reachable inside withTenant. Only the key lookup runs
+// without a tenant, as that's how the tenant is found (LLD-05 §1).
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import postgres from 'postgres';
@@ -30,6 +31,17 @@ import {
   type UsageSink,
   type User,
 } from './stores.js';
+
+type Db = ReturnType<typeof drizzle<typeof schema>>;
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/** Runs `fn` with this tenant as the RLS context, for that transaction only. */
+function withTenant<T>(db: Db, tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+    return fn(tx);
+  });
+}
 
 interface TenantRow {
   id: string;
@@ -140,17 +152,9 @@ export class DbTenantStore implements TenantStore {
         slug: schema.tenants.slug,
         status: schema.tenants.status,
         kvkkAddon: schema.tenants.kvkkAddon,
-        policy: schema.tenantPolicies.policy,
-        stdTokens: schema.tenantLimits.stdTokens,
-        premTokens: schema.tenantLimits.premTokens,
       })
       .from(schema.gatewayKeys)
       .innerJoin(schema.tenants, eq(schema.tenants.id, schema.gatewayKeys.tenantId))
-      .leftJoin(
-        schema.tenantPolicies,
-        eq(schema.tenantPolicies.tenantId, schema.gatewayKeys.tenantId),
-      )
-      .leftJoin(schema.tenantLimits, eq(schema.tenantLimits.tenantId, schema.gatewayKeys.tenantId))
       .where(eq(schema.gatewayKeys.prefix, prefix));
 
     const now = this.now();
@@ -159,15 +163,35 @@ export class DbTenantStore implements TenantStore {
       if (r.revokedAt !== null) continue;
       if (r.expiresAt !== null && r.expiresAt.getTime() <= now.getTime()) continue;
       if (!(await verifyKey(apiKey, r.keyHash))) continue;
+      // Tenant data only after the key checks out, inside that tenant's context.
+      const { policy, limits } = await withTenant(this.db, r.tenantId, async (tx) => ({
+        policy: (
+          await tx
+            .select({ policy: schema.tenantPolicies.policy })
+            .from(schema.tenantPolicies)
+            .where(eq(schema.tenantPolicies.tenantId, r.tenantId))
+        )[0]?.policy,
+        limits: (
+          await tx
+            .select({
+              std: schema.tenantLimits.stdTokens,
+              prem: schema.tenantLimits.premTokens,
+            })
+            .from(schema.tenantLimits)
+            .where(eq(schema.tenantLimits.tenantId, r.tenantId))
+            .orderBy(desc(schema.tenantLimits.month))
+            .limit(1)
+        )[0],
+      }));
       resolved = tenantFromRow({
         id: r.tenantId,
         slug: r.slug,
         status: r.status,
         kvkkAddon: r.kvkkAddon,
-        policy: json(r.policy, {}),
-        pii: piiOf(r.policy),
-        stdLimit: r.stdTokens ?? 0,
-        premLimit: r.premTokens ?? 0,
+        policy: json(policy, {}),
+        pii: piiOf(policy),
+        stdLimit: limits?.std ?? 0,
+        premLimit: limits?.prem ?? 0,
       });
       break;
     }
@@ -176,16 +200,18 @@ export class DbTenantStore implements TenantStore {
   }
 
   async findUser(tenantId: string, email: string): Promise<User | null> {
-    const rows = await this.db
-      .select({
-        id: schema.users.id,
-        email: schema.users.email,
-        status: schema.users.status,
-        departmentId: schema.users.departmentId,
-        tenantId: schema.users.tenantId,
-      })
-      .from(schema.users)
-      .where(sql`${schema.users.tenantId} = ${tenantId} and ${schema.users.email} = ${email}`);
+    const rows = await withTenant(this.db, tenantId, (tx) =>
+      tx
+        .select({
+          id: schema.users.id,
+          email: schema.users.email,
+          status: schema.users.status,
+          departmentId: schema.users.departmentId,
+          tenantId: schema.users.tenantId,
+        })
+        .from(schema.users)
+        .where(sql`${schema.users.tenantId} = ${tenantId} and ${schema.users.email} = ${email}`),
+    );
     const r = rows[0];
     return r ? userFromRow(r) : null;
   }
@@ -510,28 +536,30 @@ export class DbUsageSink implements UsageSink {
   }
 
   private async insert(e: UsageEvent, id: string): Promise<void> {
-    await this.db
-      .insert(schema.usageEvents)
-      .values({
-        id,
-        tenantId: e.tenantId,
-        userId: e.userId,
-        departmentId: e.departmentId ?? null,
-        ts: new Date(e.ts),
-        alias: e.alias,
-        modelId: e.modelId,
-        class: e.modelClass,
-        inputTokens: e.inputTokens,
-        outputTokens: e.outputTokens,
-        costUsdMicro: e.costMicroUsd,
-        priceUsdMicro: e.costMicroUsd, // list price = cost until pricing lands (P1-36)
-        conversationId: e.conversationId ?? null,
-        source: e.source,
-        fallback: e.fallback,
-        overage: e.overage,
-        requestId: null,
-      })
-      .onConflictDoNothing();
+    await withTenant(this.db, e.tenantId, (tx) =>
+      tx
+        .insert(schema.usageEvents)
+        .values({
+          id,
+          tenantId: e.tenantId,
+          userId: e.userId,
+          departmentId: e.departmentId ?? null,
+          ts: new Date(e.ts),
+          alias: e.alias,
+          modelId: e.modelId,
+          class: e.modelClass,
+          inputTokens: e.inputTokens,
+          outputTokens: e.outputTokens,
+          costUsdMicro: e.costMicroUsd,
+          priceUsdMicro: e.costMicroUsd, // list price = cost until pricing lands (P1-36)
+          conversationId: e.conversationId ?? null,
+          source: e.source,
+          fallback: e.fallback,
+          overage: e.overage,
+          requestId: null,
+        })
+        .onConflictDoNothing(),
+    );
   }
 }
 
@@ -635,19 +663,21 @@ export class DbPolicySource {
   }
 
   private async load(tenant: Tenant, user: User): Promise<EffectivePolicy> {
-    const rows = await this.db
-      .select({
-        policy: schema.tenantPolicies.policy,
-        override: schema.departments.policyOverride,
-      })
-      .from(schema.tenantPolicies)
-      .leftJoin(
-        schema.departments,
-        user.departmentId
-          ? sql`${schema.departments.id} = ${user.departmentId} and ${schema.departments.tenantId} = ${tenant.id}`
-          : sql`false`,
-      )
-      .where(eq(schema.tenantPolicies.tenantId, tenant.id));
+    const rows = await withTenant(this.db, tenant.id, (tx) =>
+      tx
+        .select({
+          policy: schema.tenantPolicies.policy,
+          override: schema.departments.policyOverride,
+        })
+        .from(schema.tenantPolicies)
+        .leftJoin(
+          schema.departments,
+          user.departmentId
+            ? sql`${schema.departments.id} = ${user.departmentId} and ${schema.departments.tenantId} = ${tenant.id}`
+            : sql`false`,
+        )
+        .where(eq(schema.tenantPolicies.tenantId, tenant.id)),
+    );
     const row = rows[0];
     const base = { ...DEFAULT_POLICY, ...((row?.policy as Partial<TenantPolicy>) ?? {}) };
     const rawOverride = (row?.override ?? {}) as Partial<TenantPolicy> & { pii?: StoredPii };
