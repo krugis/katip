@@ -36,13 +36,30 @@ function saveFile(name: string, contents: string): void {
 }
 
 export function TenantUsage({ me, getToken }: { me: Me; getToken: GetToken }) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <h1 className="text-xl font-semibold">{t('nav.tenant.usage')}</h1>
+      <UsageReport path={`/tenants/${me.tenant!.id}/usage`} groups={GROUPS} getToken={getToken} />
+    </div>
+  );
+}
+
+export function UsageReport({
+  path,
+  groups,
+  getToken,
+}: {
+  path: string;
+  groups: readonly Group[];
+  getToken: GetToken;
+}) {
   const { t, i18n } = useTranslation();
   const [group, setGroup] = useState<Group>('user');
   const [from, setFrom] = useState(`${today().slice(0, 7)}-01`);
   const [to, setTo] = useState(today());
   const [exportFailed, setExportFailed] = useState(false);
   const query = new URLSearchParams({ groupBy: group, from, to }).toString();
-  const path = `/tenants/${me.tenant!.id}/usage`;
   const report = useQuery({
     queryKey: ['usage', path, query],
     queryFn: () => apiFetch<UsageReport>(`${path}?${query}`, getToken),
@@ -64,7 +81,6 @@ export function TenantUsage({ me, getToken }: { me: Me; getToken: GetToken }) {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">{t('nav.tenant.usage')}</h1>
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-line bg-surface p-4">
         <label className="text-sm font-medium">
           {t('usage.from')}
@@ -94,7 +110,7 @@ export function TenantUsage({ me, getToken }: { me: Me; getToken: GetToken }) {
             value={group}
             onChange={(e) => setGroup(e.target.value as Group)}
           >
-            {GROUPS.map((g) => (
+            {groups.map((g) => (
               <option key={g} value={g}>
                 {t(`usage.group.${g}`)}
               </option>

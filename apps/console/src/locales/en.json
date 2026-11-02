@@ -154,7 +154,9 @@
     "import_running": "An import is already running for this company.",
     "invalid_row": "Invalid email or name",
     "unknown_department": "Department not found",
-    "policy_changed": "Someone else changed this policy just now. Reload the page and try again."
+    "policy_changed": "Someone else changed this policy just now. Reload the page and try again.",
+    "already_decided": "This request has already been decided.",
+    "own_request": "You cannot decide your own request."
   },
   "policy": {
     "aliases": "Model options",
@@ -228,5 +230,25 @@
     "none": "No department",
     "empty": "No usage in this range.",
     "badRange": "This date range can’t be used. Choose up to 400 days, with the start before the end."
+  },
+  "department": {
+    "choose": "Department:",
+    "none": "No department has been assigned to you yet. Ask your company admin.",
+    "noPeople": "Nobody is in this department yet.",
+    "budget": "Monthly budget: {{amount}}",
+    "noRequests": "No requests from this department.",
+    "requestsHelp": "This records your decision. Your company admin makes the change to access.",
+    "approve": "Approve",
+    "reject": "Decline",
+    "requestType": {
+      "premium_access": "Premium access",
+      "budget": "Higher budget",
+      "model": "New model"
+    },
+    "status": {
+      "approved": "Approved",
+      "rejected": "Declined",
+      "pending": "Waiting"
+    }
   }
 }
