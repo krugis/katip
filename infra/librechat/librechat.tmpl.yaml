@@ -5,7 +5,9 @@ version: 1.3.13
 endpoints:
   custom:
     - name: SME AI
-      apiKey: '${KATIP_TENANT_GATEWAY_KEY}'
+      # LibreChat reads this from its environment, so this file holds no secret. It has to be
+      # readable by the container's user, who isn't always the user running the install.
+      apiKey: '${GATEWAY_API_KEY}'
       baseURL: http://policy-gateway:8080/v1
       models:
         default: [auto, fast, best]

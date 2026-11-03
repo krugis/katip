@@ -432,6 +432,7 @@ export function renderTenantFiles(ctx, t) {
     KATIP_REALM: ctx.config.identity.realm,
     KATIP_LC_OIDC_CLIENT_SECRET: tenantSecret(ctx, t, 'LC_OIDC_CLIENT_SECRET'),
     KATIP_LC_OIDC_SESSION_SECRET: tenantSecret(ctx, t, 'LC_OIDC_SESSION_SECRET'),
+    KATIP_TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
   });
   writeFileSync(join(envDir, `${slug}.env`), envContent, { mode: 0o600 });
   chmodSync(join(envDir, `${slug}.env`), 0o600);
@@ -453,12 +454,12 @@ export function renderTenantFiles(ctx, t) {
 
   // librechat.yaml
   const tmplLc = readFileSync(join(ctx.infra, 'librechat', 'librechat.tmpl.yaml'), 'utf8');
-  const lc = fill(tmplLc, {
-    KATIP_TENANT_GATEWAY_KEY: tenantSecret(ctx, t, 'GATEWAY_KEY'),
-  }).replace(/<slug>/g, slug);
+  const lc = tmplLc.replace(/<slug>/g, slug);
   const lcDir = join(ctx.infra, 'librechat', 'rendered');
   mkdirSync(lcDir, { recursive: true });
-  writeFileSync(join(lcDir, `${slug}.librechat.yaml`), lc, { mode: 0o600 });
+  const lcFile = join(lcDir, `${slug}.librechat.yaml`);
+  writeFileSync(lcFile, lc, { mode: 0o644 });
+  chmodSync(lcFile, 0o644);
 
   // tenant compose file
   const tmplCompose = readFileSync(join(ctx.infra, 'compose', 'tenant.tmpl.yml'), 'utf8');

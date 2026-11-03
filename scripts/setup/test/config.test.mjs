@@ -309,6 +309,14 @@ describe('tenants', () => {
     expect(key).toContain('deepinfra/deepseek-ai/DeepSeek-V4-Flash');
   });
 
+  it("keeps the gateway key out of the file LibreChat's user has to read", () => {
+    const yaml = read('librechat', 'librechat.tmpl.yaml');
+    expect(yaml).toContain("apiKey: '${GATEWAY_API_KEY}'");
+    expect(read('env', 'tenant.example.env')).toContain(
+      'GATEWAY_API_KEY=${KATIP_TENANT_GATEWAY_KEY}',
+    );
+  });
+
   it('keeps LibreChat off the shared networks', () => {
     const compose = read('compose', 'tenant.tmpl.yml');
     expect(compose).not.toMatch(/^\s+- (edge|backend)$/m);
