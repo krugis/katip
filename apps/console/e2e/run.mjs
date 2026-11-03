@@ -815,10 +815,14 @@ try {
     `select count(*) from langchain_pg_embedding where cmetadata->>'file_id' = '${uploadedFileId}'`,
   ]).trim();
   check(Number(ragRows) > 0, `its text is in the company's own vector database (${ragRows} rows)`);
-  const embeddingUsage = await within(10, () =>
-    Number(
-      sql(`select count(*) from usage_events where tenant_id = '${sql(`select id from tenants where slug = '${slug}'`)}' and source = 'embedding'`),
-    ) > Number(usageBefore),
+  const embeddingUsage = await within(
+    10,
+    () =>
+      Number(
+        sql(
+          `select count(*) from usage_events where tenant_id = '${sql(`select id from tenants where slug = '${slug}'`)}' and source = 'embedding'`,
+        ),
+      ) > Number(usageBefore),
   );
   check(embeddingUsage !== null, 'and the embedding is metered');
 
@@ -1109,20 +1113,31 @@ try {
     `only the chat past its period goes (${chatsLeft().join(', ')})`,
   );
   check(
-    mongoshEval(`db.messages.countDocuments({ conversationId: 'ret-old' }) + db.sharedlinks.countDocuments({ conversationId: 'ret-old' })`) === '0',
+    mongoshEval(
+      `db.messages.countDocuments({ conversationId: 'ret-old' }) + db.sharedlinks.countDocuments({ conversationId: 'ret-old' })`,
+    ) === '0',
     'with its messages and shared link',
   );
-  const retentionHits = meiliCall('POST', '/indexes/messages/search', JSON.stringify({ q: 'emeklilik', limit: 20 })).hits.map((h) => h.messageId);
+  const retentionHits = meiliCall(
+    'POST',
+    '/indexes/messages/search',
+    JSON.stringify({ q: 'emeklilik', limit: 20 }),
+  ).hits.map((h) => h.messageId);
   check(!retentionHits.includes('ret-old-m'), 'and from the search index');
   check(retentionHits.includes('ret-new-m'), 'and a recent chat is still found');
   check(auditCount() !== '0', 'it is in the audit log');
   check(
-    !sql(`select coalesce(string_agg(details::text, ','), '') from audit_log where tenant_id = '${tid}' and action = 'chat.retention'`).includes('emeklilik'),
+    !sql(
+      `select coalesce(string_agg(details::text, ','), '') from audit_log where tenant_id = '${tid}' and action = 'chat.retention'`,
+    ).includes('emeklilik'),
     'as counts, with no chat text',
   );
   const afterFirst = auditCount();
   cli('daily');
-  check(JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']), 'running it again deletes nothing more');
+  check(
+    JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']),
+    'running it again deletes nothing more',
+  );
   check(auditCount() === afterFirst, 'and records nothing new');
   check((await retentionCall('PUT', { months: 12 })).status === 200, 'the admin sets it back');
 
