@@ -76,6 +76,21 @@ export interface GatewayDeps {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Runs `onSilence` if nothing arrives for this long. The timeout on a call only covers its
+ * headers, so without this a provider going quiet part-way would hang the reply for good.
+ */
+function watchForSilence(ms: number, onSilence: () => void) {
+  let timer: NodeJS.Timeout;
+  const stop = () => clearTimeout(timer);
+  const touch = () => {
+    stop();
+    timer = setTimeout(onSilence, ms);
+  };
+  touch();
+  return { touch, stop };
+}
+
 const ALIASES = new Set<Alias>(['auto', 'fast', 'best', 'tr-local']);
 const DEFAULT_MAX_OUTPUT = 1024;
 
@@ -316,7 +331,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
 
       // 4. Upstream with fallback
       metrics.overhead.observe({ tenant: ctx.tenant.slug }, (performance.now() - started) / 1000);
-      const { model, response, fallback } = await withSpan(tracer, 'upstream', () =>
+      const { model, response, fallback, abort } = await withSpan(tracer, 'upstream', () =>
         callUpstream(ctx.tenant.slug, routed, {
           ...outbound,
           user: `${ctx.tenant.slug}:${ctx.user.id}`,
@@ -340,6 +355,11 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       if (fallback) reply.header('x-katip-fallback', 'true');
       if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
 
+      const quiet = watchForSilence(deps.upstreamTimeoutMs ?? 120_000, () => {
+        metrics.upstreamErrors.inc({ model: model.id });
+        req.log.warn({ model: model.id }, 'upstream went quiet part-way');
+        abort();
+      });
       const toolCalls = new ToolCallLog();
       const finish = async (inputTokens: number, outputTokens: number) => {
         await withSpan(tracer, 'settle', () =>
@@ -400,7 +420,13 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       };
 
       if (!body.stream) {
-        const json = (await response.json()) as {
+        const json = (await response
+          .json()
+          .catch(async () => {
+            await deps.quota.settle(reservation, 0);
+            throw Errors.upstream();
+          })
+          .finally(quiet.stop)) as {
           choices?: Array<{
             index?: number;
             message?: { content?: unknown; tool_calls?: unknown; function_call?: unknown };
@@ -420,7 +446,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
         return json;
       }
 
-      await streamThrough(reply, response, map, model.id, finish, reservation, toolCalls);
+      await streamThrough(reply, response, map, model.id, finish, reservation, toolCalls, quiet);
       return reply;
     }),
   );
@@ -468,7 +494,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     tenantSlug: string,
     decision: RouteDecision,
     payload: Record<string, unknown>,
-  ): Promise<{ model: ModelEntry; response: Response; fallback: boolean }> {
+  ): Promise<{ model: ModelEntry; response: Response; fallback: boolean; abort: () => void }> {
     let index = 0;
     for (const model of decision.candidates) {
       const controller = new AbortController();
@@ -489,7 +515,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
             { tenant: tenantSlug, model: model.id },
             (performance.now() - called) / 1000,
           );
-          return { model, response: res, fallback: index > 0 };
+          return { model, response: res, fallback: index > 0, abort: () => controller.abort() };
         }
         if (res.status < 500 && res.status !== 429) {
           const text = await res.text();
@@ -530,6 +556,7 @@ async function streamThrough(
   finish: (inTok: number, outTok: number) => Promise<void>,
   reservation: Reservation,
   toolCalls: ToolCallLog,
+  quiet: { touch: () => void; stop: () => void },
 ): Promise<void> {
   reply.hijack();
   const raw = reply.raw;
@@ -570,6 +597,7 @@ async function streamThrough(
     let buffer = '';
     let done = false;
     while (!done) {
+      quiet.touch();
       const r = await reader.read();
       if (r.done) break;
       buffer += decoder.decode(r.value, { stream: true });
@@ -626,7 +654,20 @@ async function streamThrough(
     raw.write('data: [DONE]\n\n');
     await finish(usage.prompt_tokens, usage.completion_tokens);
     reservationSettled = true;
+  } catch (e) {
+    if ((e as Error).name !== 'AbortError') throw e;
+    // It's too late to try another model. Say so, and keep what the person already has.
+    flushAll();
+    write({
+      error: {
+        message: 'The model stopped responding. This answer may be incomplete.',
+        type: 'api_error',
+        code: 'upstream_stalled',
+      },
+    });
+    raw.write('data: [DONE]\n\n');
   } finally {
+    quiet.stop();
     if (!reservationSettled) {
       // Stream broke mid-way: settle with what we know (at least the prompt estimate stays charged).
       await finish(usage.prompt_tokens, usage.completion_tokens).catch(() => undefined);
