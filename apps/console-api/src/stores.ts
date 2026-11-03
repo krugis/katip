@@ -197,6 +197,7 @@ export interface ConsoleStore {
     tenantId: string,
     query: AuditQuery,
   ): Promise<{ entries: AuditEntry[]; next: string | null }>;
+  latestDailyRun(): Promise<{ ts: Date; details: Record<string, unknown> | null } | null>;
   auditAcrossTenants(
     query: AuditQuery & { tenant?: string | undefined },
   ): Promise<{ entries: (AuditEntry & { tenantSlug: string })[]; next: string | null }>;
@@ -1458,6 +1459,13 @@ export class DbConsoleStore implements ConsoleStore {
       })),
       next: rows.length > query.limit ? page.at(-1)!.ts.toISOString() : null,
     };
+  }
+
+  async latestDailyRun(): Promise<{ ts: Date; details: Record<string, unknown> | null } | null> {
+    const rows = await this.db.execute(sql`select ts, details from latest_daily_run()`);
+    const row = rows[0] as
+      { ts: Date | string; details: Record<string, unknown> | null } | undefined;
+    return row ? { ts: new Date(row.ts), details: row.details } : null;
   }
 
   async auditAcrossTenants(query: AuditQuery & { tenant?: string | undefined }) {

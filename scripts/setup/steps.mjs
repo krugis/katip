@@ -22,6 +22,7 @@ import {
 import { checkIsolation } from './isolation.mjs';
 import { ensureTenantSecrets, knownTenantSlugs, tenantSecretsFile } from './tenants.mjs';
 import { run, tryRun, ROOT, Interrupted, isInterrupted } from './util.mjs';
+import { installSchedule, removeSchedule } from './schedule.mjs';
 
 export const AUTO_KEYS = new Set([
   'POSTGRES_PASSWORD',
@@ -1196,6 +1197,21 @@ export const steps = [
       ctx.log(
         'e2e smoke ok (models, login with MFA, chat headers, tool calls, non-member refused)',
       );
+    },
+  },
+  {
+    id: 'schedule',
+    title: 'Daily jobs (deletions, purges, retention)',
+    async run(ctx) {
+      const installed = installSchedule(ctx.config);
+      ctx.log(
+        installed
+          ? `the daily job runs at ${ctx.config.jobs.daily_at}`
+          : 'no daily job scheduled: run pnpm tenant:daily yourself',
+      );
+    },
+    async rollback() {
+      removeSchedule();
     },
   },
   {

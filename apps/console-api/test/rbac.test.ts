@@ -95,6 +95,7 @@ const store: ConsoleStore = {
   usage: async () => [],
   auditPage: async () => ({ entries: [], next: null }),
   auditAcrossTenants: async () => ({ entries: [], next: null }),
+  latestDailyRun: async () => null,
   ownRequests: async () => [],
   createRequest: async () => ownRequest,
   allRequests: async () => [],
@@ -441,6 +442,11 @@ const MATRIX: {
   {
     route: '/api/v1/admin/audit',
     url: () => '/api/v1/admin/audit',
+    own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
+  },
+  {
+    route: '/api/v1/admin/daily-job',
+    url: () => '/api/v1/admin/daily-job',
     own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
   },
   {

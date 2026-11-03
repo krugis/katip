@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import type { TenantRow } from './data-provider';
 import { Button, Message } from './components/ui';
+import type { GetToken } from './api';
+import { DailyJobStatus } from './daily-jobs';
 
 /** A screen in the navigation whose own task hasn't arrived yet. */
 export function ComingSoon({ labelKey }: { labelKey: string }) {
@@ -61,7 +63,7 @@ export function AccountProblem({
   );
 }
 
-export function ProviderTenants() {
+export function ProviderTenants({ getToken }: { getToken: GetToken }) {
   const { t } = useTranslation();
   const { result, query } = useList<TenantRow>({
     resource: 'admin/tenants',
@@ -70,6 +72,7 @@ export function ProviderTenants() {
   return (
     <div>
       <h1 className="text-xl font-semibold">{t('nav.provider.tenants')}</h1>
+      <DailyJobStatus getToken={getToken} />
       {query.isLoading && <p className="mt-4 text-sm text-muted">{t('app.loading')}</p>}
       {query.isError && (
         <p className="mt-4 text-sm text-danger" role="alert">

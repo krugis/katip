@@ -31,6 +31,15 @@ identity:
   locales: [tr, en]
 
 # ------------------------------------------------------------------------------
+# Daily job (P1-65): approved deletions, purges and retention. Off by default, so
+# set up nothing on this machine you didn't ask for. Until it's on, run
+# pnpm tenant:daily yourself. To turn it on, uncomment these and run pnpm dev:up,
+# which adds one line to this user's crontab (host-local time).
+# ------------------------------------------------------------------------------
+# jobs:
+#   daily_at: '03:30'
+
+# ------------------------------------------------------------------------------
 # Image pins. Never use :latest (CLAUDE.md §7).
 # ------------------------------------------------------------------------------
 images:

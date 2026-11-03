@@ -37,6 +37,23 @@ const Entry = z.object({
 });
 const Page = z.object({ entries: z.array(Entry), next: z.string().nullable() });
 
+/** A day and a bit, so a run that started late or ran long isn't called missing. */
+const LATE_AFTER_MS = 26 * 3_600_000;
+
+export function dailyJobState(
+  last: { ts: Date; details: Record<string, unknown> | null } | null,
+  now: Date = new Date(),
+): { state: 'never' | 'ok' | 'late' | 'failed'; lastRun: string | null; failed: number } {
+  if (!last) return { state: 'never', lastRun: null, failed: 0 };
+  const failed = Number(last.details?.['failed'] ?? 0);
+  const late = now.getTime() - last.ts.getTime() > LATE_AFTER_MS;
+  return {
+    state: late ? 'late' : failed > 0 ? 'failed' : 'ok',
+    lastRun: last.ts.toISOString(),
+    failed,
+  };
+}
+
 export function registerAuditRoutes(
   parent: FastifyInstance,
   store: ConsoleStore,
@@ -81,5 +98,26 @@ export function registerAuditRoutes(
       },
     },
     async (req) => store.auditAcrossTenants(req.query),
+  );
+
+  app.get(
+    `${prefix}/admin/daily-job`,
+    {
+      // No roles listed: only a provider admin gets through (auth.ts).
+      config: { access: { roles: [] } },
+      schema: {
+        summary: 'Whether the daily job is running (provider admins)',
+        security: secured,
+        response: {
+          200: z.object({
+            state: z.enum(['never', 'ok', 'late', 'failed']),
+            lastRun: z.string().nullable(),
+            failed: z.number(),
+          }),
+          ...errors,
+        },
+      },
+    },
+    async () => dailyJobState(await store.latestDailyRun()),
   );
 }

@@ -12,6 +12,8 @@ import process from 'node:process';
 import { loadConfig } from './config.mjs';
 import { AUTO_KEYS, curlEdge, deriveEnv, gatewayStatus, loadAllTenantSecrets } from './steps.mjs';
 import { ensureEnvFile, INFRA, ROOT, run } from './util.mjs';
+import { readFileSync } from 'node:fs';
+import { dailyCommand, dailyLogPath } from './schedule.mjs';
 
 const slug = `e2e-${randomBytes(3).toString('hex')}`;
 const email = `it@${slug}.test`;
@@ -219,6 +221,25 @@ try {
   );
   r = await cli('purge-due');
   check(r.code === 0, 'tenant:purge-due succeeds once the wait is over');
+
+  // Exactly what cron will run, with as little environment as cron gives it.
+  const command = dailyCommand();
+  r = await run('env', ['-i', `HOME=${process.env.HOME}`, 'sh', '-c', command], {
+    timeoutMs: 300_000,
+  });
+  check(r.code === 0, `it runs in the bare environment cron gives it: ${r.out.slice(-200)}`);
+  check(
+    /People deleted: \d+\. Purged: .*Expired usage rows: \d+/.test(
+      readFileSync(dailyLogPath(), 'utf8'),
+    ),
+    'and says what it did in its log',
+  );
+  check(
+    (await sql(
+      `select count(*) from audit_log where action = 'platform.daily' and ts > now() - interval '5 minutes'`,
+    )) !== '0',
+    'and records the run',
+  );
   check(!(await anyContainers()), 'no containers are left');
   const volumes = (await run('docker', ['volume', 'ls', '-q'])).out;
   check(!volumes.includes(slug), 'no volumes are left');

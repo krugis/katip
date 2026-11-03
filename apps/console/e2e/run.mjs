@@ -1149,6 +1149,10 @@ try {
     (await provider.getByTestId('audit-table').textContent()).includes(slug),
     'sees the audit log across companies',
   );
+  cli('daily');
+  await provider.goto(`${consoleUrl}/provider/tenants`);
+  await provider.locator('[data-testid=daily-job][data-state=ok]').waitFor();
+  check(true, 'and that the daily job ran without problems');
   await shot(provider, 'provider');
   await providerContext.close();
 

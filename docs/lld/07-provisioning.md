@@ -67,13 +67,13 @@ Rollback: if a tenant's first attempt fails before the invite, everything it mad
 
 **A slug is never reused.** The tenant's row stays with status `deleted`, so old links and audit entries can't appear to belong to a new company.
 
-The purge has two stages so a resume can't race it: once it starts, a tenant can't be restored. If it stops part-way, a re-run finishes it. Nothing runs `tenant:purge-due` on a schedule yet (P1-65).
+The purge has two stages so a resume can't race it: once it starts, a tenant can't be restored. If it stops part-way, a re-run finishes it. The daily job below runs it.
 
 ## 2b. One person's deletion (P1-69)
 
 1. **They ask** in the portal. Nothing is deleted yet.
 2. **The company's admin approves it**, after a warning that it can't be undone. Login stops at once, and they stop managing any department. A company's last admin is refused. Only the job below can mark a deletion as done.
-3. **`pnpm tenant:forget-due` carries it out.** It skips a suspended company, whose containers are stopped, until it's resumed. Nothing runs it on a schedule yet (P1-65). It's safe to repeat if it stops part-way.
+3. **`pnpm tenant:forget-due` carries it out.** It skips a suspended company, whose containers are stopped, until it's resumed. The daily job below runs it. It's safe to repeat if it stops part-way.
 
 | Where | What happens |
 | --- | --- |
@@ -86,6 +86,16 @@ The purge has two stages so a resume can't race it: once it starts, a tenant can
 **What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
 
 **Agents and prompts they wrote are deleted too**, including ones their colleagues use. Moving them to a colleague would be a later feature.
+
+## 2c. The daily job (P1-65)
+
+`pnpm tenant:daily` carries out approved deletions, runs the purges that are due, and removes data past its retention period (LLD-10 §8): usage after 24 months, audit entries after 5 years. **The schedule is off by default.** Until someone sets `jobs.daily_at` in the config, nothing runs it and someone has to run the command. When it's set, `dev:up` adds one line to this user's crontab, and rollback takes it out. It needs Docker on the host, which is why it isn't in a container. Each part is safe to repeat, and one failing doesn't stop the rest.
+
+Each run is recorded in the audit log, and the provider console's company list says if the job failed, has never run, or hasn't run for 26 hours. **That's a notice on a screen someone has to look at.** A phone alert needs monitoring (P1-43). A machine that's off at that time, such as WSL, runs nothing until the next day, when everything still due is picked up.
+
+The retention function holds its periods itself, so the provisioner's role can call it without being able to delete anything newer, or to delete at all.
+
+**Not covered:** chats have a retention default of 12 months in LLD-10 §8, and nothing enforces it yet (P1-70).
 
 ## 3. librechat.tmpl.yaml (key parts)
 

@@ -120,7 +120,31 @@ RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS 
     AND ts < (p_to + 1)::timestamp AT TIME ZONE 'UTC'
   GROUP BY tenant_id, (ts AT TIME ZONE 'UTC')::date, user_id, class, model_id;
 $fn$;
-REVOKE ALL ON FUNCTION refresh_usage_daily(uuid, date, date) FROM PUBLIC;`;
+REVOKE ALL ON FUNCTION refresh_usage_daily(uuid, date, date) FROM PUBLIC;
+
+-- Retention (LLD-10 §8). The periods are here, not passed in, so the role allowed to call
+-- this can't delete anything younger, and still has no DELETE of its own.
+CREATE OR REPLACE FUNCTION enforce_retention()
+RETURNS TABLE (expired_usage bigint, expired_usage_daily bigint, expired_audit bigint)
+LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  WITH u AS (DELETE FROM usage_events WHERE ts < now() - interval '24 months' RETURNING 1),
+       d AS (DELETE FROM usage_daily WHERE day < (now() - interval '24 months')::date RETURNING 1),
+       a AS (DELETE FROM audit_log WHERE ts < now() - interval '5 years' RETURNING 1)
+  SELECT (SELECT count(*) FROM u), (SELECT count(*) FROM d), (SELECT count(*) FROM a);
+$fn$;
+REVOKE ALL ON FUNCTION enforce_retention() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION enforce_retention() TO katip_provider;
+
+-- The daily job's own record belongs to no company, so row-level security hides it from the
+-- console. This shows that one thing.
+CREATE OR REPLACE FUNCTION latest_daily_run()
+RETURNS TABLE (ts timestamptz, details jsonb)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT a.ts, a.details FROM audit_log a
+  WHERE a.tenant_id IS NULL AND a.action = 'platform.daily'
+  ORDER BY a.ts DESC LIMIT 1;
+$fn$;
+REVOKE ALL ON FUNCTION latest_daily_run() FROM PUBLIC;`;
 
 /** The console API's own role: not a superuser and bound by RLS, with no lookup exception. */
 export const CONSOLE_ROLE_SQL = `DO $$
@@ -142,6 +166,7 @@ GRANT UPDATE (status, completed_at) ON privacy_requests TO katip_console;
 GRANT UPDATE (status, decided_by, decided_at) ON requests TO katip_console;
 GRANT SELECT (tenant_id, day, user_id, department_id, class, model_id, input_tokens, output_tokens) ON usage_daily TO katip_console;
 GRANT EXECUTE ON FUNCTION refresh_usage_daily(uuid, date, date) TO katip_console;
+GRANT EXECUTE ON FUNCTION latest_daily_run() TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
 GRANT SELECT, INSERT ON access_rules TO katip_console;
 GRANT UPDATE (ip_allowlist, countries, session_idle_min, session_max_h, updated_at) ON access_rules TO katip_console;
