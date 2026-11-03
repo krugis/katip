@@ -803,23 +803,29 @@ try {
       headers: { authorization: `Bearer ${bearer}` },
       body: form,
     });
-    return { status: r.status, text: (await r.text()).slice(0, 200) };
+    const text = await r.text();
+    return { status: r.status, text: text.slice(0, 200), json: r.ok ? JSON.parse(text) : null };
   }, uploadedFileId);
   check(
     uploaded.status === 200,
     `LibreChat accepts a file for search (${uploaded.status}: ${uploaded.text})`,
   );
-  const ragRows = sh('docker', [
-    'exec',
-    `${project}-${slug}-ragdb-${slug}-1`,
-    'psql',
-    '-U',
-    'rag',
-    '-d',
-    'rag',
-    '-Atc',
-    `select count(*) from langchain_pg_embedding where cmetadata->>'file_id' = '${uploadedFileId}'`,
-  ]).trim();
+  // LibreChat gives a file its own id, so the one sent isn't the one stored.
+  check(uploaded.json.embedded === true, 'and says it is ready for search');
+  const countChunks = (where) =>
+    sh('docker', [
+      'exec',
+      `${project}-${slug}-ragdb-${slug}-1`,
+      'psql',
+      '-U',
+      'rag',
+      '-d',
+      'rag',
+      '-Atc',
+      `select count(*) from langchain_pg_embedding where ${where}`,
+    ]).trim();
+  const fileChunks = `cmetadata->>'file_id' = '${uploaded.json.file_id}'`;
+  const ragRows = countChunks(fileChunks);
   check(Number(ragRows) > 0, `its text is in the company's own vector database (${ragRows} rows)`);
   const embeddingUsage = await within(
     10,
@@ -976,6 +982,8 @@ try {
     'the job finishes the request',
   );
   check((await findUser(api, realm, userEmail)) === null, 'their login is gone from Keycloak');
+  check(countChunks(fileChunks) === '0', "their file's text and vectors are gone");
+  check(countChunks(`cmetadata->>'user_id' = '${lcId}'`) === '0', 'and nothing else of theirs is');
 
   // Every collection, every field: this also catches one a LibreChat upgrade adds.
   const leftovers = mongoshEval(`
