@@ -8,7 +8,7 @@ import { Errors } from '@katip/shared';
 import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import type { PolicyDocument } from './policy.js';
+import type { OverrideDocument, PolicyDocument } from './policy.js';
 
 export interface TenantRecord {
   id: string;
@@ -261,6 +261,16 @@ export interface ConsoleStore {
   /** Every company's allowlist, for Traefik. */
   allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
   policy(tenantId: string): Promise<PolicyView | null>;
+  departmentPolicy(
+    tenantId: string,
+    id: string,
+  ): Promise<{ override: OverrideDocument; company: PolicyDocument } | null>;
+  saveDepartmentPolicy(
+    tenantId: string,
+    id: string,
+    override: OverrideDocument,
+    actor: Actor,
+  ): Promise<{ override: OverrideDocument; company: PolicyDocument } | null>;
   /** null: no such company. Throws if someone else saved since `version` was read. */
   savePolicy(
     tenantId: string,
@@ -1472,6 +1482,44 @@ export class DbConsoleStore implements ConsoleStore {
       // The Turkish model comes with the KVKK add-on.
       catalog: tenant.kvkkAddon ? catalog : catalog.filter((m) => m.class !== 'tr'),
     };
+  }
+
+  private async departmentPolicyOf(tx: Tx, tenantId: string, id: string) {
+    const [department] = await tx
+      .select({ override: schema.departments.policyOverride })
+      .from(schema.departments)
+      .where(and(eq(schema.departments.tenantId, tenantId), eq(schema.departments.id, id)));
+    if (!department) return null;
+    const view = await this.policyView(tx, tenantId);
+    if (!view) return null;
+    return {
+      override: (department.override ?? {}) as OverrideDocument,
+      company: view.policy,
+    };
+  }
+
+  departmentPolicy(tenantId: string, id: string) {
+    return this.inTenant(tenantId, (tx) => this.departmentPolicyOf(tx, tenantId, id));
+  }
+
+  saveDepartmentPolicy(tenantId: string, id: string, override: OverrideDocument, actor: Actor) {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      await tx
+        .update(schema.departments)
+        .set({ policyOverride: override })
+        .where(and(eq(schema.departments.tenantId, tenantId), eq(schema.departments.id, id)));
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'department.policy',
+        id,
+        { keys: Object.keys(override), piiMode: override.pii?.mode ?? null },
+        'department',
+      );
+      return this.departmentPolicyOf(tx, tenantId, id);
+    });
   }
 
   policy(tenantId: string): Promise<PolicyView | null> {

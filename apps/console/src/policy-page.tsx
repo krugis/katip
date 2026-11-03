@@ -27,6 +27,15 @@ interface PolicyResponse {
 
 const SELECT =
   'mt-1 w-full max-w-sm rounded-md border border-line bg-surface px-2 py-1.5 text-sm disabled:opacity-60';
+const ENTITIES = [
+  'TR_TCKN',
+  'TR_VKN',
+  'TR_IBAN',
+  'TR_PHONE',
+  'EMAIL_ADDRESS',
+  'CREDIT_CARD',
+  'PERSON',
+];
 const SECTION = 'rounded-lg border border-line bg-surface p-4';
 const TITLE = 'block text-sm font-medium';
 const HELP = 'mt-1 text-sm text-muted';
@@ -227,6 +236,33 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
             {t('policy.piiOffWarning')}
           </p>
         )}
+        <h3 className="mt-4 text-sm font-medium">{t('policy.entities')}</h3>
+        <p className={HELP}>{t('policy.entitiesHelp')}</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {ENTITIES.map((entity) => (
+            <label key={entity} className="flex items-center justify-between gap-2 text-sm">
+              {t(`policy.entity.${entity}`)}
+              <select
+                data-testid={`entity-${entity}`}
+                className="rounded-md border border-line bg-surface px-1.5 py-1 text-sm"
+                value={draft.pii.entities?.[entity] ?? ''}
+                onChange={(e) => {
+                  const entities = { ...draft.pii.entities };
+                  if (e.target.value) entities[entity] = e.target.value;
+                  else delete entities[entity];
+                  change({ pii: { ...draft.pii, entities } });
+                }}
+              >
+                <option value="">{t('policy.entityDefault')}</option>
+                {(['mask', 'block', 'off'] as const).map((m) => (
+                  <option key={m} value={m}>
+                    {t(`policy.entityMode.${m}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
         <Check
           testId="detector-block"
           label={t('policy.detectorBlock')}

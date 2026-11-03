@@ -47,7 +47,7 @@ const SCREENS: Record<string, (me: Me, getToken: GetToken, config: AppConfig) =>
     '/provider/tenants': () => <ProviderTenants />,
     '/tenant/overview': (me, getToken) => <TenantOverview me={me} getToken={getToken} />,
     '/tenant/users': (me, getToken) => <TenantUsers me={me} getToken={getToken} />,
-    '/tenant/departments': (me) => <TenantDepartments me={me} />,
+    '/tenant/departments': (me, getToken) => <TenantDepartments me={me} getToken={getToken} />,
     '/tenant/policies': (me, getToken) => <TenantPolicies me={me} getToken={getToken} />,
     '/tenant/access': (me, getToken) => <TenantAccessRules me={me} getToken={getToken} />,
     '/tenant/usage': (me, getToken) => <TenantUsage me={me} getToken={getToken} />,

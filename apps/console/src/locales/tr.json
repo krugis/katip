@@ -143,7 +143,11 @@
     "noManagerYet": "Yönetici atanmadı",
     "noBudget": "Bütçe yok",
     "people_one": "{{count}} kişi",
-    "people_other": "{{count}} kişi"
+    "people_other": "{{count}} kişi",
+    "rules": "Daha sıkı kurallar",
+    "rulesHelp": "Bir departman şirketin kurallarından yalnızca daha sıkı olabilir.",
+    "sameAsCompany": "Şirketle aynı",
+    "saveRules": "Kuralları kaydet"
   },
   "errors": {
     "generic": "Bir şeyler ters gitti. Lütfen tekrar deneyin.",
@@ -203,7 +207,24 @@
     },
     "residencyAddon": "Veri konumu seçimi KVKK eklentisiyle gelir.",
     "save": "Kaydet",
-    "saved": "Kaydedildi. 30 saniye içinde geçerli olur."
+    "saved": "Kaydedildi. 30 saniye içinde geçerli olur.",
+    "entities": "Veri türüne göre",
+    "entitiesHelp": "Bir veri türünün genel ayardan farklı işlenmesini seçin.",
+    "entityDefault": "Genel ayar",
+    "entityMode": {
+      "mask": "Maskele",
+      "block": "Engelle",
+      "off": "Kapalı"
+    },
+    "entity": {
+      "TR_TCKN": "T.C. kimlik no",
+      "TR_VKN": "Vergi no",
+      "TR_IBAN": "IBAN",
+      "TR_PHONE": "Telefon",
+      "EMAIL_ADDRESS": "E-posta",
+      "CREDIT_CARD": "Kredi kartı",
+      "PERSON": "Kişi adı"
+    }
   },
   "access": {
     "ipAllowlist": "İzin verilen IP adresleri",

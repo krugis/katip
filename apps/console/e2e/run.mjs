@@ -791,6 +791,57 @@ try {
   await shot(person, 'user-disabled');
   await userContext.close();
 
+  console.log("a department's stricter rules, through to the real gateway");
+  await admin.goto(`${consoleUrl}/tenant/departments`);
+  const rulesRow = admin.getByTestId('department-Satış');
+  await rulesRow.getByTestId('department-edit').click();
+  await rulesRow.getByTestId('department-rules').waitFor();
+  check(
+    (await rulesRow.getByTestId('rules-pii').locator('option').allTextContents()).every(
+      (o) => !/Kapalı/.test(o),
+    ),
+    'it offers nothing looser than the company',
+  );
+  const personalChat = (email) =>
+    gateway(email, '/chat/completions', {
+      model: 'fast',
+      messages: [{ role: 'user', content: 'Adresim ayse.yilmaz@ornek.com.tr' }],
+      max_tokens: 16,
+    });
+  check(
+    personalChat(`ayse@${domain}`).status === 200,
+    'at first someone in the department is masked',
+  );
+  await rulesRow.getByTestId('rules-pii').selectOption('block');
+  await rulesRow.getByTestId('rules-save').click();
+  await rulesRow.getByTestId('rules-saved').waitFor();
+  const stricter = await within(30, () => personalChat(`ayse@${domain}`).status === 400);
+  check(
+    stricter !== null,
+    `blocking for the department takes effect within 30 s (took ${stricter} s)`,
+  );
+  check(personalChat(owner).status === 200, 'and someone outside it is still masked');
+  await shot(admin, 'department-rules');
+  await rulesRow.getByTestId('rules-pii').selectOption('');
+  await rulesRow.getByTestId('rules-save').click();
+  await rulesRow.getByTestId('rules-saved').waitFor();
+  check(
+    (await within(30, () => personalChat(`ayse@${domain}`).status === 200)) !== null,
+    'and it can be undone',
+  );
+  await admin.goto(`${consoleUrl}/tenant/policies`);
+  await admin.getByTestId('entity-EMAIL_ADDRESS').selectOption('block');
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+  check(
+    (await within(30, () => personalChat(owner).status === 400)) !== null,
+    'blocking one kind of data works',
+  );
+  await admin.getByTestId('entity-EMAIL_ADDRESS').selectOption('');
+  await admin.getByTestId('policy-save').click();
+  await admin.getByTestId('policy-saved').waitFor();
+  check((await within(30, () => personalChat(owner).status === 200)) !== null, 'and clearing it');
+
   console.log('usage alerts, from real usage');
   const tenantForAlerts = sql(`select id from tenants where slug = '${slug}'`);
   check((await admin.getByTestId('usage-banner').count()) === 0, 'no banner at first');

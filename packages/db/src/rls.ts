@@ -134,7 +134,7 @@ GRANT SELECT ON ${CONSOLE_READS.join(', ')} TO katip_console;
 GRANT INSERT ON users, audit_log, departments, department_managers TO katip_console;
 GRANT SELECT ON audit_log TO katip_console;
 GRANT SELECT, INSERT ON budget_alerts TO katip_console;
-GRANT UPDATE (name, budget_usd_micro) ON departments TO katip_console;
+GRANT UPDATE (name, budget_usd_micro, policy_override) ON departments TO katip_console;
 GRANT DELETE ON department_managers TO katip_console;
 GRANT SELECT, INSERT ON requests TO katip_console;
 GRANT SELECT, INSERT ON privacy_requests TO katip_console;
