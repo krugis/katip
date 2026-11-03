@@ -219,6 +219,8 @@ Rules:
 - `GET /v1/models` for a tenant without the KVKK add-on does not list `tr-local`.
 - Load test: 50 concurrent streaming chats through the gateway against a mock provider. Gateway CPU stays under 1 vCPU and p95 overhead under 120 ms.
 
+- A provider that goes quiet doesn't hang a reply. `UPSTREAM_TIMEOUT_MS` (120 s) covers each call's headers, and then each silence. Before any reply, the gateway tries the next model. Part-way through a reply it's too late to, so a stream ends with an `upstream_stalled` error, keeping what was sent, and a non-streamed reply fails with 502. The quota hold is settled by the tokens reported, which is none if the provider stalled before sending usage, so that partial answer isn't charged.
+
 ### Load baseline (P1-16)
 
 `pnpm test:load`, on the 12-core dev machine in WSL (3 Nov 2026), with a short new message each time, so nothing comes from the cache. The analyzer is limited to the CPUs shown and has 2 workers. The gateway has no CPU limit, and is measured.
