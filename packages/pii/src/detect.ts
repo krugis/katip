@@ -72,7 +72,9 @@ const RECOGNIZERS: Recognizer[] = [
   },
   {
     type: 'TR_PHONE',
-    pattern: /(?<![\d+])(?:\+90[\s-]?|0)?5\d{2}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}(?!\d)/g,
+    // A mobile number may leave out its prefix; a landline must have one, or it's just digits.
+    pattern:
+      /(?<![\d+])(?:(?:\+90[\s-]?|\(?0[\s-]?)?\(?5\d{2}\)?|(?:\+90[\s-]?|\(?0[\s-]?)\(?[2-4]\d{2}\)?)[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}(?!\d)/g,
     score: 0.8,
   },
   {

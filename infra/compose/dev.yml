@@ -273,7 +273,7 @@ services:
         max-file: '3'
 
   presidio-analyzer:
-    # P1-11: Presidio analyzer with multilingual spaCy (TR+EN PERSON NER).
+    # P1-11: Presidio analyzer with a Turkish BERT model for names (P1-13).
     # No host port: only the policy-gateway talks to it on the backend network.
     image: ghcr.io/krugis/presidio-analyzer:${KATIP_PRESIDIO_VERSION:?from katip.config.yaml}
     build:
@@ -284,9 +284,14 @@ services:
         PRESIDIO_VERSION: ${KATIP_PRESIDIO_VERSION:?from katip.config.yaml}
         SPACY_MODEL_VERSION: ${KATIP_SPACY_MODEL_VERSION:?from katip.config.yaml}
         SPACY_MODEL_SHA256: ${KATIP_SPACY_MODEL_SHA256:?from katip.config.yaml}
+        NER_MODEL: ${KATIP_NER_MODEL:?from katip.config.yaml}
+        NER_MODEL_REVISION: ${KATIP_NER_MODEL_REVISION:?from katip.config.yaml}
     restart: unless-stopped
     environment:
       PORT: '3000'
+      # LLD-03 §2: two workers, so one long text doesn't hold up everyone else. About 1 GB each.
+      WORKERS: '2'
+      OMP_NUM_THREADS: '2'
     networks:
       - backend
     healthcheck:

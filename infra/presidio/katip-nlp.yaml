@@ -1,33 +1,26 @@
-# Kâtip NLP engine config (LLD-03 §5): multilingual spaCy for TR + EN PERSON.
-nlp_engine_name: spacy
+# Kâtip NLP engine config (LLD-03 §5): a Turkish BERT model for PERSON. spaCy only splits
+# the text into tokens here. The model is baked into the image at /app/ner-model, so the
+# analyzer needs no internet. Long text runs in overlapping windows (stride).
+nlp_engine_name: transformers
 models:
   - lang_code: en
-    model_name: xx_ent_wiki_sm
+    model_name:
+      spacy: xx_ent_wiki_sm
+      transformers: /app/ner-model
   - lang_code: tr
-    model_name: xx_ent_wiki_sm
+    model_name:
+      spacy: xx_ent_wiki_sm
+      transformers: /app/ner-model
 
 ner_model_configuration:
+  aggregation_strategy: first
+  stride: 16
+  alignment_mode: expand
   model_to_presidio_entity_mapping:
     PER: PERSON
-    PERSON: PERSON
   low_confidence_score_multiplier: 0.4
   low_score_entity_names: []
   labels_to_ignore:
+    - O
     - ORG
-    - ORGANIZATION
     - LOC
-    - GPE
-    - FAC
-    - NORP
-    - DATE
-    - TIME
-    - CARDINAL
-    - ORDINAL
-    - PERCENT
-    - MONEY
-    - PRODUCT
-    - EVENT
-    - LANGUAGE
-    - LAW
-    - QUANTITY
-    - WORK_OF_ART

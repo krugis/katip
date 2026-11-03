@@ -128,7 +128,7 @@ The phase 2 learned router (RouteLLM-style) replaces rule 40 behind a feature fl
 | `TR_IBAN` | Regex `\bTR\d{2}\s?(\d{4}\s?){5}\d{2}\b` + IBAN mod-97 | TR33 0006 1005 1978 6457 8413 26 |
 | `TR_PHONE` | `(\+90|0)?\s?5\d{2}\s?\d{3}\s?\d{2}\s?\d{2}` | 0532 123 45 67 |
 | `EMAIL_ADDRESS`, `CREDIT_CARD`, `IP_ADDRESS` | Presidio built-in | – |
-| `PERSON` | NER model: start with spaCy `xx_ent_wiki_sm` (multilingual); evaluate a Turkish BERT NER model (verify licence) | Ayşe Yılmaz |
+| `PERSON` | Turkish BERT NER model `akdeniz27/bert-base-turkish-cased-ner` (MIT), fixed to one commit, baked into the image | Ayşe Yılmaz |
 | `TR_VKN` (tax no) | 10 digits + checksum, context words "VKN", "vergi" | – |
 
 Policy modes per tenant:
@@ -158,7 +158,23 @@ The gateway is the one control point for LLM calls, including those made for use
 
 Both cases log an error-level `pii_detector_failed` event with `tenant_id`, `user_id` and `action`, never prompt text. Monitoring (P1-43) alerts on this event.
 
-Test set: `packages/pii/test/fixtures/tr-*.json` with at least 200 Turkish sentences. Target recall ≥ 0.95 for TCKN/IBAN/phone/email and ≥ 0.80 for PERSON before GA.
+### How well it finds things
+
+Test set: `packages/pii/test/fixtures/tr-recall.json`, made by `gen-tr-recall.mjs`: 392 Turkish sentences holding personal data and 30 without. Target recall ≥ 0.95 for each structured kind and ≥ 0.80 for PERSON. A name counts only if all of it is found, since half a name still identifies someone. The structured floor runs in the normal tests, and `pnpm test:pii-names` runs the name floor against a real analyzer. Both run in CI.
+
+| Name model, 2 CPUs | Whole name | At least part | Clean sentences wrong | Licence |
+| --- | --- | --- | --- | --- |
+| spaCy `xx_ent_wiki_sm` (first choice) | 0.44 | 0.48 | 5 of 20 | MIT |
+| `akdeniz27/bert-base-turkish-cased-ner` (in use) | 0.99 | 1.00 | 0 of 30 | MIT |
+| `savasy/bert-base-turkish-ner-cased` | 0.96 | 1.00 | 0 of 20 | none stated, so not usable |
+
+The spaCy row and the savasy row were measured on an earlier, 102-name version of the set, and savasy without this client's cut-off and span merging, so compare them with care.
+
+These are made-up sentences written around common patterns, so **real text will score lower**. Measure again with real, anonymised text before relying on the number. The weakest case is lower-case names that are also words, such as "hatice kara".
+
+The client keeps spans from a score of 0.3, because the model is often unsure of real surnames (0.48 for one), and it joins neighbouring spans into one name.
+
+**Cost of this model:** the image grows from 1.5 GB to 3.7 GB, each of the two workers uses about 1 GB of memory, and on 2 CPUs a short sentence takes 47 ms at p50 and 75 ms at p95. That p50 is over the 40 ms budget above when nothing is cached. Long text is cut into pieces of 2,000 characters, and results are remembered in memory as positions under a hash, because each chat turn sends its history again. New text of 100,000 characters takes about 18 s and the next turn about 0.2 s. There is no GPU path yet.
 
 ## 6. Quotas and budgets
 

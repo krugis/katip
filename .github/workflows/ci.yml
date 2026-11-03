@@ -9,6 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  # Names need the real model, so this builds the analyzer: slower than the rest (P1-13).
+  pii-names:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @katip/pii build
+      - name: How often names are found in Turkish text
+        run: pnpm test:pii-names
+
   build-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

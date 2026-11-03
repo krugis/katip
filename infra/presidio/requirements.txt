@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# What the Turkish name model needs, CPU only (LLD-03 §5). torch is BSD-3, transformers and
+# huggingface_hub Apache-2.0, spacy-huggingface-pipelines MIT.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.8.0+cpu
+transformers==4.56.2
+huggingface_hub==0.35.3
+spacy-huggingface-pipelines==0.0.4

@@ -53,6 +53,9 @@ images:
     version: '2.2.366'
     spacy_model_version: '3.8.0'
     spacy_model_sha256: 6f3c4b853852ea9e9d2dc76cc950dddb10a7e4c42d813308caefe6c5e8be2f0a
+    # Finds names (P1-13). MIT; fixed to one commit of its Hugging Face repository.
+    ner_model: akdeniz27/bert-base-turkish-cased-ner
+    ner_model_revision: 99995f7d2be4b3a28c74f0d36ee97f8c04ee0571
   # Self-built from infra/litellm/Dockerfile; sha256 = wheel checksum from PyPI.
   litellm:
     version: '1.79.3'
