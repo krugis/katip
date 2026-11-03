@@ -196,6 +196,7 @@ export class DbTenantStore implements TenantStore {
         stdLimit: limits?.std ?? 0,
         premLimit: limits?.prem ?? 0,
       });
+      if (r.type === 'service') resolved.serviceKey = true;
       break;
     }
     await this.cache.set(apiKey, resolved);

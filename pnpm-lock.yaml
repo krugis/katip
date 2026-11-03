@@ -243,6 +243,9 @@ importers:
       '@testcontainers/postgresql':
         specifier: 11.5.1
         version: 11.5.1
+      testcontainers:
+        specifier: 11.14.0
+        version: 11.14.0
 
   packages/db:
     dependencies:

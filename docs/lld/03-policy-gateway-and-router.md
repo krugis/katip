@@ -7,7 +7,7 @@
 | Method + path | Purpose | Notes |
 | --- | --- | --- |
 | `POST /v1/chat/completions` | Chat (stream and non-stream) | Main path from LibreChat custom endpoint, Studio, knowledge service |
-| `POST /v1/embeddings` | Embeddings (RAG) | Routed to BGE-M3 (or tenant policy), counted as standard tokens |
+| `POST /v1/embeddings` | Embeddings (RAG) | Routed to BGE-M3 (or tenant policy), counted as standard tokens. See §1.3 |
 | `GET /v1/models` | Model list **filtered by tenant policy** | LibreChat `models.fetch: true` shows only allowed aliases |
 | `POST /v1/research/runs` | Deep-research run accounting (phase 2) | Called by the research MCP server; decrements run quota |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | Ops | `/metrics` on an internal port only |
@@ -44,6 +44,20 @@ endpoints:
 ```
 
 The header placeholders are documented for custom endpoints. Verify `{{LIBRECHAT_BODY_CONVERSATIONID}}` on the pinned version.
+
+### 1.3 Embeddings
+
+`POST /v1/embeddings` runs the same stages as chat: authenticate, route, reserve quota, mask, call LiteLLM, settle, record. Differences:
+
+- **Model.** `model` is `auto`, `tr-local` or the id of an `embedding` class model, which needs no `allowUserModelChoice`, since nobody picks it in a chat. `allowedModels`, residency and the data policy apply as in chat, so a `TR_ONLY` company gets 403 until a model hosted in Türkiye is in the catalog. A chat model or alias gets 403.
+- **Exactly one model, with no fallback.** A vector only compares with vectors from the same model, so a fallback would quietly leave a file unsearchable. If the model is down, the call fails with 502.
+- **Text only.** `input` is a string or up to 2,048 strings. Token ids are refused with 400, because they can't be checked for personal data. A client built on `tiktoken` has to turn that off (`RAG_CHECK_EMBEDDING_CTX_LENGTH=False` on the RAG API).
+- **Metering.** `usage_events.source = 'embedding'`, class `embedding`, `output_tokens = 0`, priced from the catalog, charged to the `standard` quota. With nothing cheaper to go to, `downgrade` refuses like `block`. If a provider reports no usage, the estimate counts. A reply with the wrong number of vectors is a 502, and charges nothing.
+- **Service keys.** A `gateway_keys` row with `type = 'service'` belongs to a company but no person. It works on this route only: chat and `/v1/models` answer 403. The RAG API needs one because it can't add a header to its embedding calls, so it can't send `X-User-Email` (checked in its code, v0.9.0). This has three costs:
+  - Its usage row has the user `00000000-0000-0000-0000-000000000000`, so the company total is right, but embedding tokens aren't on any person or department.
+  - A department's stricter policy isn't applied, as the department isn't known. The company's policy is.
+  - A person's token cap can't count them.
+  A company's normal key still needs `X-User-Email` here, and is charged to that person, as in chat. The knowledge service can use that later.
 
 ## 2. Request pipeline
 
@@ -154,6 +168,22 @@ The gateway is the one control point for LLM calls, including those made for use
 - **Images, files and audio are allowed for now, unscanned**, and counted in a `non_text_content_sent` log event. Their contents reach the provider as they are. Filtering documents before they are sent is tracked as P3-11.
 - **What this can't see:** what a tool does with what it receives, including an MCP server calling its own LLM, and personal data the detectors miss.
 
+### Text sent for embedding
+
+Text sent to embed reaches a provider like any prompt, so `input` gets the same checks: `off`, `mask` and `block`, the per-kind choices, and `onDetectorFailure`. A field other than `model`, `input`, `encoding_format` and `dimensions` is dropped (`maskEmbeddingRequest`). The policy applies whichever model is used, including one hosted in Türkiye or on the company's own machine, as chat's does.
+
+- **`block` is all or nothing per request.** One chunk holding a blocked kind refuses that call, so the RAG API rolls the file back and the upload fails. A company in `block` mode can't index a document with personal data in it.
+- **Each string is checked alone.** An upload's chunks are cut wherever they fell, so joining them into one text could hide a name that crosses a join. Checks run one at a time per request, so an upload uses one analyzer worker per call. The RAG API runs one call at a time per file (`PARALLEL_EXECUTION=1`). A busy analyzer still slows chat, and under `allow` a chat check that times out sends without name masking (see the load baseline), so many large uploads at once are a real risk. This hasn't been measured.
+- **Placeholders are numbered per request**, not by conversation: nothing comes back to unmask, and a stable token would let a provider link one person across a company's documents. So `⟦PERSON_1⟧` means a different person in each call.
+
+**What masking does to search.** The vector comes from the masked text, but the RAG API stores and returns the original text, in the company's own database. What the model reads afterwards goes through chat masking as usual. So:
+
+- A search by topic ("kira sözleşmesi") should work about as before, as most of the words are unchanged.
+- A search by a name or number loses what it asked for. "Ayşe Yılmaz'ın izni" is embedded as a generic "⟦PERSON_1⟧'in izni" and finds leave records of anyone, ranked by the other words. A TCKN or IBAN can't be searched for at all.
+- It gets worse for the file search tool in a chat: the model's query is a masked tool argument (§5), so the name is already a placeholder before it gets here.
+
+None of this has been measured, and the mock can't show it. Measure it on the LLD-08 test set with a real model before relying on it. Masking can't be turned off for search alone, short of `PERSON: off` for the whole company.
+
 ### When the detector fails
 
 Both cases log an error-level `pii_detector_failed` event with `tenant_id`, `user_id` and `action`, never prompt text. Monitoring (P1-43) alerts on this event.
@@ -195,11 +225,11 @@ Rules:
 
 ## 7. Observability
 
-- **OpenTelemetry traces** per request. Spans: auth, policy, pii, route, upstream, settle.
+- **OpenTelemetry traces** per request, under `gateway.chat` or `gateway.embeddings`. Spans: auth, policy, pii, route, upstream, settle.
 - **Attributes:** `tenant.slug`, `model.alias`, `model.name`, `quota.class`, `pii.entities_count`. Never prompt text.
 - **Prometheus metrics:**
-  - `gw_requests_total{tenant,alias,model,status}`
-  - `gw_tokens_total{tenant,class,dir}`
+  - `gw_requests_total{tenant,alias,model,status}`: chat and embeddings
+  - `gw_tokens_total{tenant,class,dir}`: embeddings under `class="embedding"`
   - `gw_upstream_latency_seconds`
   - `gw_pii_entities_total{type}`
   - `gw_quota_denials_total{tenant,class}`

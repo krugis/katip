@@ -4,8 +4,38 @@
 
 | Kind | Implementation | Phase |
 | --- | --- | --- |
-| Files a user uploads into a chat | LibreChat built-in file search via the shared **RAG API** + pgvector. Embeddings go through the gateway `/v1/embeddings` (BGE-M3), so they are metered and governed | 1 |
+| Files a user uploads into a chat | LibreChat built-in file search via **each tenant's own RAG API** and its own pgvector database (§1.1). Embeddings go through the gateway `/v1/embeddings` (BGE-M3), so they are metered and governed | 1 |
 | Company knowledge (SharePoint/OneDrive, Google Drive, Confluence, file shares) | Our **knowledge service** (`apps/knowledge`), exposed to LibreChat as an **MCP server** with tool `search_company_knowledge` | 2 |
+
+### 1.1 File search (P1-08)
+
+The official RAG API (`librechat-rag-api-dev-lite`, MIT) and a Postgres with pgvector, in the tenant's compose project: `rag-<slug>` and `ragdb-<slug>`. LibreChat finds it through `RAG_API_URL`.
+
+**Why one per tenant.** This design first had one shared service, which can't keep companies apart:
+
+- It checks one `JWT_SECRET`, and each LibreChat signs with its own. Sharing it would let one company's LibreChat sign for anyone.
+- In v0.9.0, the version LibreChat v0.8.7 can use, any valid token can list every file id (`GET /ids`) and read any file through `GET /documents`.
+- Upstream fixes the second point in later builds, with chunks scoped to their owner. Those need a newer LibreChat first, because v0.8.7 doesn't send `entity_id` on delete, which would orphan agents' files. The fix wouldn't remove the first point.
+
+So a token only ever opens the one tenant's files. Inside a tenant, LibreChat decides who may use a file, and `/query` also checks the owner. **This relies on only LibreChat holding that tenant's secret**: the RAG API has no route from outside, and its database isn't on any other tenant's network. The platform's Postgres stays off tenant networks, which is why the vectors aren't there.
+
+**The path of a file:**
+
+1. LibreChat posts it to `/embed` with a 5-minute token signed with its `JWT_SECRET`.
+2. The RAG API cuts it into chunks of 1,500 characters and sends them to the gateway, 32 at a time, as text, on a service key (LLD-03 §1.3).
+3. The gateway masks them per the company's policy, and sends them to the provider.
+4. Postgres stores the **original** chunk text with the vector of the masked text.
+5. A question arrives as the model's `file_search` tool call, already masked, and is embedded the same way. The chunks found go back to the model through chat masking.
+
+**Deleting.** LibreChat deletes a file's chunks when someone deletes the file. One person's deletion removes their chunks and those of their files (LLD-07 §2b). A purge removes the containers and the volume.
+
+**Limits, from reading the code and running it on its own (not yet through LibreChat):**
+
+- Its logs hold the user id, file id and **file name**, and on a failed search the query. File names can hold personal data, and they're third-party logs we can't change. They stay in Docker's logs (at most 30 MB) until they rotate or the container is removed, and a person's deletion doesn't reach them.
+- It keeps the last 128 queries' vectors in memory, so a repeated question isn't charged again.
+- `/health` answers 200 even with its database down, so the health check reads the reply.
+- Changing the embedding model means embedding every file again: old and new vectors can't be compared.
+- `images.postgres` is also the image of these databases, so a new Postgres major version needs an upgrade of each one. They hold only what can be embedded again, but nothing does that yet.
 
 ## 2. Knowledge service
 

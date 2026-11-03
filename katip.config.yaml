@@ -52,6 +52,9 @@ images:
   mailpit: axllent/mailpit:v1.33.0
   # v0.8.0+ fills user and body placeholders in custom endpoint headers (P1-05).
   librechat: ghcr.io/danny-avila/librechat:v0.8.7
+  # File search (P1-08). MIT. A newer build needs a newer LibreChat first: its upstream says
+  # so, as LibreChat v0.8.7 doesn't say whose file it's deleting. Runs one per tenant.
+  rag_api: ghcr.io/danny-avila/librechat-rag-api-dev-lite:v0.9.0
   # Used by the bootstrap's own network checks.
   curl: curlimages/curl:8.8.0
   # Presidio analyzer (P1-11): upstream moved to GHCR (LLD-01 still says MCR).

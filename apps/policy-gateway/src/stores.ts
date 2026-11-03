@@ -23,7 +23,12 @@ export interface Tenant {
   kvkkAddon: boolean;
   /** Pooled monthly token limits per quota class. */
   limits: { standard: number; premium: number };
+  /** The key used is a service's, with no person behind its calls (`gateway_keys.type`). */
+  serviceKey?: boolean | undefined;
 }
+
+/** Who a service key's usage is recorded under. No such person exists, and it has no row. */
+export const NO_PERSON = '00000000-0000-0000-0000-000000000000';
 
 export interface User {
   id: string;

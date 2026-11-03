@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHAT_ENDPOINT,
   composeEnv,
+  embeddingModel,
   identityInput,
   loadConfig,
   renderLiteLLMModels,
@@ -22,6 +23,8 @@ import {
 } from '../tenants.mjs';
 import { tenantPairs } from '../isolation.mjs';
 import { totp } from '../kc-lib.mjs';
+import { renderTenantFiles } from '../steps.mjs';
+import { FORGET_VECTORS_SQL } from '../tenant-lifecycle.mjs';
 import { INFRA, generatorFor, parseEnvFile, parseYaml, redact, run } from '../util.mjs';
 
 const config = loadConfig();
@@ -291,7 +294,11 @@ describe('tenants', () => {
   it('prefers a real key, then a local model, then the mock', () => {
     const local = renderLiteLLMModels(config, { KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080' });
     expect(local).toContain('api_base: http://host.docker.internal:18090/v1');
-    expect(local).not.toContain('mock-llm');
+    // A local chat model says nothing about embeddings, so those stay on the mock.
+    const embedding = config.models.find((m) => m.class === 'embedding').alias;
+    for (const block of local.split('  - model_name: ').slice(1)) {
+      expect(block.includes('mock-llm')).toBe(block.startsWith(embedding));
+    }
     const mock = renderLiteLLMModels(config, {});
     expect(mock).toContain('mock-llm');
     expect(mock).not.toContain('host.docker.internal');
@@ -322,6 +329,110 @@ describe('tenants', () => {
     expect(env).toContain('authSource=lc_${KATIP_SLUG}');
     expect(env).not.toContain('authSource=admin');
     expect(read('compose', 'platform.yml')).not.toContain('meilisearch');
+  });
+});
+
+describe('file search', () => {
+  const rendered = (slug = 'acme') => {
+    const infra = mkdtempSync(join(tmpdir(), 'katip-render-'));
+    for (const [dir, file] of [
+      ['env', 'tenant.example.env'],
+      ['env', 'tenant.rag.example.env'],
+      ['librechat', 'librechat.tmpl.yaml'],
+      ['compose', 'tenant.tmpl.yml'],
+    ]) {
+      mkdirSync(join(infra, dir), { recursive: true });
+      writeFileSync(join(infra, dir, file), read(dir, file));
+    }
+    const env = { ...ensureTenantSecrets(infra, slug), ...ensureTenantSecrets(infra, 'beta') };
+    renderTenantFiles({ config, infra, env }, { slug });
+    const out = (...p) => readFileSync(join(infra, ...p), 'utf8');
+    return {
+      infra,
+      env,
+      compose: out('compose', 'tenants', `${slug}.yml`),
+      lc: parseEnvFile(out('env', 'tenants', `${slug}.env`)),
+      rag: parseEnvFile(out('env', 'tenants', `${slug}.rag.env`)),
+      ragFile: out('env', 'tenants', `${slug}.rag.env`),
+      ragdb: out('env', 'tenants', `${slug}.ragdb.env`),
+    };
+  };
+  const withRendered = (fn) => {
+    const r = rendered();
+    try {
+      fn(r);
+    } finally {
+      rmSync(r.infra, { recursive: true, force: true });
+    }
+  };
+
+  it('pins the RAG API, and refuses a config without a model for it', () => {
+    expect(config.images.rag_api).toMatch(/:v\d+\.\d+\.\d+$/);
+    expect(composeEnv(config).KATIP_IMAGE_RAG_API).toBe(config.images.rag_api);
+    const c = clone();
+    c.images.rag_api = 'ghcr.io/danny-avila/librechat-rag-api-dev-lite:latest';
+    c.models = c.models.filter((m) => m.class !== 'embedding');
+    const errors = validateConfig(c);
+    expect(errors).toContain('images.rag_api: :latest is not allowed');
+    expect(errors).toContain('models: one embedding model is required, for file search');
+  });
+
+  it("gives each tenant its own, on that tenant's network only", () => {
+    withRendered(({ compose }) => {
+      expect(compose).toContain(`image: ${config.images.rag_api}`);
+      expect(compose).toContain(`image: ${config.images.postgres}`);
+      expect(compose).toContain('  rag-acme:');
+      expect(compose).toContain('  ragdb-acme:');
+      expect(compose).toContain('ragdb-acme:/var/lib/postgresql/data');
+      expect(compose).toMatch(/^volumes:[\s\S]*^ {2}ragdb-acme: \{\}$/m);
+      expect(compose).not.toMatch(/^\s+- (edge|backend)$/m);
+      expect(compose).not.toMatch(/^\s+ports:/m);
+      expect(compose).not.toContain('${KATIP_IMAGE');
+      expect(compose).not.toContain('${KATIP_SLUG');
+      expect(compose).not.toContain('traefik.http.routers.rag');
+    });
+  });
+
+  it('points LibreChat at its own RAG API, which trusts only that LibreChat', () => {
+    withRendered(({ lc, rag, env }) => {
+      expect(lc.RAG_API_URL).toBe('http://rag-acme:8000');
+      expect(rag.JWT_SECRET).toBe(lc.JWT_SECRET);
+      expect(rag.JWT_SECRET).toBe(env.KATIP_T_ACME_LC_JWT_SECRET);
+      expect(rag.JWT_SECRET).not.toBe(env.KATIP_T_BETA_LC_JWT_SECRET);
+      expect(rag.DB_HOST).toBe('ragdb-acme');
+    });
+  });
+
+  it('embeds through the gateway, on its own key, sending text', () => {
+    withRendered(({ rag, env, ragFile }) => {
+      expect(rag.RAG_OPENAI_BASEURL).toBe('http://policy-gateway:8080/v1');
+      expect(rag.RAG_OPENAI_API_KEY).toBe(env.KATIP_T_ACME_RAG_GATEWAY_KEY);
+      expect(rag.RAG_OPENAI_API_KEY).toMatch(/^sk-sme-t-/);
+      expect(rag.RAG_OPENAI_API_KEY).not.toBe(env.KATIP_T_ACME_GATEWAY_KEY);
+      expect(rag.EMBEDDINGS_MODEL).toBe(embeddingModel(config));
+      expect(rag.EMBEDDINGS_MODEL).toBe('emb-bge-m3');
+      // Otherwise it sends token ids, which the gateway refuses.
+      expect(rag.RAG_CHECK_EMBEDDING_CTX_LENGTH).toBe('False');
+      expect(rag.PARALLEL_EXECUTION).toBe('1');
+      expect(ragFile).not.toContain('${');
+    });
+  });
+
+  it('keeps the secrets private and the database password apart', () => {
+    withRendered(({ infra, rag, ragdb, env }) => {
+      expect(ragdb).toBe(`POSTGRES_PASSWORD=${env.KATIP_T_ACME_RAG_DB_PASSWORD}\n`);
+      expect(rag.POSTGRES_PASSWORD).toBe(env.KATIP_T_ACME_RAG_DB_PASSWORD);
+      expect(env.KATIP_T_ACME_RAG_DB_PASSWORD).not.toBe(env.KATIP_T_BETA_RAG_DB_PASSWORD);
+      for (const f of ['acme.rag.env', 'acme.ragdb.env']) {
+        expect(statSync(join(infra, 'env', 'tenants', f)).mode & 0o077).toBe(0);
+      }
+    });
+  });
+
+  it('removes vectors by owner and by file, with values passed apart from the statement', () => {
+    expect(FORGET_VECTORS_SQL).toContain(`cmetadata->>'user_id' = :'who'`);
+    expect(FORGET_VECTORS_SQL).toContain(`cmetadata->>'file_id' IN`);
+    expect(FORGET_VECTORS_SQL).toContain('VACUUM');
   });
 });
 

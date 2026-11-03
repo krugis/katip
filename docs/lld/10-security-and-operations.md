@@ -106,7 +106,7 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 - A data processing agreement (DPA) template for customers, plus a sub-processor list (each LLM provider, Hetzner, Cloudflare, Lago host, e-Fatura provider).
 - Cross-border transfer: EU-region tenants get a disclosure plus the appropriate KVKK transfer mechanism (counsel to confirm). The TR region keeps all data and models in Turkey.
 - Retention defaults:
-  - chats: tenant-defined (default 12 months);
+  - chats: tenant-defined (default 12 months, 1 to 120), enforced by the daily job (LLD-07 §2c);
   - usage events: 24 months;
   - audit log: 5 years;
   - backups: 30 days;
@@ -125,10 +125,11 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 
 | Layer | What is tried | Must happen |
 | --- | --- | --- |
-| Network | From a tenant's LibreChat: Valkey, Postgres, LiteLLM, Presidio, Keycloak's internal port, Mailpit, the other tenant's LibreChat and search | Closed. The gateway, Mongo and its own search stay open |
+| Network | From a tenant's LibreChat: Valkey, Postgres, LiteLLM, Presidio, Keycloak's internal port, Mailpit, the other tenant's LibreChat, search, RAG API and vector database | Closed. The gateway, Mongo, its own search and its own RAG API stay open |
 | Mongo | The tenant's login reads the other tenant's database | Refused |
 | Search | The tenant's key on the other tenant's Meilisearch; restarting one tenant's LibreChat, which syncs search | Key refused; the other tenant's search data unchanged |
-| Gateway | The tenant's key with the other tenant's user | 403 |
+| Files | A token signed with the tenant's secret on the other tenant's RAG API; the tenant's password on the other tenant's vector database | Refused; each one's own works |
+| Gateway | The tenant's key with the other tenant's user; the RAG API's key on chat | 403 |
 | Postgres | As `katip_gateway`, in one tenant's context, with no tenant filter; and with no context at all | No rows of the other tenant; no rows at all. The role doesn't bypass RLS |
 | Valkey | A connection with no password | `NOAUTH` |
 | Login | A member of another tenant logs in, with correct password and MFA | LibreChat refuses |

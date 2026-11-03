@@ -20,6 +20,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "11.5.1"
+    "@testcontainers/postgresql": "11.5.1",
+    "testcontainers": "11.14.0"
   }
 }

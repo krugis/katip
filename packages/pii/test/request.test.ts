@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { PlaceholderMap, maskChatRequest, type PiiPolicy } from '../src/index.js';
+import {
+  PlaceholderMap,
+  maskChatRequest,
+  maskEmbeddingRequest,
+  type PiiPolicy,
+} from '../src/index.js';
 
 const TCKN = '10000000146';
 const secret = `Ayşe Yılmaz, TCKN ${TCKN}`;
@@ -25,6 +30,66 @@ const leaks = (v: unknown) => {
   return s.includes(TCKN) || s.includes('Ayşe') || s.includes('Yılmaz');
 };
 const user = { role: 'user', content: 'merhaba' };
+
+describe('maskEmbeddingRequest', () => {
+  const embed = (input: string | string[], policy: PiiPolicy = { mode: 'mask' }, extra = person) =>
+    maskEmbeddingRequest({ model: 'm', input }, policy, new PlaceholderMap(), extra);
+
+  it('masks a string and each string of an array, keeping their order', async () => {
+    expect((await embed(secret)).body['input']).toBe('⟦PERSON_1⟧, TCKN ⟦TR_TCKN_1⟧');
+    expect((await embed(['temiz', secret, TCKN])).body['input']).toEqual([
+      'temiz',
+      '⟦PERSON_1⟧, TCKN ⟦TR_TCKN_1⟧',
+      '⟦TR_TCKN_1⟧',
+    ]);
+  });
+
+  it('finds a name split between chunks only if each chunk holds it, and asks per chunk', async () => {
+    const seen: string[] = [];
+    const r = await embed(['Ayşe Yılmaz izinli', 'Ayşe'], { mode: 'mask' }, async (text) => {
+      seen.push(text);
+      return person(text);
+    });
+    expect(seen).toEqual(['Ayşe Yılmaz izinli', 'Ayşe']);
+    expect(r.body['input']).toEqual(['⟦PERSON_1⟧ izinli', 'Ayşe']);
+  });
+
+  it('drops what is not on the list, naming fields but no values', async () => {
+    const r = await maskEmbeddingRequest(
+      {
+        model: 'm',
+        input: 'x',
+        dimensions: 3,
+        encoding_format: 'float',
+        extra_body: { a: secret },
+        [secret]: 1,
+      },
+      { mode: 'mask' },
+      new PlaceholderMap(),
+    );
+    expect(Object.keys(r.body).sort()).toEqual(['dimensions', 'encoding_format', 'input', 'model']);
+    expect(r.dropped).toEqual(['extra_body', '<other>']);
+  });
+
+  it('reports what the policy blocks and a failed detector', async () => {
+    expect((await embed(secret, { mode: 'block' })).blocked.sort()).toEqual(['PERSON', 'TR_TCKN']);
+    const failed = await embed(['Ayşe Yılmaz', TCKN], { mode: 'mask' }, async () => {
+      throw new Error('down');
+    });
+    expect(failed.detectorFailed).toBe(true);
+    expect(failed.body['input']).toEqual(['Ayşe Yılmaz', '⟦TR_TCKN_1⟧']);
+  });
+
+  it('changes nothing with masking off, and does not ask the detector', async () => {
+    let asked = false;
+    const r = await embed(secret, { mode: 'off' }, async () => {
+      asked = true;
+      return [];
+    });
+    expect(r.body['input']).toBe(secret);
+    expect(asked).toBe(false);
+  });
+});
 
 describe('maskChatRequest: text never leaves unmasked', () => {
   it.each<[string, Record<string, unknown>]>([

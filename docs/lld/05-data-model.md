@@ -37,7 +37,7 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
 | `department_managers` | department_id, user_id | |
 | `users` | tenant_id, keycloak_id (unique), email (unique per tenant, citext), name, department_id, role, seat_plan_code, status, user_cap_usd_micro, created_at, last_seen_at | Mirrors Keycloak; seat assignment lives here |
 | `gateway_keys` | tenant_id, key_hash (argon2id), prefix, type (`tenant/user/service`), user_id null, scopes text[], expires_at, revoked_at | |
-| `tenant_policies` | tenant_id (PK), policy jsonb (`TenantPolicy`), version, updated_by | History in `policy_history` |
+| `tenant_policies` | tenant_id (PK), policy jsonb (`TenantPolicy`), version, chat_retention_months (1 to 120, default 12), updated_by | History of `policy` in `policy_history`. `katip_provider` can read only tenant_id and chat_retention_months |
 | `access_rules` | tenant_id (PK), ip_allowlist cidr[], countries char(2)[], mfa_required, session_idle_min, session_max_h, device_trust | |
 | `model_catalog` | id, litellm_name, display_name, class (`standard/premium/tr/embedding`), provider, region, data_policy (`zero_retention/30d/unknown`), price_in_usd_micro_per_m, price_out_usd_micro_per_m, enabled | Global |
 | `tenant_model_allow` | tenant_id, model_id | |

@@ -33,11 +33,12 @@ Each step is idempotent, checks for existing state, and records progress in the 
 3. **MongoDB:** create database `lc_<slug>` and a user with `readWrite` on that database only.
 4. **Network and search:** create the network `<project>_t_<slug>` with a subnet from the tenant's slug, and attach Traefik, the gateway and Mongo to it. Generate a key for the tenant's own Meilisearch, which starts with its compose project: LibreChat has no index prefix setting (LLD-01 §2.2).
 5. **LiteLLM (deferred, P1-64):** a team `<slug>` with a max budget (backstop = 150% of the plan's expected monthly cost) and a virtual key for the gateway. LiteLLM has no database today, so it has no teams or keys. The gateway enforces quotas, and LibreChat can't reach LiteLLM. What's missing is a second, independent spending limit.
-6. **Gateway key:** generate `sk-sme-t-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant's secrets file only. If the two ever disagree, the secrets file wins: the old key is revoked, and the new hash stored.
+6. **Gateway keys:** generate `sk-sme-t-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant's secrets file only. If the two ever disagree, the secrets file wins: the old key is revoked, and the new hash stored. The RAG API has a second key, of type `service`, which can only embed (LLD-03 §1.3). It's stored at every start of the tenant, so a tenant from before file search gets one.
 7. **Lago:** create the customer and subscription (from milestone M3).
 8. **Render files:**
    - `infra/env/tenants/<slug>.env` (SOPS-encrypted), containing Mongo URI, OIDC client, gateway key, `CREDS_KEY`/`CREDS_IV`/`JWT_SECRET` (random per tenant, never shared), and `RAG_API_URL`;
    - `infra/env/tenants/<slug>.meili.env`, holding only that Meilisearch key;
+   - `infra/env/tenants/<slug>.rag.env`, for the RAG API, and `<slug>.ragdb.env`, holding only its database's password;
    - `infra/librechat/rendered/<slug>.librechat.yaml` from `librechat.tmpl.yaml`, with endpoints (LLD-03 §1.2), interface settings, the MCP servers enabled by plan, and the file upload limits of the plan;
    - `infra/compose/tenants/<slug>.yml` from `tenant.tmpl.yml`;
    - Traefik middleware `<slug>-ipallow` from `access_rules`.
@@ -61,7 +62,7 @@ Rollback: if a tenant's first attempt fails before the invite, everything it mad
 | `tenant:delete --confirm <slug>` | Status `deleted`, containers stopped, a `tenant.purge` job due in 30 days. Refuses a tenant listed in the config | Kept for the 30 days |
 | `tenant:purge-due` | Runs the purges whose wait is over | See below |
 
-**A purge destroys:** the tenant's containers and volumes (chats' search index, uploads), its Mongo database and login, its Keycloak organization and client, members who belong to no other company, its network, and its files and secrets.
+**A purge destroys:** the tenant's containers and volumes (chats' search index, uploads, file search's text and vectors), its Mongo database and login, its Keycloak organization and client, members who belong to no other company, its network, and its files and secrets.
 
 **A purge keeps**, for the periods in LLD-10 §8: `usage_events`, invoices and the audit log. So they stay usable but say nothing about who it was, the tenant's `users` rows are anonymised (email, name, Keycloak id), `requests.payload` is emptied and export links in `privacy_requests` are cleared. Its gateway keys are revoked. The owner decided this on 2 Nov 2026; counsel should confirm it's enough for KVKK (P1-49). IP addresses in the audit log stay for its 5 years, and backups age out after 30 days.
 
@@ -78,24 +79,50 @@ The purge has two stages so a resume can't race it: once it starts, a tenant can
 | Where | What happens |
 | --- | --- |
 | Search index (Meilisearch) | Their messages and conversations are removed, and the job waits until that has really happened |
+| File search (RAG API's Postgres) | Chunks of text and vectors they own, and those of their files, including a file they added to an agent, then `VACUUM` |
 | Uploaded files | Their folders are removed |
 | LibreChat (Mongo) | Everything they own, in every collection: chats, files' records, presets, memories, agents, prompts, shared links, keys, and their account. Where they only granted someone else access, the access stays without their name. They leave shared groups |
 | Keycloak | Their login is removed. If they also belong to another company, only this membership ends. Platform staff are refused |
 | Our database | Their row is anonymised and marked `deleted`, which hides it from the users list. Their requests are emptied, export links cleared and keys revoked |
 
-**What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
+**What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The RAG API's own logs hold their id and file names until they rotate (LLD-08 §1.1). The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
 
 **Agents and prompts they wrote are deleted too**, including ones their colleagues use. Moving them to a colleague would be a later feature.
 
 ## 2c. The daily job (P1-65)
 
-`pnpm tenant:daily` carries out approved deletions, runs the purges that are due, removes data past its retention period (LLD-10 §8), that is usage after 24 months and audit entries after 5 years, and stores the central bank's USD rate. **The schedule is off by default.** Until someone sets `jobs.daily_at` in the config, nothing runs it and someone has to run the command. When it's set, `dev:up` adds one line to this user's crontab, and rollback takes it out. It needs Docker on the host, which is why it isn't in a container. Each part is safe to repeat, and one failing doesn't stop the rest.
+`pnpm tenant:daily` carries out approved deletions, runs the purges that are due, removes data past its retention period (LLD-10 §8), that is usage after 24 months, audit entries after 5 years and each company's old chats, and stores the central bank's USD rate. **The schedule is off by default.** Until someone sets `jobs.daily_at` in the config, nothing runs it and someone has to run the command. When it's set, `dev:up` adds one line to this user's crontab, and rollback takes it out. It needs Docker on the host, which is why it isn't in a container. Each part is safe to repeat, and one failing doesn't stop the rest.
 
 Each run is recorded in the audit log, and the provider console's company list says if the job failed, has never run, or hasn't run for 26 hours. **That's a notice on a screen someone has to look at.** A phone alert needs monitoring (P1-43). A machine that's off at that time, such as WSL, runs nothing until the next day, when everything still due is picked up.
 
 The retention function holds its periods itself, so the provisioner's role can call it without being able to delete anything newer, or to delete at all.
 
-**Not covered:** chats have a retention default of 12 months in LLD-10 §8, and nothing enforces it yet (P1-70).
+### Old chats (P1-70)
+
+Each running company has a period, `tenant_policies.chat_retention_months`: 12 by default, and 1 to 120 as its admin sets it on the policy page, with the database refusing anything else. There is no "never". A suspended company waits until it's resumed.
+
+A chat goes when its conversation's `updatedAt` is older than the period, in calendar months back in UTC, and neither it nor any of its messages has a date since then. LibreChat moves `updatedAt` on each message. A conversation with no date is left alone, and so is one whose id another person's recent conversation shares. Pinned, archived and bookmarked chats go like any other, and a shared link to one stops working.
+
+For each company, in batches:
+
+1. The provisioner picks the oldest chats past the period. It reads the period itself, so the host can't ask for anything younger to go. It returns ids and counts, never a title, text or file name.
+2. The host removes them from the search index, and waits until that's done. LibreChat's indexes can be filtered only by `user`, so this goes by id: `messageId` in `messages` and `conversationId` in `convos`.
+3. The host removes the files that can go, by id, from the LibreChat container.
+4. The provisioner checks again that nothing has come back to life, then deletes the file records, then every document with that `conversationId` in any collection, the conversation last, then writes one `chat.retention` audit entry with counts. LibreChat's bookmark and project counts are recounted.
+
+If it stops anywhere, the next run finds the same chats and finishes. A failure in one company doesn't stop the others, and nothing reaches Mongo until steps 2 and 3 are done.
+
+**Limits:** 200 chats or 20,000 messages a batch and 25 batches a run, so 5,000 chats a day for each company. The rest wait for the next run, and `chatBacklog` in the `platform.daily` record counts the companies with more waiting. That record holds counts only: `expiredChats`, `expiredChatMessages`, `expiredChatFiles`, `chatFilesKept`.
+
+**A file goes with its chat only if all of these hold:** it was made for a chat (`message_attachment`, `image_generation`, `execute_code`), it hasn't been used since the cutoff, it has no vectors, it's stored locally under its owner's folder with a name starting with its id or is only text in the database, and no other chat, shared link, preset, assistant or agent, including an agent's old versions, points at it. Anything else stays, with its record, and is counted in `filesKept`.
+
+**Not covered:**
+
+- A chat image uploaded by a person is named after the original file rather than its id, so two uploads of the same name can share one file, and it stays. It lives in the container, not on a volume, so it does go when the container is recreated, but its record stays.
+- Messages whose conversation no longer exists, as nothing selects them.
+- An old file no chat points at any more, such as one from a chat a person deleted themselves. LibreChat leaves those for them to delete in "My files".
+- Backups hold deleted chats until they age out after 30 days (LLD-10 §8).
+- A chat imported with old dates counts as old, and goes in the next run.
 
 ## 3. librechat.tmpl.yaml (key parts)
 

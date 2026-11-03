@@ -173,6 +173,15 @@
     "too_many_requests": "You have many requests waiting already."
   },
   "policy": {
+    "retention": {
+      "title": "Chat retention",
+      "help": "Chats with no activity for longer than this are deleted by the daily job, with their messages, shared links and search entries, and the files attached only to them. This is permanent and cannot be undone. Files that can't safely be tied to one chat stay until someone deletes them.",
+      "months": "Keep chats for (months)",
+      "range": "Between 1 and 120 months. The default is 12.",
+      "confirmShorter": "Chats with no activity for {{months}} months will be deleted permanently the next time the daily job runs. This cannot be undone. Continue?",
+      "save": "Save retention period",
+      "saved": "Saved. It applies from the next daily job."
+    },
     "aliases": "Model options",
     "aliasesHelp": "The options people can see in chat.",
     "alias": {
@@ -337,6 +346,8 @@
       "department_update": "Department changed",
       "policy_update": "Policy changed",
       "access_rules_update": "Access rules changed",
+      "chat_retention_update": "Chat retention changed",
+      "chat_retention": "Old chats deleted",
       "request_create": "Request sent",
       "request_decide": "Request decided",
       "privacy_export": "Data downloaded",

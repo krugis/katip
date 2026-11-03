@@ -1,0 +1,34 @@
+name: pii-names
+
+# Names need the real model, so this builds the analyzer. It only depends on these paths.
+on:
+  pull_request:
+    paths: &paths
+      - 'packages/pii/**'
+      - 'infra/presidio/**'
+      - 'scripts/setup/pii-names.mjs'
+      - 'katip.config.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/pii-names.yml'
+  push:
+    branches: [main]
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  pii-names:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @katip/pii build
+      - name: How often names are found in Turkish text
+        run: pnpm test:pii-names

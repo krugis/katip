@@ -173,6 +173,15 @@
     "too_many_requests": "Bekleyen çok fazla isteğiniz var."
   },
   "policy": {
+    "retention": {
+      "title": "Sohbet saklama süresi",
+      "help": "Bundan daha uzun süredir kullanılmayan sohbetler; mesajları, paylaşım bağlantıları, arama kayıtları ve yalnızca bu sohbetlere eklenmiş dosyalarıyla birlikte günlük işte silinir. Bu silme kalıcıdır ve geri alınamaz. Tek bir sohbete güvenle bağlanamayan dosyalar, biri silene kadar kalır.",
+      "months": "Sohbetlerin saklanacağı süre (ay)",
+      "range": "1 ile 120 ay arasında. Varsayılan 12 aydır.",
+      "confirmShorter": "{{months}} aydan uzun süredir kullanılmayan sohbetler, günlük iş bir sonraki çalıştığında kalıcı olarak silinecek. Bu işlem geri alınamaz. Devam edilsin mi?",
+      "save": "Saklama süresini kaydet",
+      "saved": "Kaydedildi. Bir sonraki günlük işte geçerli olur."
+    },
     "aliases": "Model seçenekleri",
     "aliasesHelp": "Kullanıcıların sohbette görebileceği seçenekler.",
     "alias": {
@@ -337,6 +346,8 @@
       "department_update": "Departman değiştirildi",
       "policy_update": "Politika değiştirildi",
       "access_rules_update": "Erişim kuralları değiştirildi",
+      "chat_retention_update": "Sohbet saklama süresi değiştirildi",
+      "chat_retention": "Eski sohbetler silindi",
       "request_create": "İstek gönderildi",
       "request_decide": "İstek karara bağlandı",
       "privacy_export": "Veriler indirildi",

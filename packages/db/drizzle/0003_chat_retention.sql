@@ -1,0 +1,2 @@
+ALTER TABLE "tenant_policies" ADD COLUMN "chat_retention_months" integer DEFAULT 12 NOT NULL;--> statement-breakpoint
+ALTER TABLE "tenant_policies" ADD CONSTRAINT "tenant_policies_chat_retention_months" CHECK ("tenant_policies"."chat_retention_months" between 1 and 120);

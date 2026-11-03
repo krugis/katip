@@ -27,12 +27,19 @@ export interface PurgeJob {
 
 const PURGE_JOB = 'tenant.purge';
 
+type GatewayKeyType = 'tenant' | 'service';
+
 export interface ProvisionerStore {
   ensureTenant(input: TenantInput): Promise<{ tenantId: string; created: boolean }>;
   hasTenantAdmin(tenantId: string): Promise<boolean>;
   addTenantAdmin(tenantId: string, keycloakId: string, input: TenantInput): Promise<void>;
-  liveGatewayKeys(tenantId: string): Promise<{ keyHash: string }[]>;
-  replaceGatewayKey(tenantId: string, keyHash: string, prefix: string): Promise<void>;
+  liveGatewayKeys(tenantId: string, type?: GatewayKeyType): Promise<{ keyHash: string }[]>;
+  replaceGatewayKey(
+    tenantId: string,
+    keyHash: string,
+    prefix: string,
+    type?: GatewayKeyType,
+  ): Promise<void>;
   audit(tenantId: string, slug: string, steps: string[]): Promise<void>;
   tenantId(slug: string): Promise<string | null>;
   tenantHasUsers(slug: string): Promise<boolean>;
@@ -52,6 +59,9 @@ export interface ProvisionerStore {
   anonymiseTenant(tenantId: string): Promise<void>;
   saveFxRate(rate: FxRate): Promise<boolean>;
   enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }>;
+  chatRetentionPeriods(
+    slug?: string,
+  ): Promise<{ tenantId: string; slug: string; months: number }[]>;
   recordDailyRun(details: Record<string, unknown>): Promise<void>;
   deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
   deletionSubject(
@@ -168,22 +178,41 @@ export class DbProvisionerStore implements ProvisionerStore {
     });
   }
 
-  async liveGatewayKeys(tenantId: string): Promise<{ keyHash: string }[]> {
+  /** Keys of one type: a tenant has one of each, and each is replaced on its own. */
+  async liveGatewayKeys(
+    tenantId: string,
+    type: GatewayKeyType = 'tenant',
+  ): Promise<{ keyHash: string }[]> {
     return this.db
       .select({ keyHash: schema.gatewayKeys.keyHash })
       .from(schema.gatewayKeys)
-      .where(and(eq(schema.gatewayKeys.tenantId, tenantId), isNull(schema.gatewayKeys.revokedAt)));
+      .where(
+        and(
+          eq(schema.gatewayKeys.tenantId, tenantId),
+          eq(schema.gatewayKeys.type, type),
+          isNull(schema.gatewayKeys.revokedAt),
+        ),
+      );
   }
 
-  async replaceGatewayKey(tenantId: string, keyHash: string, prefix: string): Promise<void> {
+  async replaceGatewayKey(
+    tenantId: string,
+    keyHash: string,
+    prefix: string,
+    type: GatewayKeyType = 'tenant',
+  ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
         .update(schema.gatewayKeys)
         .set({ revokedAt: this.now() })
         .where(
-          and(eq(schema.gatewayKeys.tenantId, tenantId), isNull(schema.gatewayKeys.revokedAt)),
+          and(
+            eq(schema.gatewayKeys.tenantId, tenantId),
+            eq(schema.gatewayKeys.type, type),
+            isNull(schema.gatewayKeys.revokedAt),
+          ),
         );
-      await tx.insert(schema.gatewayKeys).values({ tenantId, keyHash, prefix, type: 'tenant' });
+      await tx.insert(schema.gatewayKeys).values({ tenantId, keyHash, prefix, type });
     });
   }
 
@@ -401,6 +430,27 @@ export class DbProvisionerStore implements ProvisionerStore {
       usageDaily: Number(row['expired_usage_daily']),
       audit: Number(row['expired_audit']),
     };
+  }
+
+  /** Not a suspended company's: its search index is stopped, so it waits until it's resumed. */
+  async chatRetentionPeriods(
+    slug?: string,
+  ): Promise<{ tenantId: string; slug: string; months: number }[]> {
+    const rows = await this.db
+      .select({
+        tenantId: schema.tenants.id,
+        slug: schema.tenants.slug,
+        months: schema.tenantPolicies.chatRetentionMonths,
+      })
+      .from(schema.tenants)
+      .leftJoin(schema.tenantPolicies, eq(schema.tenantPolicies.tenantId, schema.tenants.id))
+      .where(
+        and(eq(schema.tenants.status, 'active'), slug ? eq(schema.tenants.slug, slug) : undefined),
+      );
+    return rows.map((r) => ({
+      ...r,
+      months: r.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS,
+    }));
   }
 
   /** False if that date already has a rate: an invoice may rely on it, so it stays. */

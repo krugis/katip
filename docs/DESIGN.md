@@ -119,7 +119,7 @@ Details: [lld/03](lld/03-policy-gateway-and-router.md).
 
 - **Tenant** = one customer company. It has:
   - a slug (`acme`) and a subdomain (`acme.<our-domain>`), with an optional custom domain;
-  - one LibreChat instance, one Meilisearch and one Docker network;
+  - one LibreChat instance, one Meilisearch, one RAG API with its own vector database, and one Docker network;
   - one Mongo database (`lc_acme`) with a login limited to it;
   - its own secrets (`CREDS`, `JWT`, OIDC client, gateway key);
   - one Keycloak organization and OIDC client;
@@ -203,8 +203,8 @@ How quotas work:
 
 Isolation has separate layers, and `pnpm dev:up` tests each of them across two real tenants on every install (lld/10).
 
-- **Network:** a tenant's LibreChat reaches only Traefik, the gateway, Mongo and its own search.
-- **Stores:** its own Mongo login and Meilisearch.
+- **Network:** a tenant's LibreChat reaches only Traefik, the gateway, Mongo, its own search and its own RAG API.
+- **Stores:** its own Mongo login, Meilisearch and vector database.
 - **Governance data:** the gateway's Postgres role is bound by row-level security, so a query with no tenant filter can't cross tenants.
 - **Identity:** a member of one tenant is refused by another's LibreChat.
 
@@ -224,7 +224,7 @@ Isolation has separate layers, and `pnpm dev:up` tests each of them across two r
 | --- | --- | --- |
 | dev (local) | developer laptop | 32 GB RAM recommended; 16 GB without Presidio and Keycloak |
 | dev/test shared | Hetzner AX42 (8 cores, 64 GB) | about 28 GB for dev + test stacks |
-| pilot (≤200 users) | 1 × 8 vCPU / 32 GB / 250 GB SSD + Storage Box backups | + about 0.5–0.7 GB per tenant (LibreChat 470–610 MB and Meilisearch about 45 MB, measured idle in dev with almost no data) |
+| pilot (≤200 users) | 1 × 8 vCPU / 32 GB / 250 GB SSD + Storage Box backups | + about 0.75–1 GB per tenant (LibreChat 470–610 MB, Meilisearch about 45 MB, and RAG API with its Postgres about 235–280 MB, measured idle in dev with almost no data) |
 | production (≤1,000 users) | 3 VMs: app + gateway, databases, workers | see lld/01 |
 | KVKK region | Same topology in a Turkish data centre + GPU server for vLLM | – |
 
@@ -257,6 +257,7 @@ Changes from the unified setup and tenant isolation work (November 2026). PR num
 | **LibreChat** | Keycloak login only. Upgraded from v0.7.8 to v0.8.7 so chat knows the user. Waits for Keycloak at startup. Login rate limit raised, as a shared office IP would be locked out | P1-19, P1-05 | #7, #8 | 02, 03 |
 | **MongoDB** | Each tenant has a login limited to its own database, replacing `root` | P1-59 | #11 | 01, 07 |
 | **Meilisearch** | **One per tenant instead of one shared.** LibreChat has no index prefix setting, and its sync deletes documents missing from its own database | P1-59 | #11 | 01, 07 |
+| **File search** | **One RAG API and vector database per tenant instead of one shared.** It checks one secret, and in the version LibreChat v0.8.7 can use, any valid token reads every file it holds. Embeddings go through the gateway on a key that can do nothing else | P1-08 | – | 01, 03, 08 |
 | **Valkey** | Password required. The health check now reads the reply | P1-60 | #12 | 01 |
 | **Docker networks** | One per tenant. LibreChat left the shared `edge` and `backend` networks | P1-60 | #12 | 01 |
 | **Traefik** | Reaches each tenant over that tenant's network. Dev aliases let containers use public hostnames | P1-19, P1-60 | #7, #12 | 01 |
