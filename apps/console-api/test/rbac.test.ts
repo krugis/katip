@@ -102,6 +102,7 @@ const store: ConsoleStore = {
   allPrivacyRequests: async () => [],
   exportOwnData: async () => ({}),
   requestDeletion: async () => privacyRequest,
+  approveDeletion: async () => privacyRequest,
   completePrivacyRequest: async () => privacyRequest,
   canSeeDepartment: async () => true,
   departmentUsers: async () => [],

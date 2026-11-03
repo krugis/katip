@@ -57,7 +57,7 @@ const TOOL_TRIGGER = '[[use-tool]]';
 
 const edgeNetwork = (config) => `${config.project.name}_edge`;
 const backendNetwork = (config) => `${config.project.name}_backend`;
-const tenantProject = (config, t) => `${config.project.name}-${t.slug}`;
+export const tenantProject = (config, t) => `${config.project.name}-${t.slug}`;
 const tenantFile = (t) => `infra/compose/tenants/${t.slug}.yml`;
 const tenantSecret = (ctx, t, name) => ctx.env[tenantSecretName(t.slug, name)];
 export const tenantSecretOf = tenantSecret;
@@ -471,7 +471,7 @@ async function connectPlatformToTenant(ctx, t) {
 }
 
 /** Runs one action of the provisioner. The Docker work stays here, on the host. */
-async function runProvisionerWith(ctx, action, input, extra = {}) {
+export async function runProvisionerWith(ctx, action, input, extra = {}) {
   const env = {
     DATABASE_URL: `postgres://katip_provider:${ctx.env.KATIP_PROVIDER_DB_PASSWORD}@postgres:5432/governance`,
     KEYCLOAK_URL: 'http://keycloak:8080',

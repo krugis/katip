@@ -69,6 +69,24 @@ Rollback: if a tenant's first attempt fails before the invite, everything it mad
 
 The purge has two stages so a resume can't race it: once it starts, a tenant can't be restored. If it stops part-way, a re-run finishes it. Nothing runs `tenant:purge-due` on a schedule yet (P1-65).
 
+## 2b. One person's deletion (P1-69)
+
+1. **They ask** in the portal. Nothing is deleted yet.
+2. **The company's admin approves it**, after a warning that it can't be undone. Login stops at once, and they stop managing any department. A company's last admin is refused. Only the job below can mark a deletion as done.
+3. **`pnpm tenant:forget-due` carries it out.** It skips a suspended company, whose containers are stopped, until it's resumed. Nothing runs it on a schedule yet (P1-65). It's safe to repeat if it stops part-way.
+
+| Where | What happens |
+| --- | --- |
+| Search index (Meilisearch) | Their messages and conversations are removed, and the job waits until that has really happened |
+| Uploaded files | Their folders are removed |
+| LibreChat (Mongo) | Everything they own, in every collection: chats, files' records, presets, memories, agents, prompts, shared links, keys, and their account. Where they only granted someone else access, the access stays without their name. They leave shared groups |
+| Keycloak | Their login is removed. If they also belong to another company, only this membership ends. Platform staff are refused |
+| Our database | Their row is anonymised and marked `deleted`, which hides it from the users list. Their requests are emptied, export links cleared and keys revoked |
+
+**What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
+
+**Agents and prompts they wrote are deleted too**, including ones their colleagues use. Moving them to a colleague would be a later feature.
+
 ## 3. librechat.tmpl.yaml (key parts)
 
 ```yaml

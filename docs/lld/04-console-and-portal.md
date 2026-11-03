@@ -51,7 +51,7 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | Requests | Ask for premium access, a higher budget or a new model → routed to the dept manager or tenant admin |
 | Devices and sessions | Active sessions (Keycloak account API), sign out others, manage passkeys/OTP (link to the Keycloak account console) |
 | API keys | Phase 2: personal API keys with scopes and expiry |
-| Privacy (KVKK) | Download my data (export job: LibreChat conversations via Mongo + usage); request deletion (creates a ticket for the tenant admin; executed by the provisioner job) |
+| Privacy (KVKK) | Download my data (export job: LibreChat conversations via Mongo + usage); request deletion (the tenant admin approves it, and the provisioner job carries it out: LLD-07 §2b) |
 | Preferences | Default alias (`auto`/`fast`/`best`), language |
 
 ## 2. API (excerpt; full OpenAPI generated)

@@ -755,11 +755,10 @@ try {
     'asking deleted nothing',
   );
   await shot(admin, 'tenant-requests');
-  await askedToDelete.getByTestId('privacy-complete').click();
-  await admin
-    .locator(`[data-testid="privacy-${userEmail}-delete"][data-status=completed]`)
-    .waitFor();
-  check(true, 'the admin sees the deletion request, and can mark it done');
+  check(
+    (await askedToDelete.getByTestId('privacy-complete').count()) === 0,
+    'the admin sees the deletion request, and cannot just mark it done',
+  );
   const theirRequest = admin.getByTestId(`tenant-request-${userEmail}`);
   await theirRequest.getByTestId('reject').click();
   await admin
@@ -772,6 +771,12 @@ try {
     await person.getByTestId('no-access').waitFor();
   }
   check(true, 'going straight to other areas says no access');
+
+  // A real LibreChat account, for the deletion below to find.
+  await person.goto(`https://${slug}.${base}/oauth/openid`);
+  await person.waitForLoadState('domcontentloaded');
+  if (onAuth(person)) await signIn(person, userEmail, `${slug}.${base}`);
+  await person.waitForURL((u) => !u.pathname.startsWith('/oauth'), { timeout: 30_000 });
 
   console.log('a disabled user');
   const off = await fetch(`${consoleUrl}/api/v1/tenants/${tid}/users/${userId}`, {
@@ -790,6 +795,220 @@ try {
   check(await person.getByTestId('problem-sign-out').isVisible(), 'and lets them sign out');
   await shot(person, 'user-disabled');
   await userContext.close();
+
+  console.log("one person's deletion, from the admin's yes through every store");
+  const lcContainer = `${project}-${slug}-lc-${slug}-1`;
+  const meiliContainer = `${project}-${slug}-meili-${slug}-1`;
+  // The root login is read inside the container, so it can't appear in a failure message.
+  const mongoshEval = (code) =>
+    sh('docker', [
+      'exec',
+      '-e',
+      `E2E_CODE=${code}`,
+      '-e',
+      `E2E_DB=lc_${slug}`,
+      `${project}-mongodb-1`,
+      'sh',
+      '-c',
+      'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$E2E_DB" --eval "$E2E_CODE"',
+    ]).trim();
+  const meiliCall = (method, path, body) =>
+    JSON.parse(
+      sh('docker', [
+        'exec',
+        meiliContainer,
+        'sh',
+        '-c',
+        `curl -s -X ${method} -H "Authorization: Bearer $MEILI_MASTER_KEY" -H 'content-type: application/json' ${body ? `-d '${body}'` : ''} http://localhost:7700${path}`,
+      ]),
+    );
+  const lcId = mongoshEval(`db.users.findOne({ email: '${userEmail}' })._id.toHexString()`);
+  check(/^[0-9a-f]{24}$/.test(lcId), 'they really have a LibreChat account');
+  const personKc = (await findUser(api, realm, userEmail)).id;
+  const colleagueId = mongoshEval(
+    `db.users.insertOne({ email: 'meslektas@${domain}', name: 'Meslektaş' }).insertedId.toHexString()`,
+  );
+  // What a person collects with use, in the shapes LibreChat stores: real browser chats would
+  // cover only some of these. The colleague's copies must survive.
+  mongoshEval(`
+    for (const [who, tag] of [['${lcId}', 'person'], ['${colleagueId}', 'colleague']]) {
+      const oid = ObjectId(who);
+      db.conversations.insertOne({ conversationId: tag + '-c', user: who, title: 'Ayşe özel' });
+      db.messages.insertOne({ messageId: tag + '-m', conversationId: tag + '-c', user: who, text: 'gizli' });
+      db.files.insertOne({ file_id: tag + '-f', user: oid, filepath: '/uploads/' + who + '/a.txt' });
+      db.presets.insertOne({ presetId: tag + '-p', user: who });
+      db.memoryentries.insertOne({ key: tag, userId: oid, value: 'hatırla' });
+      db.agents.insertOne({ id: tag + '-a', author: oid, authorName: 'Ayşe', name: tag });
+      db.prompts.insertOne({ author: oid, prompt: tag });
+      db.promptgroups.insertOne({ author: oid, authorName: 'Ayşe', name: tag });
+      db.sharedlinks.insertOne({ shareId: tag, user: who });
+      db.conversationtags.insertOne({ tag, user: who });
+      db.toolcalls.insertOne({ conversationId: tag + '-c', user: oid });
+      db.transactions.insertOne({ user: oid, rawAmount: 1 });
+      db.keys.insertOne({ userId: oid, name: tag });
+      db.tokens.insertOne({ userId: oid, email: tag + '@x.test', token: tag });
+      db.pluginauths.insertOne({ userId: who, authField: tag });
+      db.aclentries.insertOne({ principalType: 'user', principalId: oid, resourceId: tag });
+    }
+    db.groups.insertOne({ name: 'ekip', memberIds: ['${lcId}', '${colleagueId}'] });
+    db.aclentries.insertOne({ principalType: 'user', principalId: ObjectId('${colleagueId}'), grantedBy: ObjectId('${lcId}'), resourceId: 'kept' });
+  `);
+  const seeded = meiliCall(
+    'POST',
+    '/indexes/messages/documents',
+    JSON.stringify([
+      { messageId: 'person-m', user: lcId, text: 'gizli' },
+      { messageId: 'colleague-m', user: colleagueId, text: 'gizli' },
+    ]),
+  );
+  for (let i = 0; i < 40; i += 1) {
+    if (meiliCall('GET', `/tasks/${seeded.taskUid}`).status === 'succeeded') break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  for (const who of [lcId, colleagueId]) {
+    sh('docker', [
+      'exec',
+      lcContainer,
+      'sh',
+      '-c',
+      `mkdir -p /app/uploads/${who} && echo gizli > /app/uploads/${who}/a.txt`,
+    ]);
+  }
+  const usageTotal = () =>
+    sql(
+      `select coalesce(sum(input_tokens + output_tokens), 0), count(*) from usage_events where tenant_id = '${tid}'`,
+    );
+  sql(`insert into usage_events
+       (id, tenant_id, user_id, alias, model_id, class, input_tokens, output_tokens,
+        cost_usd_micro, price_usd_micro, source)
+       values (gen_random_uuid(), '${tid}', '${userId}', 'fast', 'e2e', 'standard', 11, 5, 0, 0, 'chat')`);
+  await new Promise((r) => setTimeout(r, 1000));
+  const totalBefore = usageTotal();
+  const auditBefore = sql(`select count(*) from audit_log where tenant_id = '${tid}'`);
+
+  check(
+    sql(
+      `select count(*) from privacy_requests where user_id = '${userId}' and status = 'pending'`,
+    ) === '1',
+    'their request is still waiting for the admin',
+  );
+  cli('forget-due');
+  check(
+    mongoshEval(`db.users.countDocuments({ email: '${userEmail}' })`) === '1',
+    'nothing happens until the admin says yes',
+  );
+  await admin.goto(`${consoleUrl}/tenant/requests`);
+  const toApprove = admin.getByTestId(`privacy-${userEmail}-delete`);
+  admin.once('dialog', (d) => void d.accept());
+  await toApprove.getByTestId('privacy-approve').click();
+  await admin
+    .locator(`[data-testid="privacy-${userEmail}-delete"][data-status=approved]`)
+    .waitFor();
+  check(true, 'the admin approves it, after a warning');
+  await shot(admin, 'tenant-deletion-approved');
+  const kcAfterYes = await findUser(api, realm, userEmail);
+  check(kcAfterYes?.enabled === false, 'login stops at once');
+  const backOn = await fetch(`${consoleUrl}/api/v1/tenants/${tid}/users/${userId}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ status: 'active' }),
+  });
+  check(backOn.status === 409, 'and it cannot be turned back on');
+
+  cli('forget-due');
+  check(
+    sql(`select status from privacy_requests where user_id = '${userId}' and type = 'delete'`) ===
+      'completed',
+    'the job finishes the request',
+  );
+  check((await findUser(api, realm, userEmail)) === null, 'their login is gone from Keycloak');
+
+  // Every collection, every field: this also catches one a LibreChat upgrade adds.
+  const leftovers = mongoshEval(`
+    const needles = ['${lcId}', '${userEmail}', 'person-', '${personKc}'];
+    const found = [];
+    for (const name of db.getCollectionNames()) {
+      db.getCollection(name).find().forEach((doc) => {
+        const text = EJSON.stringify(doc);
+        if (needles.some((n) => text.includes(n))) found.push(name);
+      });
+    }
+    found.join(',');
+  `);
+  check(
+    leftovers === '',
+    `nothing of theirs is left in any LibreChat collection${leftovers ? `: ${leftovers}` : ''}`,
+  );
+  check(
+    mongoshEval(
+      `db.messages.countDocuments({ user: '${colleagueId}', messageId: 'colleague-m' }) + db.agents.countDocuments({ id: 'colleague-a' }) + db.aclentries.countDocuments({ resourceId: 'colleague' })`,
+    ) === '3',
+    "and a colleague's data is untouched",
+  );
+  check(
+    mongoshEval(`const k = db.aclentries.findOne({ resourceId: 'kept' }); !!k && !k.grantedBy`) ===
+      'true',
+    'an access they granted to someone else stays, without their name',
+  );
+  check(
+    mongoshEval(`JSON.stringify(db.groups.findOne({ name: 'ekip' }).memberIds)`) ===
+      JSON.stringify([colleagueId]),
+    'and their colleagues stay in a shared group',
+  );
+  const search = meiliCall(
+    'POST',
+    '/indexes/messages/search',
+    JSON.stringify({ q: 'gizli', limit: 20 }),
+  );
+  const searchUsers = search.hits.map((h) => h.user);
+  check(!searchUsers.includes(lcId), 'they are gone from the search index');
+  check(searchUsers.includes(colleagueId), 'and a colleague is still found');
+  const fileCheck = sh('docker', [
+    'exec',
+    lcContainer,
+    'sh',
+    '-c',
+    `ls /app/uploads/${lcId} 2>/dev/null | wc -l; ls /app/uploads/${colleagueId} | wc -l`,
+  ])
+    .trim()
+    .split(/\s+/);
+  check(fileCheck[0] === '0', 'their uploaded files are gone');
+  check(fileCheck[1] === '1', "and a colleague's are not");
+
+  const row = sql(
+    `select email || '|' || name || '|' || keycloak_id || '|' || status from users where id = '${userId}'`,
+  );
+  check(
+    row === `deleted-${userId}@deleted.invalid|Deleted user|deleted-${userId}|deleted`,
+    'their row says nothing about who they were',
+  );
+  check(
+    !sql(
+      `select coalesce(string_agg(payload::text, ','), '') from requests where user_id = '${userId}'`,
+    ).includes('Yeni model'),
+    'nor do their requests',
+  );
+  check(usageTotal() === totalBefore, 'the company’s usage totals still add up');
+  check(
+    sql(`select count(*) from usage_events where user_id = '${userId}'`) !== '0',
+    'with their usage kept under an id',
+  );
+  check(
+    Number(sql(`select count(*) from audit_log where tenant_id = '${tid}'`)) > Number(auditBefore),
+    'the deletion is in the audit log',
+  );
+  const deletionAudit = sql(
+    `select coalesce(string_agg(details::text, ','), '') from audit_log where tenant_id = '${tid}' and action like 'privacy.delete%'`,
+  );
+  check(!deletionAudit.includes(userEmail) && !deletionAudit.includes(lcId), 'without naming them');
+  await admin.goto(`${consoleUrl}/tenant/users`);
+  await admin.getByTestId(`user-${owner}`).waitFor();
+  check(
+    !(await admin.getByTestId(`user-deleted-${userId}@deleted.invalid`).count()),
+    'and the users list no longer shows them',
+  );
+  cli('forget-due');
+  check(true, 'running the job again changes nothing');
 
   console.log("a department's stricter rules, through to the real gateway");
   await admin.goto(`${consoleUrl}/tenant/departments`);
