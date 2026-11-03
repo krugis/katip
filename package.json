@@ -37,6 +37,7 @@
     "test:lifecycle": "node scripts/setup/lifecycle-e2e.mjs",
     "test:users": "node scripts/setup/users-e2e.mjs",
     "test:pii-names": "node scripts/setup/pii-names.mjs",
+    "test:metrics": "node scripts/setup/metrics-check.mjs",
     "test:local-llm": "node scripts/setup/local-llm-check.mjs",
     "test:console": "NODE_EXTRA_CA_CERTS=infra/traefik/dev-certs/localhost.crt node apps/console/e2e/run.mjs"
   },

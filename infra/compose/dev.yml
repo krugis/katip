@@ -130,6 +130,8 @@ services:
       VALKEY_URL: redis://:${VALKEY_PASSWORD:?from katip.env}@valkey:6379
       PRESIDIO_URL: http://presidio-analyzer:3000
       PII_TOKEN_KEY: ${KATIP_PII_TOKEN_KEY:?from katip.env}
+      METRICS_TOKEN: ${KATIP_METRICS_TOKEN:?from katip.env}
+      OTEL_SERVICE_NAME: policy-gateway
       LOG_LEVEL: info
     networks:
       - backend
