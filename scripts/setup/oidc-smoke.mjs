@@ -124,51 +124,41 @@ async function chatThroughLibreChat(b) {
   const { token } = await refresh.json();
   const auth = { ...common, authorization: `Bearer ${token}` };
 
-  let body = '';
-  for (let attempt = 1; attempt <= 13; attempt += 1) {
-    const started = await fetch(`${lcUrl}/api/agents/chat/${encodeURIComponent(chatEndpoint)}`, {
-      method: 'POST',
-      headers: { ...auth, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text: 'merhaba',
-        sender: 'User',
-        isCreatedByUser: true,
-        messageId: randomUUID(),
-        parentMessageId: '00000000-0000-0000-0000-000000000000',
-        conversationId: null,
-        endpoint: chatEndpoint,
-        endpointType: 'custom',
-        model: 'fast',
-      }),
-    });
-    if (!started.ok) throw new Error(`LibreChat chat request failed: HTTP ${started.status}`);
-    const { streamId, conversationId } = await started.json();
+  const started = await fetch(`${lcUrl}/api/agents/chat/${encodeURIComponent(chatEndpoint)}`, {
+    method: 'POST',
+    headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text: 'merhaba',
+      sender: 'User',
+      isCreatedByUser: true,
+      messageId: randomUUID(),
+      parentMessageId: '00000000-0000-0000-0000-000000000000',
+      conversationId: null,
+      endpoint: chatEndpoint,
+      endpointType: 'custom',
+      model: 'fast',
+    }),
+  });
+  if (!started.ok) throw new Error(`LibreChat chat request failed: HTTP ${started.status}`);
+  const { streamId, conversationId } = await started.json();
 
-    const stream = await fetch(`${lcUrl}/api/agents/chat/stream/${encodeURIComponent(streamId)}`, {
-      headers: auth,
-      signal: AbortSignal.timeout(60_000),
-    });
-    body = await stream.text();
-    for (const line of body.split('\n')) {
-      if (!line.startsWith('data:')) continue;
-      let event;
-      try {
-        event = JSON.parse(line.slice(5));
-      } catch {
-        continue;
-      }
-      if (!event.final) continue;
-      const msg = event.responseMessage;
-      const text = msg?.text || (msg?.content ?? []).map((p) => p.text ?? '').join('');
-      return { text, conversationId, error: msg?.error === true };
+  const stream = await fetch(`${lcUrl}/api/agents/chat/stream/${encodeURIComponent(streamId)}`, {
+    headers: auth,
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = await stream.text();
+  for (const line of body.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    let event;
+    try {
+      event = JSON.parse(line.slice(5));
+    } catch {
+      continue;
     }
-    if (!body.includes('endpoint_models_not_loaded')) break;
-    if (attempt === 1) {
-      const loaded = await (await fetch(`${lcUrl}/api/models`, { headers: auth })).json();
-      console.log(`LibreChat has models for: ${Object.keys(loaded).join(', ')}`);
-    }
-    console.log(`LibreChat's models aren't loaded yet (attempt ${attempt})`);
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (!event.final) continue;
+    const msg = event.responseMessage;
+    const text = msg?.text || (msg?.content ?? []).map((p) => p.text ?? '').join('');
+    return { text, conversationId, error: msg?.error === true };
   }
   throw new Error(`chat stream ended without an answer: ${body.slice(-300)}`);
 }
