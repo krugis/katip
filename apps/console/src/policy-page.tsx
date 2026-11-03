@@ -64,6 +64,85 @@ function Check({
   );
 }
 
+function ChatRetention({ path, getToken }: { path: string; getToken: GetToken }) {
+  const { t } = useTranslation();
+  const client = useQueryClient();
+  const loaded = useQuery({
+    queryKey: ['chat-retention', path],
+    queryFn: () => apiFetch<{ months: number }>(path, getToken),
+  });
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  if (!loaded.data) return null;
+  const current = loaded.data.months;
+  const months = Number(draft ?? current);
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (months < current && !window.confirm(t('policy.retention.confirmShorter', { months }))) {
+      return;
+    }
+    setError(null);
+    setSaved(false);
+    setSaving(true);
+    try {
+      const result = await apiSend<{ months: number }>('PUT', path, getToken, { months });
+      client.setQueryData(['chat-retention', path], result);
+      setDraft(null);
+      setSaved(true);
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : 'generic';
+      setError(t(`errors.${code}`, { defaultValue: t('errors.generic') }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={(e) => void save(e)} data-testid="chat-retention-form" className={SECTION}>
+      <h2 className={TITLE}>{t('policy.retention.title')}</h2>
+      <p className={HELP}>{t('policy.retention.help')}</p>
+      <label className="mt-3 block text-sm" htmlFor="chat-retention-months">
+        {t('policy.retention.months')}
+      </label>
+      <input
+        id="chat-retention-months"
+        data-testid="chat-retention-months"
+        type="number"
+        required
+        min={1}
+        max={120}
+        step={1}
+        className={SELECT}
+        value={draft ?? String(current)}
+        onChange={(e) => {
+          setSaved(false);
+          setDraft(e.target.value);
+        }}
+      />
+      <p className={HELP}>{t('policy.retention.range')}</p>
+      <div className="mt-3 flex items-center gap-3">
+        <Button type="submit" data-testid="chat-retention-save" disabled={saving}>
+          {t('policy.retention.save')}
+        </Button>
+        {saved && (
+          <p className="text-sm text-muted" role="status" data-testid="chat-retention-saved">
+            {t('policy.retention.saved')}
+          </p>
+        )}
+      </div>
+      {error && (
+        <p className="mt-2 text-sm text-danger" role="alert" data-testid="chat-retention-error">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
 export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken }) {
   const { t } = useTranslation();
   const client = useQueryClient();
@@ -132,183 +211,182 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
   };
 
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      data-testid="policy-form"
-      className="max-w-3xl space-y-4"
-    >
-      <h1 className="text-xl font-semibold">{t('nav.tenant.policies')}</h1>
+    <div className="max-w-3xl space-y-4">
+      <form onSubmit={(e) => void submit(e)} data-testid="policy-form" className="space-y-4">
+        <h1 className="text-xl font-semibold">{t('nav.tenant.policies')}</h1>
 
-      <section className={SECTION}>
-        <h2 className={TITLE}>{t('policy.aliases')}</h2>
-        <p className={HELP}>{t('policy.aliasesHelp')}</p>
-        {(['auto', 'fast', 'best'] as const).map((alias) => (
+        <section className={SECTION}>
+          <h2 className={TITLE}>{t('policy.aliases')}</h2>
+          <p className={HELP}>{t('policy.aliasesHelp')}</p>
+          {(['auto', 'fast', 'best'] as const).map((alias) => (
+            <Check
+              key={alias}
+              testId={`alias-${alias}`}
+              label={t(`policy.alias.${alias}`)}
+              checked={draft.aliases[alias]}
+              onChange={(on) => change({ aliases: { ...draft.aliases, [alias]: on } })}
+            />
+          ))}
+          {kvkkAddon && (
+            <Check
+              testId="alias-tr-local"
+              label={t('policy.alias.trLocal')}
+              checked={draft.aliases['tr-local']}
+              onChange={(on) => change({ aliases: { ...draft.aliases, 'tr-local': on } })}
+            />
+          )}
           <Check
-            key={alias}
-            testId={`alias-${alias}`}
-            label={t(`policy.alias.${alias}`)}
-            checked={draft.aliases[alias]}
-            onChange={(on) => change({ aliases: { ...draft.aliases, [alias]: on } })}
+            testId="user-choice"
+            label={t('policy.userChoice')}
+            checked={draft.allowUserModelChoice}
+            onChange={(on) => change({ allowUserModelChoice: on })}
           />
-        ))}
-        {kvkkAddon && (
-          <Check
-            testId="alias-tr-local"
-            label={t('policy.alias.trLocal')}
-            checked={draft.aliases['tr-local']}
-            onChange={(on) => change({ aliases: { ...draft.aliases, 'tr-local': on } })}
-          />
-        )}
-        <Check
-          testId="user-choice"
-          label={t('policy.userChoice')}
-          checked={draft.allowUserModelChoice}
-          onChange={(on) => change({ allowUserModelChoice: on })}
-        />
-      </section>
+        </section>
 
-      <section className={SECTION}>
-        <h2 className={TITLE}>{t('policy.models')}</h2>
-        <p className={HELP}>{t(allModels ? 'policy.modelsAll' : 'policy.modelsSome')}</p>
-        <ul className="mt-2 grid gap-1 sm:grid-cols-2">
-          {catalog.map((m) => (
-            <li key={m.id}>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  data-testid={`model-${m.id}`}
-                  checked={draft.allowedModels.includes(m.id)}
-                  onChange={(e) => toggleModel(m.id, e.target.checked)}
-                />
-                <span>
-                  {m.displayName}
-                  <span className="block text-muted">
-                    {t(`policy.class.${m.class}`, { defaultValue: m.class })} · {m.region}
+        <section className={SECTION}>
+          <h2 className={TITLE}>{t('policy.models')}</h2>
+          <p className={HELP}>{t(allModels ? 'policy.modelsAll' : 'policy.modelsSome')}</p>
+          <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+            {catalog.map((m) => (
+              <li key={m.id}>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    data-testid={`model-${m.id}`}
+                    checked={draft.allowedModels.includes(m.id)}
+                    onChange={(e) => toggleModel(m.id, e.target.checked)}
+                  />
+                  <span>
+                    {m.displayName}
+                    <span className="block text-muted">
+                      {t(`policy.class.${m.class}`, { defaultValue: m.class })} · {m.region}
+                    </span>
                   </span>
-                </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className={SECTION}>
+          <label className={TITLE} htmlFor="at-limit">
+            {t('policy.atLimit')}
+          </label>
+          <select
+            id="at-limit"
+            data-testid="at-limit"
+            className={SELECT}
+            value={draft.atQuotaLimit}
+            onChange={(e) => change({ atQuotaLimit: e.target.value as Policy['atQuotaLimit'] })}
+          >
+            {(['downgrade', 'block', 'overage'] as const).map((b) => (
+              <option key={b} value={b}>
+                {t(`policy.limit.${b}`)}
+              </option>
+            ))}
+          </select>
+        </section>
+
+        <section className={SECTION}>
+          <label className={TITLE} htmlFor="pii-mode">
+            {t('policy.pii')}
+          </label>
+          <select
+            id="pii-mode"
+            data-testid="pii-mode"
+            className={SELECT}
+            value={draft.pii.mode}
+            onChange={(e) =>
+              change({ pii: { ...draft.pii, mode: e.target.value as Policy['pii']['mode'] } })
+            }
+          >
+            {(['mask', 'block', 'off'] as const).map((m) => (
+              <option key={m} value={m}>
+                {t(`policy.piiMode.${m}`)}
+              </option>
+            ))}
+          </select>
+          {draft.pii.mode === 'off' && (
+            <p className="mt-2 text-sm text-danger" data-testid="pii-off-warning">
+              {t('policy.piiOffWarning')}
+            </p>
+          )}
+          <h3 className="mt-4 text-sm font-medium">{t('policy.entities')}</h3>
+          <p className={HELP}>{t('policy.entitiesHelp')}</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {ENTITIES.map((entity) => (
+              <label key={entity} className="flex items-center justify-between gap-2 text-sm">
+                {t(`policy.entity.${entity}`)}
+                <select
+                  data-testid={`entity-${entity}`}
+                  className="rounded-md border border-line bg-surface px-1.5 py-1 text-sm"
+                  value={draft.pii.entities?.[entity] ?? ''}
+                  onChange={(e) => {
+                    const entities = { ...draft.pii.entities };
+                    if (e.target.value) entities[entity] = e.target.value;
+                    else delete entities[entity];
+                    change({ pii: { ...draft.pii, entities } });
+                  }}
+                >
+                  <option value="">{t('policy.entityDefault')}</option>
+                  {(['mask', 'block', 'off'] as const).map((m) => (
+                    <option key={m} value={m}>
+                      {t(`policy.entityMode.${m}`)}
+                    </option>
+                  ))}
+                </select>
               </label>
-            </li>
-          ))}
-        </ul>
-      </section>
+            ))}
+          </div>
+          <Check
+            testId="detector-block"
+            label={t('policy.detectorBlock')}
+            checked={draft.pii.onDetectorFailure === 'block'}
+            onChange={(on) =>
+              change({ pii: { ...draft.pii, onDetectorFailure: on ? 'block' : 'allow' } })
+            }
+          />
+        </section>
 
-      <section className={SECTION}>
-        <label className={TITLE} htmlFor="at-limit">
-          {t('policy.atLimit')}
-        </label>
-        <select
-          id="at-limit"
-          data-testid="at-limit"
-          className={SELECT}
-          value={draft.atQuotaLimit}
-          onChange={(e) => change({ atQuotaLimit: e.target.value as Policy['atQuotaLimit'] })}
-        >
-          {(['downgrade', 'block', 'overage'] as const).map((b) => (
-            <option key={b} value={b}>
-              {t(`policy.limit.${b}`)}
-            </option>
-          ))}
-        </select>
-      </section>
+        <section className={SECTION}>
+          <label className={TITLE} htmlFor="residency">
+            {t('policy.residency')}
+          </label>
+          <select
+            id="residency"
+            data-testid="residency"
+            className={SELECT}
+            disabled={!kvkkAddon}
+            value={draft.residency}
+            onChange={(e) => change({ residency: e.target.value as Policy['residency'] })}
+          >
+            {(['ANY_APPROVED', 'EU_ONLY', 'TR_ONLY'] as const).map((r) => (
+              <option key={r} value={r}>
+                {t(`policy.residencyValue.${r}`)}
+              </option>
+            ))}
+          </select>
+          {!kvkkAddon && <p className={HELP}>{t('policy.residencyAddon')}</p>}
+        </section>
 
-      <section className={SECTION}>
-        <label className={TITLE} htmlFor="pii-mode">
-          {t('policy.pii')}
-        </label>
-        <select
-          id="pii-mode"
-          data-testid="pii-mode"
-          className={SELECT}
-          value={draft.pii.mode}
-          onChange={(e) =>
-            change({ pii: { ...draft.pii, mode: e.target.value as Policy['pii']['mode'] } })
-          }
-        >
-          {(['mask', 'block', 'off'] as const).map((m) => (
-            <option key={m} value={m}>
-              {t(`policy.piiMode.${m}`)}
-            </option>
-          ))}
-        </select>
-        {draft.pii.mode === 'off' && (
-          <p className="mt-2 text-sm text-danger" data-testid="pii-off-warning">
-            {t('policy.piiOffWarning')}
-          </p>
-        )}
-        <h3 className="mt-4 text-sm font-medium">{t('policy.entities')}</h3>
-        <p className={HELP}>{t('policy.entitiesHelp')}</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {ENTITIES.map((entity) => (
-            <label key={entity} className="flex items-center justify-between gap-2 text-sm">
-              {t(`policy.entity.${entity}`)}
-              <select
-                data-testid={`entity-${entity}`}
-                className="rounded-md border border-line bg-surface px-1.5 py-1 text-sm"
-                value={draft.pii.entities?.[entity] ?? ''}
-                onChange={(e) => {
-                  const entities = { ...draft.pii.entities };
-                  if (e.target.value) entities[entity] = e.target.value;
-                  else delete entities[entity];
-                  change({ pii: { ...draft.pii, entities } });
-                }}
-              >
-                <option value="">{t('policy.entityDefault')}</option>
-                {(['mask', 'block', 'off'] as const).map((m) => (
-                  <option key={m} value={m}>
-                    {t(`policy.entityMode.${m}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
+        <div className="flex items-center gap-3">
+          <Button variant="primary" type="submit" data-testid="policy-save" disabled={saving}>
+            {t('policy.save')}
+          </Button>
+          {saved && (
+            <p className="text-sm text-muted" role="status" data-testid="policy-saved">
+              {t('policy.saved')}
+            </p>
+          )}
         </div>
-        <Check
-          testId="detector-block"
-          label={t('policy.detectorBlock')}
-          checked={draft.pii.onDetectorFailure === 'block'}
-          onChange={(on) =>
-            change({ pii: { ...draft.pii, onDetectorFailure: on ? 'block' : 'allow' } })
-          }
-        />
-      </section>
-
-      <section className={SECTION}>
-        <label className={TITLE} htmlFor="residency">
-          {t('policy.residency')}
-        </label>
-        <select
-          id="residency"
-          data-testid="residency"
-          className={SELECT}
-          disabled={!kvkkAddon}
-          value={draft.residency}
-          onChange={(e) => change({ residency: e.target.value as Policy['residency'] })}
-        >
-          {(['ANY_APPROVED', 'EU_ONLY', 'TR_ONLY'] as const).map((r) => (
-            <option key={r} value={r}>
-              {t(`policy.residencyValue.${r}`)}
-            </option>
-          ))}
-        </select>
-        {!kvkkAddon && <p className={HELP}>{t('policy.residencyAddon')}</p>}
-      </section>
-
-      <div className="flex items-center gap-3">
-        <Button variant="primary" type="submit" data-testid="policy-save" disabled={saving}>
-          {t('policy.save')}
-        </Button>
-        {saved && (
-          <p className="text-sm text-muted" role="status" data-testid="policy-saved">
-            {t('policy.saved')}
+        {error && (
+          <p className="text-sm text-danger" role="alert" data-testid="form-error">
+            {error}
           </p>
         )}
-      </div>
-      {error && (
-        <p className="text-sm text-danger" role="alert" data-testid="form-error">
-          {error}
-        </p>
-      )}
-    </form>
+      </form>
+      <ChatRetention path={`/tenants/${me.tenant!.id}/chat-retention`} getToken={getToken} />
+    </div>
   );
 }

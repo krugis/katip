@@ -29,6 +29,8 @@ const ACTIONS = [
   'department.update',
   'policy.update',
   'access_rules.update',
+  'chat_retention.update',
+  'chat.retention',
   'request.create',
   'request.decide',
   'privacy.export',

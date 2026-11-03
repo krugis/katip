@@ -268,6 +268,8 @@ export interface ConsoleStore {
   /** Every company's allowlist, for Traefik. */
   allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
   policy(tenantId: string): Promise<PolicyView | null>;
+  chatRetention(tenantId: string): Promise<number | null>;
+  saveChatRetention(tenantId: string, months: number, actor: Actor): Promise<number | null>;
   departmentPolicy(
     tenantId: string,
     id: string,
@@ -1694,6 +1696,49 @@ export class DbConsoleStore implements ConsoleStore {
         'policy',
       );
       return { ...current, policy, version: next };
+    });
+  }
+
+  private async chatRetentionOf(tx: Tx, tenantId: string): Promise<number | null> {
+    const [tenant] = await tx
+      .select({ id: schema.tenants.id })
+      .from(schema.tenants)
+      .where(eq(schema.tenants.id, tenantId));
+    if (!tenant) return null;
+    const [row] = await tx
+      .select({ months: schema.tenantPolicies.chatRetentionMonths })
+      .from(schema.tenantPolicies)
+      .where(eq(schema.tenantPolicies.tenantId, tenantId));
+    return row?.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS;
+  }
+
+  async chatRetention(tenantId: string): Promise<number | null> {
+    return this.inTenant(tenantId, (tx) => this.chatRetentionOf(tx, tenantId));
+  }
+
+  async saveChatRetention(tenantId: string, months: number, actor: Actor): Promise<number | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const previousMonths = await this.chatRetentionOf(tx, tenantId);
+      if (previousMonths === null) return null;
+      await tx
+        .insert(schema.tenantPolicies)
+        // Version 0, as with no row: nobody has set a policy, and this doesn't count as one.
+        .values({ tenantId, policy: {}, version: 0, chatRetentionMonths: months })
+        .onConflictDoUpdate({
+          target: schema.tenantPolicies.tenantId,
+          set: { chatRetentionMonths: months },
+        });
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'chat_retention.update',
+        tenantId,
+        { months, previousMonths },
+        'policy',
+      );
+      return months;
     });
   }
 

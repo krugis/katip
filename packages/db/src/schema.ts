@@ -7,6 +7,7 @@
 // - RLS on every tenant-owned table (see rls.ts): using (tenant_id = current_setting('app.tenant_id')::uuid).
 import { sql } from 'drizzle-orm';
 import {
+  check,
   bigint,
   boolean,
   char,
@@ -177,15 +178,27 @@ export const gatewayKeys = pgTable(
 
 // ---- Policy ----
 
-export const tenantPolicies = pgTable('tenant_policies', {
-  tenantId: uuid('tenant_id')
-    .primaryKey()
-    .references(() => tenants.id),
-  policy: jsonb('policy').notNull(),
-  version: integer('version').notNull().default(1),
-  updatedBy: uuid('updated_by'),
-  updatedAt: updatedAt(),
-});
+export const DEFAULT_CHAT_RETENTION_MONTHS = 12;
+
+export const tenantPolicies = pgTable(
+  'tenant_policies',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    policy: jsonb('policy').notNull(),
+    version: integer('version').notNull().default(1),
+    /** Its own column, not in `policy`: the gateway has no use for it, and the daily job reads it. */
+    chatRetentionMonths: integer('chat_retention_months')
+      .notNull()
+      .default(DEFAULT_CHAT_RETENTION_MONTHS),
+    updatedBy: uuid('updated_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('tenant_policies_chat_retention_months', sql`${t.chatRetentionMonths} between 1 and 120`),
+  ],
+);
 
 export const policyHistory = pgTable(
   'policy_history',

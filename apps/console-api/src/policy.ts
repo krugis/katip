@@ -98,6 +98,8 @@ export function looserThan(company: PolicyDocument, override: OverrideDocument):
   return null;
 }
 
+const ChatRetentionSchema = z.object({ months: z.number().int().min(1).max(120) }).strict();
+
 export function registerPolicyRoutes(
   parent: FastifyInstance,
   store: ConsoleStore,
@@ -124,6 +126,48 @@ export function registerPolicyRoutes(
       const policy = await store.policy(req.params.tid);
       if (!policy) throw Errors.notFound();
       return policy;
+    },
+  );
+
+  app.get(
+    `${prefix}/tenants/:tid/chat-retention`,
+    {
+      config: { access },
+      schema: {
+        summary: 'How long the company keeps chats',
+        security: secured,
+        params: TenantParams,
+        response: { 200: ChatRetentionSchema, ...errors },
+      },
+    },
+    async (req) => {
+      const months = await store.chatRetention(req.params.tid);
+      if (months === null) throw Errors.notFound();
+      return { months };
+    },
+  );
+
+  // Not part of the policy document: no version to race over, and the gateway doesn't care.
+  app.put(
+    `${prefix}/tenants/:tid/chat-retention`,
+    {
+      config: { access },
+      schema: {
+        summary: 'Change how long the company keeps chats. Older ones are deleted for good',
+        security: secured,
+        params: TenantParams,
+        body: ChatRetentionSchema,
+        response: { 200: ChatRetentionSchema, ...errors },
+      },
+    },
+    async (req) => {
+      const months = await store.saveChatRetention(
+        req.params.tid,
+        req.body.months,
+        actorOf(callerOf(req)),
+      );
+      if (months === null) throw Errors.notFound();
+      return { months };
     },
   );
 

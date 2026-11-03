@@ -7,7 +7,7 @@
  * pnpm tenant:delete  --slug acme --confirm acme # locks it out; the purge comes 30 days later
  * pnpm tenant:purge-due                          # runs the purges whose wait is over
  * pnpm tenant:forget-due                         # carries out the deletions admins approved
- * pnpm tenant:daily                              # all of the above that's due, and retention
+ * pnpm tenant:daily                              # all of the above that's due, retention and old chats
  * pnpm tenant:upgrade --slug acme | --all        # rolls out the image and settings in the config
  */
 import process from 'node:process';
@@ -130,9 +130,9 @@ const COMMANDS = {
     }
   },
   async daily(ctx) {
-    const { deleted, purged, expired, fxDate, failed } = await daily(ctx);
+    const { deleted, purged, expired, chats, fxDate, failed } = await daily(ctx);
     console.log(
-      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}. Exchange rate date: ${fxDate ?? 'none'}.`,
+      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}. Old chats: ${chats.conversations}, with ${chats.messages} messages and ${chats.files} files (${chats.filesKept} files kept). Companies with more chats waiting: ${chats.backlog.length}. Exchange rate date: ${fxDate ?? 'none'}.`,
     );
     if (failed.length > 0) throw new Error(`Failed:\n  ${failed.join('\n  ')}`);
   },
