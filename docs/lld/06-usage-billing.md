@@ -41,7 +41,7 @@ Verify the field names against the Lago API for the pinned version.
 
 ## 3. Currency and invoicing (Turkey)
 
-- The list price is in USD. Turkish customers are invoiced in TRY at the CBRT/TCMB selling rate of the invoice date. The rate is fetched daily from the TCMB XML and stored in `fx_rates`; confirm the rule with the accountant.
+- The list price is in USD. Turkish customers are invoiced in TRY at the CBRT/TCMB selling rate of the invoice date. The rate is fetched by the daily job (LLD-07 §2c) from the TCMB XML and stored in `fx_rates`, with the bank's own date, as published. The first rate for a date is kept. The feed only changes on working days, so an invoice dated on another day needs the last rate before it, and which published date applies to which invoice date needs confirming with the accountant.
 - **e-Fatura vs e-Arşiv:** check whether the customer's VKN is a registered e-Fatura user, via the provider's API.
   - Registered → e-Fatura.
   - Otherwise → e-Arşiv.

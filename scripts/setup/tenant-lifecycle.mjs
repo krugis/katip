@@ -13,6 +13,7 @@ import {
   tenantProjectCompose,
   tenantStatuses,
 } from './steps.mjs';
+import { fetchTcmbRate } from './fx.mjs';
 import { ensureTenantSecrets } from './tenants.mjs';
 import { run } from './util.mjs';
 
@@ -152,6 +153,15 @@ export async function daily(ctx) {
     usage: 0,
     audit: 0,
   });
+  const fxDate = await part(
+    'exchange rate',
+    async () => {
+      const rate = await fetchTcmbRate();
+      await runProvisionerWith(ctx, 'fx-store', { slug: 'none', ...rate });
+      return rate.date;
+    },
+    null,
+  );
   failed.push(...forget.failed, ...purge.failed);
   await runProvisionerWith(ctx, 'daily-record', {
     slug: 'none',
@@ -160,8 +170,9 @@ export async function daily(ctx) {
     failed: failed.length,
     expiredUsage: expired.usage,
     expiredAudit: expired.audit,
+    fxDate,
   });
-  return { deleted: forget.done, purged: purge.purged, expired, failed };
+  return { deleted: forget.done, purged: purge.purged, expired, fxDate, failed };
 }
 
 /**

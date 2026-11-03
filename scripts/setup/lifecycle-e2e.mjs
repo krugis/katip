@@ -240,6 +240,14 @@ try {
     )) !== '0',
     'and records the run',
   );
+  check(
+    /^\d+\.\d{4}$/.test(
+      await sql(
+        `select selling::text from fx_rates where currency = 'USD' order by rate_date desc limit 1`,
+      ),
+    ),
+    "and stores the central bank's USD rate",
+  );
   check(!(await anyContainers()), 'no containers are left');
   const volumes = (await run('docker', ['volume', 'ls', '-q'])).out;
   check(!volumes.includes(slug), 'no volumes are left');

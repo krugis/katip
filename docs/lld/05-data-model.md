@@ -50,6 +50,7 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
 | `audit_log` | id, tenant_id null, actor_type (`user/provider/system`), actor_id, action, target_type, target_id, ip, details jsonb, ts | Append-only: revoke UPDATE/DELETE; monthly partitions; 5 years |
 | `jobs` | id, type, tenant_id, status, payload, result, attempts | Mirrors BullMQ for visibility |
 | `privacy_requests` | tenant_id, user_id, type (`export/delete`), status, file_url, completed_at | KVKK |
+| `fx_rates` | rate_date, currency, buying, selling, created_at | The central bank's rates. Not tenant data. The provisioner's role can add one but not change one |
 | `invoices` | tenant_id, lago_invoice_id, number, total_usd_micro, total_try_kurus, fx_rate, efatura_status, efatura_uuid, issued_at | LLD-06 |
 
 ## 3. Indexes (minimum)

@@ -56,6 +56,7 @@ GRANT UPDATE (revoked_at) ON gateway_keys TO katip_provider;
 GRANT UPDATE (status) ON tenants TO katip_provider;
 GRANT UPDATE (email, name, keycloak_id, status) ON users TO katip_provider;
 GRANT SELECT (tenant_id, user_id), UPDATE (payload) ON requests TO katip_provider;
+GRANT SELECT, INSERT ON fx_rates TO katip_provider;
 GRANT SELECT (id, tenant_id, user_id, type, status), UPDATE (file_url, status, completed_at) ON privacy_requests TO katip_provider;
 GRANT SELECT, INSERT, UPDATE ON jobs TO katip_provider;
 -- audit_log is append-only for app roles (LLD-05 §2): revoke UPDATE/DELETE from PUBLIC.

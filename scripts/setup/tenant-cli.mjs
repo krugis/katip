@@ -130,9 +130,9 @@ const COMMANDS = {
     }
   },
   async daily(ctx) {
-    const { deleted, purged, expired, failed } = await daily(ctx);
+    const { deleted, purged, expired, fxDate, failed } = await daily(ctx);
     console.log(
-      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}.`,
+      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}. Exchange rate date: ${fxDate ?? 'none'}.`,
     );
     if (failed.length > 0) throw new Error(`Failed:\n  ${failed.join('\n  ')}`);
   },

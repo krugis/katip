@@ -21,6 +21,7 @@ import {
   timestamp,
   unique,
   uuid,
+  numeric,
 } from 'drizzle-orm/pg-core';
 
 /** citext column (case-insensitive text) for emails. */
@@ -396,6 +397,19 @@ export const jobs = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index('jobs_tenant_idx').on(t.tenantId)],
+);
+
+/** The central bank's published rates, for invoicing in TRY (LLD-06). Not any company's. */
+export const fxRates = pgTable(
+  'fx_rates',
+  {
+    rateDate: date('rate_date').notNull(),
+    currency: text('currency').notNull(),
+    buying: numeric('buying', { precision: 14, scale: 4 }).notNull(),
+    selling: numeric('selling', { precision: 14, scale: 4 }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.rateDate, t.currency] })],
 );
 
 export const privacyRequests = pgTable(
