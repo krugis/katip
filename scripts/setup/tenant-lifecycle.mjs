@@ -98,8 +98,44 @@ async function forgetInSearch(ctx, slug, lcUserId) {
 }
 
 /**
- * Carries out the deletions that companies' admins have approved. The search index and files
- * come first, as the database step removes what says whose they are. One failing doesn't
+ * Their chunks: the original text and its vectors. By owner, and by file, as a file for an
+ * agent is stored under the agent's id. VACUUM so the text leaves the table's pages now.
+ */
+export const FORGET_VECTORS_SQL = `DELETE FROM langchain_pg_embedding
+  WHERE cmetadata->>'user_id' = :'who'
+     OR cmetadata->>'file_id' IN (SELECT jsonb_array_elements_text(:'ids'::jsonb));
+VACUUM langchain_pg_embedding;`;
+
+async function forgetVectors(ctx, slug, lcUserId, fileIds) {
+  const project = tenantProject(ctx.config, { slug });
+  const env = { FORGET_SQL: FORGET_VECTORS_SQL, WHO: lcUserId, IDS: JSON.stringify(fileIds) };
+  const { code } = await run(
+    'docker',
+    [
+      'exec',
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      `${project}-ragdb-${slug}-1`,
+      'sh',
+      '-c',
+      'printf "%s" "$FORGET_SQL" | psql -U rag -d rag -v ON_ERROR_STOP=1 -v who="$WHO" -v ids="$IDS"',
+    ],
+    { env },
+  );
+  if (code !== 0) throw new Error('could not remove their files from file search');
+  // What an upload that stopped part-way may have left.
+  const leftovers = await run('docker', [
+    'exec',
+    `${project}-rag-${slug}-1`,
+    'rm',
+    '-rf',
+    `/app/uploads/${lcUserId}`,
+  ]);
+  if (leftovers.code !== 0) throw new Error('could not remove their files from the RAG API');
+}
+
+/**
+ * Carries out the deletions that companies' admins have approved. The search index, vectors and
+ * files come first, as the database step removes what says whose they are. One failing doesn't
  * stop the rest, and a re-run finishes it.
  */
 export async function forgetDue(ctx) {
@@ -108,10 +144,14 @@ export async function forgetDue(ctx) {
   const failed = [];
   for (const { slug, requestId } of deletions) {
     try {
-      const { lcUserId } = await runProvisionerWith(ctx, 'deletion-lookup', { slug, requestId });
+      const { lcUserId, fileIds } = await runProvisionerWith(ctx, 'deletion-lookup', {
+        slug,
+        requestId,
+      });
       if (lcUserId) {
         if (!/^[0-9a-f]{24}$/.test(lcUserId)) throw new Error('unexpected LibreChat id');
         await forgetInSearch(ctx, slug, lcUserId);
+        await forgetVectors(ctx, slug, lcUserId, fileIds);
         const { code } = await run('docker', [
           'exec',
           `${tenantProject(ctx.config, { slug })}-lc-${slug}-1`,

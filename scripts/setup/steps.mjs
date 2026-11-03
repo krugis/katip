@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import {
   composeEnv,
+  embeddingModel,
   identityInput,
   platformIdentityInput,
   provisionInput,
@@ -291,6 +292,40 @@ async function checkToolCallPath(ctx, t) {
   });
 }
 
+/**
+ * A file through the tenant's RAG API and the gateway: it must be found again, and the
+ * gateway must have recorded the embeddings for this company (P1-08).
+ */
+async function checkFileSearchPath(ctx, t) {
+  const count = async () => {
+    const sql =
+      `select count(*) from usage_events e join tenants t on t.id = e.tenant_id ` +
+      `where t.slug = '${t.slug}' and e.source = 'embedding'`;
+    const { out } = await platformCompose(
+      ['exec', '-T', 'postgres', 'psql', '-U', 'katip', '-d', 'governance', '-At', '-c', sql],
+      ctx,
+    );
+    return parseInt(out.trim(), 10);
+  };
+  const before = await count();
+  await runOnEdge(
+    ctx,
+    t,
+    'rag-smoke.mjs',
+    {
+      RAG_URL: `http://rag-${t.slug}:8000`,
+      RAG_JWT_SECRET: tenantSecret(ctx, t, 'LC_JWT_SECRET'),
+    },
+    tenantNetworkName(ctx.config, t),
+  );
+  await waitUntil(async () => (await count()) > before, {
+    timeoutMs: 30_000,
+    intervalMs: 2000,
+  }).catch(() => {
+    throw new Error(`the gateway recorded no embeddings for ${t.slug}`);
+  });
+}
+
 async function checkUsageRecorded(ctx, t, smokeOutput) {
   const id = smokeOutput.match(/chat-conversation=([\w-]+)/)?.[1];
   if (!id) throw new Error('the smoke test reported no conversation id');
@@ -395,6 +430,18 @@ export function renderTenantFiles(ctx, t) {
   const meiliEnv = `MEILI_MASTER_KEY=${tenantSecret(ctx, t, 'MEILI_KEY')}\n`;
   writeFileSync(join(envDir, `${slug}.meili.env`), meiliEnv, { mode: 0o600 });
   chmodSync(join(envDir, `${slug}.meili.env`), 0o600);
+  const ragEnv = fill(readFileSync(join(ctx.infra, 'env', 'tenant.rag.example.env'), 'utf8'), {
+    KATIP_SLUG: slug,
+    KATIP_LC_JWT_SECRET: tenantSecret(ctx, t, 'LC_JWT_SECRET'),
+    KATIP_RAG_GATEWAY_KEY: tenantSecret(ctx, t, 'RAG_GATEWAY_KEY'),
+    KATIP_RAG_DB_PASSWORD: tenantSecret(ctx, t, 'RAG_DB_PASSWORD'),
+    KATIP_EMBEDDING_MODEL: embeddingModel(ctx.config),
+  });
+  writeFileSync(join(envDir, `${slug}.rag.env`), ragEnv, { mode: 0o600 });
+  chmodSync(join(envDir, `${slug}.rag.env`), 0o600);
+  const ragdbEnv = `POSTGRES_PASSWORD=${tenantSecret(ctx, t, 'RAG_DB_PASSWORD')}\n`;
+  writeFileSync(join(envDir, `${slug}.ragdb.env`), ragdbEnv, { mode: 0o600 });
+  chmodSync(join(envDir, `${slug}.ragdb.env`), 0o600);
 
   // librechat.yaml
   const tmplLc = readFileSync(join(ctx.infra, 'librechat', 'librechat.tmpl.yaml'), 'utf8');
@@ -412,6 +459,8 @@ export function renderTenantFiles(ctx, t) {
     KATIP_BASE_DOMAIN: base,
     KATIP_IMAGE_LIBRECHAT: ctx.config.images.librechat,
     KATIP_IMAGE_MEILISEARCH: ctx.config.images.meilisearch,
+    KATIP_IMAGE_POSTGRES: ctx.config.images.postgres,
+    KATIP_IMAGE_RAG_API: ctx.config.images.rag_api,
     KATIP_COMPOSE_PROJECT: ctx.config.project.name,
   });
   const tDir = join(ctx.infra, 'compose', 'tenants');
@@ -614,6 +663,13 @@ export async function provisionTenant(ctx, t) {
 export async function startTenant(ctx, t, { recreate = false } = {}) {
   const base = ctx.config.project.base_domain;
   renderTenantFiles(ctx, t);
+  // Every start, so a tenant from before file search gets its key, wherever it was made.
+  await runProvisionerWith(
+    ctx,
+    'rag-key',
+    { slug: t.slug },
+    { TENANT_RAG_GATEWAY_KEY: tenantSecret(ctx, t, 'RAG_GATEWAY_KEY') },
+  );
   await tenantCompose(
     ['up', '-d', '--wait', '--wait-timeout', '180', ...(recreate ? ['--force-recreate'] : [])],
     ctx,
@@ -715,6 +771,8 @@ export async function removeTenantFromHost(ctx, t) {
   for (const file of [
     join(envDir, `${t.slug}.env`),
     join(envDir, `${t.slug}.meili.env`),
+    join(envDir, `${t.slug}.rag.env`),
+    join(envDir, `${t.slug}.ragdb.env`),
     join(ctx.infra, 'librechat', 'rendered', `${t.slug}.librechat.yaml`),
     join(ctx.infra, 'compose', 'tenants', `${t.slug}.yml`),
     tenantSecretsFile(ctx.infra, t.slug),
@@ -881,6 +939,8 @@ export const steps = [
       for (const t of allTenants(ctx)) {
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.env`), { force: true });
         rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.meili.env`), { force: true });
+        rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.rag.env`), { force: true });
+        rmSync(join(ctx.infra, 'env', 'tenants', `${t.slug}.ragdb.env`), { force: true });
         rmSync(tenantSecretsFile(ctx.infra, t.slug), { force: true });
       }
       rmSync(join(ctx.infra, 'traefik', 'dev-certs'), { recursive: true, force: true });
@@ -1132,7 +1192,7 @@ export const steps = [
   },
   {
     id: 'tenant',
-    title: 'Tenants (LibreChat, Meilisearch, traefik route, smoke, invite)',
+    title: 'Tenants (LibreChat, Meilisearch, RAG API, traefik route, smoke, invite)',
     async run(ctx) {
       const statuses = await tenantStatuses(ctx);
       for (const t of allTenants(ctx)) {
@@ -1194,9 +1254,11 @@ export const steps = [
         await checkUsageRecorded(ctx, t, out);
         // This one relies on the mock's fixed tool call. pnpm test:local-llm covers a real model.
         if (!ctx.env.KATIP_LOCAL_LLM_UPSTREAM) await checkToolCallPath(ctx, t);
+        // A local chat model may have no embeddings. pnpm test:local-llm doesn't cover this.
+        if (!ctx.env.KATIP_LOCAL_LLM_UPSTREAM) await checkFileSearchPath(ctx, t);
       }
       ctx.log(
-        'e2e smoke ok (models, login with MFA, chat headers, tool calls, non-member refused)',
+        'e2e smoke ok (models, login with MFA, chat headers, tool calls, file search, non-member refused)',
       );
     },
   },
@@ -1217,7 +1279,7 @@ export const steps = [
   },
   {
     id: 'isolation',
-    title: 'Tenant isolation checks (network, Mongo, search, gateway, Postgres, Valkey)',
+    title: 'Tenant isolation checks (network, Mongo, search, files, gateway, Postgres, Valkey)',
     async run(ctx) {
       await checkIsolation(ctx, {
         secret: (t, name) => tenantSecret(ctx, t, name),
@@ -1232,6 +1294,21 @@ export const steps = [
               `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
               '-H',
               `x-user-email: ${email}`,
+            ])
+          ).trim(),
+        serviceKeyChatStatus: async (t) =>
+          (
+            await curlBackend(ctx, '/v1/chat/completions', [
+              '-o',
+              '/dev/null',
+              '-w',
+              '%{http_code}',
+              '-H',
+              `authorization: Bearer ${tenantSecret(ctx, t, 'RAG_GATEWAY_KEY')}`,
+              '-H',
+              'content-type: application/json',
+              '-d',
+              '{"model":"fast","messages":[{"role":"user","content":"merhaba"}]}',
             ])
           ).trim(),
         waitForTenant: (t) =>

@@ -20,6 +20,18 @@ export async function findLibreChatUser(
   return user ? user._id.toHexString() : null;
 }
 
+/** The ids of their files. File search stores a file for an agent under the agent's id. */
+export async function findLibreChatFiles(db: Db, lcUserId: string): Promise<string[]> {
+  const files = await db
+    .collection('files')
+    .find(
+      { user: { $in: [new ObjectId(lcUserId), lcUserId] } },
+      { projection: { _id: 0, file_id: 1 } },
+    )
+    .toArray();
+  return files.flatMap((f) => (typeof f['file_id'] === 'string' ? [f['file_id']] : []));
+}
+
 export async function forgetLibreChatUser(db: Db, lcUserId: string, email: string): Promise<void> {
   const oid = new ObjectId(lcUserId);
   const ids = [oid, lcUserId];

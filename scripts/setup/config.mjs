@@ -17,6 +17,7 @@ const PINNED_IMAGES = [
   'valkey',
   'mailpit',
   'librechat',
+  'rag_api',
   'curl',
 ];
 const MODEL_CLASSES = ['standard', 'premium', 'tr', 'embedding'];
@@ -136,6 +137,9 @@ export function validateConfig(c) {
   if (!Array.isArray(c.models) || c.models.length === 0) {
     errors.push('models: at least one model is required');
   }
+  if (Array.isArray(c.models) && !c.models.some((m) => m?.class === 'embedding')) {
+    errors.push('models: one embedding model is required, for file search');
+  }
   const aliases = new Set();
   for (const [i, m] of (Array.isArray(c.models) ? c.models : []).entries()) {
     const where = `models[${m?.alias ?? i}]`;
@@ -243,6 +247,12 @@ export function renderLiteLLMModels(config, env) {
   return lines.join('\n');
 }
 
+/**
+ * The model the RAG API asks for, by id so a catalog change can't move it silently: vectors
+ * from another model wouldn't compare, so changing it means embedding every file again.
+ */
+export const embeddingModel = (config) => config.models.find((m) => m.class === 'embedding').alias;
+
 /** The custom endpoint's name in infra/librechat/librechat.tmpl.yaml. */
 export const CHAT_ENDPOINT = 'SME AI';
 
@@ -260,6 +270,8 @@ export const TENANT_SECRETS = [
   'LC_OIDC_SESSION_SECRET',
   'MONGO_PASSWORD',
   'MEILI_KEY',
+  'RAG_DB_PASSWORD',
+  'RAG_GATEWAY_KEY',
   'DEMO_USER_PASSWORD',
 ];
 

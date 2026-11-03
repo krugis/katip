@@ -10,6 +10,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTenant,
+  ensureRagKey,
   finishTenant,
   rollbackTenant,
   type IdentityAdmin,
@@ -285,6 +286,52 @@ describe('tenant:create', () => {
       where t.slug = 'acme-rotate' order by k.created_at`;
     expect(rows).toHaveLength(2);
     expect(rows.filter((row) => row['revoked_at'] === null)).toHaveLength(1);
+  });
+
+  describe("the RAG API's key", () => {
+    const keys = (slug: string) =>
+      admin`select k.type, k.revoked_at from gateway_keys k join tenants t on t.id = k.tenant_id
+        where t.slug = ${slug} order by k.created_at`;
+
+    it('is stored as a service key, by its hash, once', async () => {
+      await provision(deps(), input('acme-rag'), secrets);
+      const key = (await generateGatewayKey('tenant')).key;
+      expect(await ensureRagKey({ store }, 'acme-rag', key)).toEqual({ changed: true });
+      expect(await ensureRagKey({ store }, 'acme-rag', key)).toEqual({ changed: false });
+      const rows = await keys('acme-rag');
+      expect(rows.map((r) => [r['type'], r['revoked_at']])).toEqual([
+        ['tenant', null],
+        ['service', null],
+      ]);
+      const [row] = await admin`select k.key_hash from gateway_keys k
+        join tenants t on t.id = k.tenant_id where t.slug = 'acme-rag' and k.type = 'service'`;
+      expect(row!['key_hash']).not.toContain(key);
+      expect(await verifyKey(key, row!['key_hash'] as string)).toBe(true);
+    });
+
+    it('is replaced on its own, and a new tenant key leaves it alone', async () => {
+      const d = deps();
+      await provision(d, input('acme-rag2'), secrets);
+      await ensureRagKey({ store }, 'acme-rag2', (await generateGatewayKey('tenant')).key);
+      await ensureRagKey({ store }, 'acme-rag2', (await generateGatewayKey('tenant')).key);
+      const replaced = await keys('acme-rag2');
+      expect(replaced.filter((r) => r['type'] === 'tenant' && !r['revoked_at'])).toHaveLength(1);
+      expect(replaced.filter((r) => r['type'] === 'service' && !r['revoked_at'])).toHaveLength(1);
+
+      const next = await generateGatewayKey('tenant');
+      await provision(d, input('acme-rag2'), { ...secrets, gatewayKey: next.key });
+      const after = await keys('acme-rag2');
+      expect(after.filter((r) => r['type'] === 'tenant' && !r['revoked_at'])).toHaveLength(1);
+      expect(after.filter((r) => r['type'] === 'service' && !r['revoked_at'])).toHaveLength(1);
+    });
+
+    it("refuses a tenant that doesn't exist, and a key in the wrong format", async () => {
+      await expect(ensureRagKey({ store }, 'yok-boyle', 'sk-sme-t-abc')).rejects.toThrow(
+        'does not exist',
+      );
+      await provision(deps(), input('acme-rag3'), secrets);
+      await expect(ensureRagKey({ store }, 'acme-rag3', '')).rejects.toThrow('wrong format');
+    });
   });
 
   it('keeps tenants apart', async () => {

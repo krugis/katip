@@ -33,11 +33,12 @@ Each step is idempotent, checks for existing state, and records progress in the 
 3. **MongoDB:** create database `lc_<slug>` and a user with `readWrite` on that database only.
 4. **Network and search:** create the network `<project>_t_<slug>` with a subnet from the tenant's slug, and attach Traefik, the gateway and Mongo to it. Generate a key for the tenant's own Meilisearch, which starts with its compose project: LibreChat has no index prefix setting (LLD-01 §2.2).
 5. **LiteLLM (deferred, P1-64):** a team `<slug>` with a max budget (backstop = 150% of the plan's expected monthly cost) and a virtual key for the gateway. LiteLLM has no database today, so it has no teams or keys. The gateway enforces quotas, and LibreChat can't reach LiteLLM. What's missing is a second, independent spending limit.
-6. **Gateway key:** generate `sk-sme-t-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant's secrets file only. If the two ever disagree, the secrets file wins: the old key is revoked, and the new hash stored.
+6. **Gateway keys:** generate `sk-sme-t-…` and store its hash in `gateway_keys`. The plaintext goes into the tenant's secrets file only. If the two ever disagree, the secrets file wins: the old key is revoked, and the new hash stored. The RAG API has a second key, of type `service`, which can only embed (LLD-03 §1.3). It's stored at every start of the tenant, so a tenant from before file search gets one.
 7. **Lago:** create the customer and subscription (from milestone M3).
 8. **Render files:**
    - `infra/env/tenants/<slug>.env` (SOPS-encrypted), containing Mongo URI, OIDC client, gateway key, `CREDS_KEY`/`CREDS_IV`/`JWT_SECRET` (random per tenant, never shared), and `RAG_API_URL`;
    - `infra/env/tenants/<slug>.meili.env`, holding only that Meilisearch key;
+   - `infra/env/tenants/<slug>.rag.env`, for the RAG API, and `<slug>.ragdb.env`, holding only its database's password;
    - `infra/librechat/rendered/<slug>.librechat.yaml` from `librechat.tmpl.yaml`, with endpoints (LLD-03 §1.2), interface settings, the MCP servers enabled by plan, and the file upload limits of the plan;
    - `infra/compose/tenants/<slug>.yml` from `tenant.tmpl.yml`;
    - Traefik middleware `<slug>-ipallow` from `access_rules`.
@@ -61,7 +62,7 @@ Rollback: if a tenant's first attempt fails before the invite, everything it mad
 | `tenant:delete --confirm <slug>` | Status `deleted`, containers stopped, a `tenant.purge` job due in 30 days. Refuses a tenant listed in the config | Kept for the 30 days |
 | `tenant:purge-due` | Runs the purges whose wait is over | See below |
 
-**A purge destroys:** the tenant's containers and volumes (chats' search index, uploads), its Mongo database and login, its Keycloak organization and client, members who belong to no other company, its network, and its files and secrets.
+**A purge destroys:** the tenant's containers and volumes (chats' search index, uploads, file search's text and vectors), its Mongo database and login, its Keycloak organization and client, members who belong to no other company, its network, and its files and secrets.
 
 **A purge keeps**, for the periods in LLD-10 §8: `usage_events`, invoices and the audit log. So they stay usable but say nothing about who it was, the tenant's `users` rows are anonymised (email, name, Keycloak id), `requests.payload` is emptied and export links in `privacy_requests` are cleared. Its gateway keys are revoked. The owner decided this on 2 Nov 2026; counsel should confirm it's enough for KVKK (P1-49). IP addresses in the audit log stay for its 5 years, and backups age out after 30 days.
 
@@ -78,12 +79,13 @@ The purge has two stages so a resume can't race it: once it starts, a tenant can
 | Where | What happens |
 | --- | --- |
 | Search index (Meilisearch) | Their messages and conversations are removed, and the job waits until that has really happened |
+| File search (RAG API's Postgres) | Chunks of text and vectors they own, and those of their files, including a file they added to an agent, then `VACUUM` |
 | Uploaded files | Their folders are removed |
 | LibreChat (Mongo) | Everything they own, in every collection: chats, files' records, presets, memories, agents, prompts, shared links, keys, and their account. Where they only granted someone else access, the access stays without their name. They leave shared groups |
 | Keycloak | Their login is removed. If they also belong to another company, only this membership ends. Platform staff are refused |
 | Our database | Their row is anonymised and marked `deleted`, which hides it from the users list. Their requests are emptied, export links cleared and keys revoked |
 
-**What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
+**What stays:** usage rows under the id, so the company's totals still add up, and audit entries, which hold ids and no names or emails. The RAG API's own logs hold their id and file names until they rotate (LLD-08 §1.1). The audit log's IP addresses stay for its 5 years. **Backups** still hold them until they age out after 30 days.
 
 **Agents and prompts they wrote are deleted too**, including ones their colleagues use. Moving them to a colleague would be a later feature.
 

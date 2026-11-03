@@ -25,6 +25,7 @@ const deps = (): ForgetDeps => ({
     },
   },
   findLibreChatUser: async () => 'a'.repeat(24),
+  findLibreChatFiles: async () => ['file-1', 'file-2'],
   forgetLibreChatUser: async (database, id) => {
     forgotten.push(`librechat ${database} ${id}`);
   },
@@ -87,6 +88,20 @@ describe("one person's deletion", () => {
     expect(listed).toContainEqual({ slug: yes.slug, requestId: yes.requestId });
     expect(listed.map((d) => d.slug)).not.toContain(waiting.slug);
     expect(listed.map((d) => d.slug)).not.toContain(suspended.slug);
+  });
+
+  it('tells the host whose files to remove from file search, before anything is gone', async () => {
+    const p = await person();
+    expect(await deletionLookup(deps(), p.slug, p.requestId)).toEqual({
+      lcUserId: 'a'.repeat(24),
+      fileIds: ['file-1', 'file-2'],
+    });
+    const never = await person();
+    const neverUsed = { ...deps(), findLibreChatUser: async () => null };
+    expect(await deletionLookup(neverUsed, never.slug, never.requestId)).toEqual({
+      lcUserId: null,
+      fileIds: [],
+    });
   });
 
   it('refuses a request nobody has approved, or from another company', async () => {
