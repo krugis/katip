@@ -91,7 +91,15 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-const PLATFORM_SERVICES = ['traefik', 'postgres', 'keycloak', 'mongodb', 'valkey', 'mailpit'];
+const PLATFORM_SERVICES = [
+  'docker-socket-proxy',
+  'traefik',
+  'postgres',
+  'keycloak',
+  'mongodb',
+  'valkey',
+  'mailpit',
+];
 
 const platformCompose = (args, ctx) =>
   tryRun('docker', [...platformComposeArgs(), ...args], {

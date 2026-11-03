@@ -23,16 +23,40 @@ services:
     volumes:
       - ../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ../traefik/dynamic:/etc/traefik/dynamic:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
     networks:
       - edge
+      - docker-socket
+    depends_on:
+      docker-socket-proxy:
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'traefik', 'healthcheck', '--ping']
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging: *default-logging
+
+  # Traefik faces the internet and needs to see containers. It gets that through this, not
+  # the socket: `:ro` on a socket only stops writes to the file, not to the Docker API. This
+  # answers reads of containers and refuses the rest, on a network with only those two.
+  docker-socket-proxy:
+    image: ${KATIP_IMAGE_SOCKET_PROXY:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      CONTAINERS: '1'
+      POST: '0'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-socket
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:2375/_ping || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
     logging: *default-logging
 
   postgres:
@@ -178,6 +202,8 @@ networks:
   backend:
     name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_backend
     external: true
+  docker-socket:
+    internal: true
 
 volumes:
   traefik-certs: {}

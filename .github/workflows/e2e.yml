@@ -1,0 +1,47 @@
+name: e2e
+
+# The whole product on a clean machine: install, invite, login, chat, usage, policy (P1-34).
+# Slow, so it runs when asked for or on an e2e/ branch, not on every PR.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['e2e/**']
+
+permissions:
+  contents: read
+
+jobs:
+  whole-product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install the whole stack with the one script
+        run: pnpm dev:up --yes
+      - name: Browser for the console test
+        run: pnpm --filter @katip/console exec playwright install --with-deps chromium
+      - name: Users
+        run: pnpm test:users
+      - name: Lifecycle
+        run: pnpm test:lifecycle
+      - name: 'Each role in a real browser: invite, login, chat, usage, policy'
+        run: pnpm test:console
+      - name: Metrics
+        run: pnpm test:metrics
+      - name: Screenshots, of made-up data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-screenshots
+          path: apps/console/e2e/artifacts
+          retention-days: 7
+      - name: What failed
+        if: failure()
+        run: docker ps -a --format '{{.Names}} {{.Status}}' && tail -40 .katip/logs/*.log | sed -E 's/(PASSWORD|SECRET|TOKEN|KEY)=[^ ]*/\1=***/g'

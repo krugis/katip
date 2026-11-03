@@ -60,6 +60,7 @@ librechat-sme/
 | searxng | searxng/searxng pinned | 8080 | – | Unmodified (AGPL) |
 | code-interpreter | pinned (Apache-2.0 sandbox used by LibreChat) | – | – | Phase 1b; resource limits per run |
 | seaweedfs | chrislusf/seaweedfs pinned | 8333 (S3) | seaweed | Files, backups staging |
+| docker-socket-proxy | pinned | – | – | Only Traefik reaches it, on a network of their own. Traefik has no socket. It answers reads of containers and refuses the rest. Inspecting a container shows its environment, so a broken-into Traefik could still read those secrets. |
 | prometheus, grafana, loki, promtail, node-exporter, cadvisor | pinned | – | – | Admin UIs only via Tailscale |
 
 **Security note on the provisioner and docker.sock.** The provisioner is the only container with `docker.sock`. It runs on an internal network and requires a provider-admin token. Plan: replace it with a Docker socket proxy that allows only compose operations (tracker P1-35).

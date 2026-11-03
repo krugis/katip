@@ -106,13 +106,13 @@ One script, one config file and one env file set up every building block. Each b
 | P1-31 | Department manager area | 04 | P1 | done | P1-30 | Other departments 404 | Approving records the decision and doesn't change access yet. Budget alerts come with P1-41; people raise requests from P1-32 |
 | P1-32 | User portal: my usage, requests, sessions/MFA links, privacy export | 04 | P0 | done | P1-30 | Usage visible within 1 min of a chat | Export covers the governance database, not chats (P1-68). Deletion is a request the admin carries out by hand (P1-69). Default alias isn't built |
 | P1-33 | Audit log API + screen (tenant + provider) | 04, 05 | P1 | done | P1-20 | All mutations audited | Client IPs aren't recorded yet. Our provider admins' own log entries with no company aren't shown |
-| P1-34 | M2 e2e (Playwright): invite → login → chat → usage visible → policy change effective | 04 | P0 | todo | P1-26…33 | Green in CI against dev stack | |
+| P1-34 | M2 e2e (Playwright): invite → login → chat → usage visible → policy change effective | 04 | P0 | review | P1-26…33 | Green in CI against dev stack | `.github/workflows/e2e.yml` runs the one script and the live tests on a clean machine, on request or an `e2e/` branch. `pnpm test:console` holds the flow |
 
 ### M3 Billing, security, operations (S6–S7)
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1-35 | Docker socket proxy for provisioner (compose ops only) | 01, 10 | P0 | todo | P1-22 | Provisioner can't run arbitrary containers | |
+| P1-35 | Docker socket proxy for provisioner (compose ops only) | 01, 10 | P0 | done | P1-22 | Provisioner can't run arbitrary containers | The provisioner never had the socket: its Docker work runs on the host. The real exposure was Traefik, which now reaches Docker only through a read-only proxy, checked in the isolation step |
 | P1-36 | Lago deploy; plans, add-ons, metered charges configured | 06 | P0 | todo | P0-03 | Test customer + subscription created | |
 | P1-37 | `billing-bridge`: hourly usage → Lago events (idempotent); seat sync | 06 | P0 | todo | P1-36, P1-14 | Replay doesn't double-bill | |
 | P1-38 | `EInvoiceProvider` interface + manual mode (+ provider adapter when decided) | 06 | P1 | blocked | e-Fatura decision | Draft PDF in TRY with FX rate | Manual mode can ship first |

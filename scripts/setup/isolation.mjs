@@ -8,6 +8,7 @@ export const tenantPairs = (tenants) =>
   tenants.length < 2 ? [] : tenants.map((t, i) => [t, tenants[(i + 1) % tenants.length]]);
 
 const NOT_FOR_TENANTS = [
+  'docker-socket-proxy:2375',
   'valkey:6379',
   'postgres:5432',
   'litellm:4000',
@@ -76,6 +77,32 @@ export async function checkIsolation(ctx, helpers) {
 
   const ids = Object.fromEntries(
     (await adminSql('select slug, id from tenants')).split('\n').map((line) => line.split('|')),
+  );
+
+  // What a broken-into Traefik could do with Docker: see containers, and nothing else.
+  const dockerApi = (method, path) =>
+    exec(
+      'traefik',
+      `wget -S -qO- ${method === 'POST' ? '--post-data=' : ''} http://docker-socket-proxy:2375${path} 2>&1 | grep -m1 HTTP/`,
+    );
+  expect(
+    (await dockerApi('GET', '/containers/json')).out.includes(' 200'),
+    "Traefik can't list containers through its proxy, so it can't find routes",
+  );
+  for (const [method, path] of [
+    ['POST', '/containers/create'],
+    ['GET', '/images/json'],
+    ['GET', '/volumes'],
+    ['GET', '/secrets'],
+  ]) {
+    expect(
+      !(await dockerApi(method, path)).out.includes(' 200'),
+      `Traefik can ${method} ${path} through its proxy`,
+    );
+  }
+  expect(
+    (await exec('traefik', 'test ! -S /var/run/docker.sock')).code === 0,
+    'Traefik still has the Docker socket',
   );
 
   for (const [a, b] of tenantPairs(ctx.config.tenants)) {
