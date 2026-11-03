@@ -12,6 +12,14 @@ There are two commands, and they cover different parts.
 | `pnpm dev:up`                    | The platform: Traefik, Postgres, Keycloak, Mongo, Valkey, Mailpit, LiteLLM, Presidio, policy gateway, console, console API, identity service. Also creates and starts the tenants listed in `katip.config.yaml` |
 | `pnpm tenant:upgrade --slug X` or `--all` | Only the companies' stacks: LibreChat, Meilisearch, RAG API, vector database |
 
+## Traefik and its routes
+
+Traefik has no access to Docker. The platform's routes are in `infra/traefik/dynamic/routes.yml`, and a company's route comes from `console-api`, polled every 5 s. [LLD-01 §2.2a](../lld/01-repo-and-deployment.md) says what happens when `console-api` is down.
+
+- To see the routes: `docker exec katip-traefik-1 wget -qO- http://127.0.0.1:8080/api/http/routers`. The dashboard at `127.0.0.1:9090` has gone: it was readable from every company's network.
+- **Upgrading an install from before this.** `pnpm dev:up` re-applies everything, as `katip.config.yaml` changed, and removes `katip-docker-socket-proxy-1` and its network. Every service loses its labels, so compose recreates them. Companies' hosts answer 404 from when Traefik is recreated until the new `console-api` is up, some minutes on a build, and companies' LibreChat restart. Login and the console come back with their services. Plan it as an outage.
+- **Going back to a version from before this** needs its `katip.config.yaml` too, which holds the proxy's image, and a `pnpm dev:up`.
+
 ## Before you start
 
 1. Take a copy of the data you cannot lose. There are no backups. See [restore.md](restore.md), "Take a copy by hand". Do this before a LibreChat upgrade especially (LLD-07 §4 asks for it).

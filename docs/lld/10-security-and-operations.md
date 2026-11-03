@@ -32,7 +32,8 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 - **Traefik:**
   - HSTS, security headers middleware (CSP for console);
   - `ipAllowList` per tenant;
-  - `rateLimit` per IP for login routes.
+  - `rateLimit` per IP for login routes;
+  - no Docker socket and no way to Docker: routes come from a file and `console-api` (LLD-01 §2.2a).
 - **TLS:** Cloudflare Full (strict) using origin certificates.
 
 ## 3. Secrets
@@ -137,5 +138,7 @@ Step by step, with the commands that exist today: [docs/runbooks/incident.md](..
 | Valkey | A connection with no password | `NOAUTH` |
 | Login | A member of another tenant logs in, with correct password and MFA | LibreChat refuses |
 | Secrets | Comparing the tenants' keys | None shared |
+| Routes | A company's LibreChat tries `console-api`, by name and address, and Traefik's own port. `/internal/traefik` through the public address | None answers with routes |
+| Docker | From Traefik: the socket, a proxy, the Docker API on its host. Also its mounts, and where its routes came from | None there, and no route from Docker |
 
 **What this doesn't cover:** a compromise of a platform service both tenants use (Traefik, the gateway, Mongo), and Docker itself.

@@ -8,7 +8,6 @@ export const tenantPairs = (tenants) =>
   tenants.length < 2 ? [] : tenants.map((t, i) => [t, tenants[(i + 1) % tenants.length]]);
 
 const NOT_FOR_TENANTS = [
-  'docker-socket-proxy:2375',
   'valkey:6379',
   'postgres:5432',
   'litellm:4000',
@@ -79,31 +78,61 @@ export async function checkIsolation(ctx, helpers) {
     (await adminSql('select slug, id from tenants')).split('\n').map((line) => line.split('|')),
   );
 
-  // What a broken-into Traefik could do with Docker: see containers, and nothing else.
-  const dockerApi = (method, path) =>
-    exec(
-      'traefik',
-      `wget -S -qO- ${method === 'POST' ? '--post-data=' : ''} http://docker-socket-proxy:2375${path} 2>&1 | grep -m1 HTTP/`,
-    );
+  const inspect = async (container, format) =>
+    (await run('docker', ['inspect', '-f', format, `${project}-${container}-1`])).out.trim();
+
+  // A broken-into Traefik must get nothing from Docker: inspecting a container shows its
+  // environment, so that would be every company's secrets.
   expect(
-    (await dockerApi('GET', '/containers/json')).out.includes(' 200'),
-    "Traefik can't list containers through its proxy, so it can't find routes",
+    !(await inspect('traefik', '{{json .Mounts}}')).includes('docker.sock'),
+    'Traefik has the Docker socket mounted',
   );
-  for (const [method, path] of [
-    ['POST', '/containers/create'],
-    ['GET', '/images/json'],
-    ['GET', '/volumes'],
-    ['GET', '/secrets'],
-  ]) {
+  expect(
+    (await exec('traefik', 'test ! -e /var/run/docker.sock')).code === 0,
+    'Traefik still has the Docker socket',
+  );
+  expect(
+    !(await inspect('traefik', '{{json .Config.Env}}')).includes('DOCKER_HOST'),
+    'Traefik is told where Docker is',
+  );
+  expect(
+    (await exec('traefik', 'nc -z -w2 docker-socket-proxy 2375')).code !== 0,
+    'Traefik can reach a Docker socket proxy',
+  );
+  for (const port of [2375, 2376]) {
     expect(
-      !(await dockerApi(method, path)).out.includes(' 200'),
-      `Traefik can ${method} ${path} through its proxy`,
+      (await exec('traefik', `nc -z -w2 "$(ip route | awk '/^default/{print $3}')" ${port}`))
+        .code !== 0,
+      `Traefik can reach the Docker API on its host, on ${port}`,
     );
   }
   expect(
-    (await exec('traefik', 'test ! -S /var/run/docker.sock')).code === 0,
-    'Traefik still has the Docker socket',
+    (await run('docker', ['inspect', `${project}-docker-socket-proxy-1`])).code !== 0,
+    'the old Docker socket proxy is still here',
   );
+  // Its routes are what console-api and the file gave it, and none came from Docker.
+  const routers = (await exec('traefik', 'wget -qO- http://127.0.0.1:8080/api/http/routers')).out;
+  expect(!routers.includes('@docker'), 'Traefik still has a route from Docker');
+  expect(routers.includes('keycloak@file'), "Traefik doesn't have the login route from its file");
+  for (const t of ctx.config.tenants) {
+    expect(
+      routers.includes(`${t.slug}@http`),
+      `Traefik has no route to ${t.slug} from console-api`,
+    );
+  }
+
+  // Every company's host and allowlist, from console-api: not by its public address.
+  const internal = await exec(
+    'traefik',
+    `wget -qO- --no-check-certificate --header 'Host: console.${base}' https://127.0.0.1/internal/traefik 2>/dev/null`,
+  );
+  expect(!internal.out.includes('ipallow'), 'the routes can be read through the public address');
+  const consoleApiIps = (
+    await inspect('console-api', '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}')
+  )
+    .split(/\s+/)
+    .filter(Boolean);
+  expect(consoleApiIps.length > 0, 'console-api has no address, so the check of it proves nothing');
 
   for (const [a, b] of tenantPairs(ctx.config.tenants)) {
     const pair = `${a.slug} → ${b.slug}`;
@@ -126,6 +155,21 @@ export async function checkIsolation(ctx, helpers) {
     ]) {
       expect(!(await reachable(a, target)), `${a.slug}'s LibreChat can reach ${target}`);
     }
+
+    // The routes of every company: console-api even by address, and Traefik's own port, which
+    // is on this company's network. Its public port shows that port's answer means something.
+    for (const ip of consoleApiIps) {
+      expect(!(await reachable(a, `${ip}:8081`)), `${a.slug}'s LibreChat can reach console-api`);
+    }
+    const traefikIp = await inspect(
+      'traefik',
+      `{{(index .NetworkSettings.Networks "${project}_t_${a.slug}").IPAddress}}`,
+    );
+    expect(await reachable(a, `${traefikIp}:443`), `${a.slug} can't reach Traefik, which it needs`);
+    expect(
+      !(await reachable(a, `${traefikIp}:8080`)),
+      `${a.slug}'s LibreChat can read Traefik's API and metrics, with every company's host`,
+    );
 
     // Mongo: a's login works on its own database and not on b's.
     const mongo = (db) =>

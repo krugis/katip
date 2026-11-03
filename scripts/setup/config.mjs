@@ -10,7 +10,6 @@ const ENV_PATH = join(INFRA, 'env', 'katip.env');
 
 const PINNED_IMAGES = [
   'traefik',
-  'socket_proxy',
   'postgres',
   'keycloak',
   'mongodb',

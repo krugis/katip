@@ -44,7 +44,6 @@ identity:
 # ------------------------------------------------------------------------------
 images:
   traefik: traefik:v3.7.17
-  socket_proxy: tecnativa/docker-socket-proxy:v0.4.1
   postgres: pgvector/pgvector:0.8.7-pg16-trixie
   keycloak: quay.io/keycloak/keycloak:26.8.1
   mongodb: mongo:7.0.16

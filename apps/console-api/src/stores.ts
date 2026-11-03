@@ -265,8 +265,8 @@ export interface ConsoleStore {
     actor: Actor,
     applyIdentity: () => Promise<void>,
   ): Promise<AccessRulesView>;
-  /** Every company's allowlist, for Traefik. */
-  allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
+  /** The companies Traefik should route to, the active ones, with their allowlists. */
+  routedTenants(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
   policy(tenantId: string): Promise<PolicyView | null>;
   chatRetention(tenantId: string): Promise<number | null>;
   saveChatRetention(tenantId: string, months: number, actor: Actor): Promise<number | null>;
@@ -1553,8 +1553,8 @@ export class DbConsoleStore implements ConsoleStore {
     });
   }
 
-  async allIpAllowlists(): Promise<{ slug: string; ipAllowlist: string[] }[]> {
-    const tenants = await this.listTenants();
+  async routedTenants(): Promise<{ slug: string; ipAllowlist: string[] }[]> {
+    const tenants = (await this.listTenants()).filter((t) => t.status === 'active');
     // One at a time: row-level security gives this role one company's rows at a time.
     const out: { slug: string; ipAllowlist: string[] }[] = [];
     for (const tenant of tenants) {

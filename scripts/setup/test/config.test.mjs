@@ -320,7 +320,96 @@ describe('tenants', () => {
   it('keeps LibreChat off the shared networks', () => {
     const compose = read('compose', 'tenant.tmpl.yml');
     expect(compose).not.toMatch(/^\s+- (edge|backend)$/m);
-    expect(compose).toContain('traefik.docker.network=${KATIP_COMPOSE_PROJECT}_t_${KATIP_SLUG}');
+  });
+
+  describe('Traefik and Docker', () => {
+    const composeFiles = ['platform.yml', 'dev.yml', 'tenant.tmpl.yml'].map((f) => [f]);
+    const traefikService = () => parseYaml(read('compose', 'platform.yml')).services.traefik;
+
+    it.each(composeFiles)('%s gives no service the socket, a proxy or a label', (file) => {
+      const compose = read('compose', file);
+      expect(compose).not.toContain('docker.sock');
+      expect(compose).not.toContain('docker-socket');
+      expect(compose).not.toMatch(/traefik\.(enable|docker|http|tcp)/);
+      expect(compose).not.toMatch(/^\s+labels:/m);
+    });
+
+    it('leaves Traefik on the edge network only, with nothing to wait for', () => {
+      const traefik = traefikService();
+      expect(traefik.networks).toEqual(['edge']);
+      expect(traefik.depends_on).toBeUndefined();
+      expect(traefik.volumes.join()).not.toContain('sock');
+    });
+
+    it.each([['traefik.yml'], ['traefik.dev.yml']])('%s reads no Docker', (file) => {
+      const providers = parseYaml(read('traefik', file)).providers;
+      expect(Object.keys(providers).sort()).toEqual(['file', 'http']);
+      expect(providers.http.endpoint).toBe('http://console-api:8081/internal/traefik');
+    });
+
+    it.each([['traefik.yml'], ['traefik.dev.yml']])(
+      "%s keeps Traefik's API and metrics off the companies' networks",
+      (file) => {
+        expect(parseYaml(read('traefik', file)).entryPoints.traefik.address).toBe('127.0.0.1:8080');
+      },
+    );
+
+    it('publishes only 80 and 443', () => {
+      expect(traefikService().ports).toEqual(['80:80', '443:443']);
+      expect(read('compose', 'dev.yml')).not.toContain(':8080:');
+    });
+
+    it('routes the platform from a file, as its labels did', () => {
+      const { routers, services } = parseYaml(read('traefik', 'dynamic/routes.yml')).http;
+      const host = (name) => `Host(\`${name}.{{ env "KATIP_BASE_DOMAIN" }}\`)`;
+      expect(routers).toEqual({
+        keycloak: {
+          rule: host('auth'),
+          entryPoints: ['websecure'],
+          tls: expect.anything(),
+          service: 'keycloak',
+        },
+        mailpit: {
+          rule: host('mailpit'),
+          entryPoints: ['websecure'],
+          tls: expect.anything(),
+          service: 'mailpit',
+        },
+        console: {
+          rule: host('console'),
+          entryPoints: ['websecure'],
+          tls: expect.anything(),
+          middlewares: ['secure-headers@file'],
+          service: 'console',
+        },
+        'console-api': {
+          rule: `${host('console')} && PathPrefix(\`/api\`)`,
+          entryPoints: ['websecure'],
+          tls: expect.anything(),
+          middlewares: ['secure-headers@file'],
+          service: 'console-api',
+        },
+      });
+      const urls = Object.values(services).map((s) => s.loadBalancer.servers[0].url);
+      expect(urls.sort()).toEqual([
+        'http://console-api:8081',
+        'http://console:8080',
+        'http://keycloak:8080',
+        'http://mailpit:8025',
+      ]);
+    });
+
+    it('tells Traefik and console-api the domain', () => {
+      expect(traefikService().environment.KATIP_BASE_DOMAIN).toContain('KATIP_BASE_DOMAIN');
+      expect(
+        parseYaml(read('compose', 'dev.yml')).services['console-api'].environment.BASE_DOMAIN,
+      ).toContain('KATIP_BASE_DOMAIN');
+    });
+
+    it('has no image pin left for the proxy', () => {
+      expect(config.images.socket_proxy).toBeUndefined();
+      expect(composeEnv(config).KATIP_IMAGE_SOCKET_PROXY).toBeUndefined();
+    });
   });
 
   it('protects Valkey with a password', () => {

@@ -41,9 +41,8 @@ Each step is idempotent, checks for existing state, and records progress in the 
    - `infra/env/tenants/<slug>.rag.env`, for the RAG API, and `<slug>.ragdb.env`, holding only its database's password;
    - `infra/librechat/rendered/<slug>.librechat.yaml` from `librechat.tmpl.yaml`, with endpoints (LLD-03 §1.2), interface settings, the MCP servers enabled by plan, and the file upload limits of the plan;
    - `infra/compose/tenants/<slug>.yml` from `tenant.tmpl.yml`;
-   - Traefik middleware `<slug>-ipallow` from `access_rules`.
 9. **Cloudflare:** DNS record `<slug>.<domain>` (proxied) and the WAF country rule (API token with limited zone scope).
-10. **Start:** `docker compose -p <project>-<slug> -f tenants/<slug>.yml up -d`. Wait for `GET /health` (verify the LibreChat health route), timeout 180 s.
+10. **Start:** `docker compose -p <project>-<slug> -f tenants/<slug>.yml up -d`. The route and `<slug>-ipallow` come from `console-api` once the tenant is active, within about 5 s (LLD-01 §2.2a). Wait for `GET /health` (verify the LibreChat health route), timeout 180 s.
 11. **Smoke test:**
     - OIDC discovery reachable;
     - the gateway accepts the tenant's key, and once the admin exists serves them `/v1/models`. A real chat call waits until the gateway can count a system event without billing it. `dev:up` runs a full login and chat for its own tenants.
@@ -57,7 +56,7 @@ Rollback: if a tenant's first attempt fails before the invite, everything it mad
 
 | Command | What happens | Data |
 | --- | --- | --- |
-| `tenant:suspend` | Status `suspended`, containers stopped. The gateway refuses it within a minute, its key cache being 60 s | Kept |
+| `tenant:suspend` | Status `suspended`, containers stopped. Its route goes within about 5 s. The gateway refuses it within a minute, its key cache being 60 s | Kept |
 | `tenant:resume` | Status `active`, containers started, smoke test. Also restores a deleted tenant until its purge starts | Kept |
 | `tenant:delete --confirm <slug>` | Status `deleted`, containers stopped, a `tenant.purge` job due in 30 days. Refuses a tenant listed in the config | Kept for the 30 days |
 | `tenant:purge-due` | Runs the purges whose wait is over | See below |

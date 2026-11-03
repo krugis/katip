@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A company's access rules (LLD-02 §6, tracker P1-28). Traefik polls the allowlists from
-// here. If it can't load them when it starts, the company's route answers 404 rather than
-// opening up.
+// A company's access rules (LLD-02 §6, tracker P1-28), and its route (LLD-01 §2.2). Traefik
+// polls both from here, in one document, so a route can't open before its allowlist. If it
+// can't load them when it starts, the company's host answers 404 rather than opening up.
 import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { Errors } from '@katip/shared';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -73,21 +73,69 @@ const actorOf = (caller: Caller): Actor =>
     ? { type: 'provider', id: caller.sub }
     : { type: 'user', id: caller.user.id };
 
-/** What Traefik's HTTP provider reads. An empty allowlist lets everyone through. */
-export const traefikConfig = (rules: { slug: string; ipAllowlist: string[] }[]) => ({
+/** The platform's own hosts (infra/traefik/dynamic/routes.yml), which no company may take. */
+const PLATFORM_HOSTS = ['auth', 'console', 'mailpit'];
+
+/** A slug goes into a router rule and a container's name, so nothing else may get there. */
+export const routableSlug = (slug: string): boolean =>
+  /^[a-z0-9-]{3,32}$/.test(slug) && !PLATFORM_HOSTS.includes(slug);
+
+interface TenantRoute {
+  rule: string;
+  entryPoints: string[];
+  tls: object;
+  middlewares: string[];
+  service: string;
+}
+interface TenantService {
+  loadBalancer: { servers: { url: string }[] };
+}
+interface IpAllow {
+  ipAllowList: { sourceRange: string[] };
+}
+export interface TraefikConfig {
   http: {
-    middlewares: Object.fromEntries(
-      rules.map(({ slug, ipAllowlist }) => [
-        `${slug}-ipallow`,
-        {
-          ipAllowList: {
-            sourceRange: ipAllowlist.length > 0 ? ipAllowlist : ['0.0.0.0/0', '::/0'],
-          },
-        },
-      ]),
-    ),
-  },
-});
+    routers?: Record<string, TenantRoute>;
+    services?: Record<string, TenantService>;
+    middlewares: Record<string, IpAllow>;
+  };
+}
+
+/**
+ * What Traefik's HTTP provider reads: one router, service and allowlist per company given, so
+ * pass only those that should be open. An empty allowlist lets everyone through. No labels:
+ * Traefik reaches `lc-<slug>` by name, over the company's own network.
+ *
+ * With no companies, it must still change what Traefik has, or the last company's route would
+ * stay open after it's suspended. Traefik ignores an empty answer and refuses an empty
+ * `routers` or `services`, keeping the last one either way. So those are left out, and a
+ * middleware nothing uses stays in.
+ */
+export const traefikConfig = (
+  rules: { slug: string; ipAllowlist: string[] }[],
+  baseDomain: string,
+): TraefikConfig => {
+  const routed = rules.filter(({ slug }) => routableSlug(slug));
+  const middlewares: Record<string, IpAllow> = {
+    'never-empty': { ipAllowList: { sourceRange: ['127.0.0.1/32'] } },
+  };
+  const routers: Record<string, TenantRoute> = {};
+  const services: Record<string, TenantService> = {};
+  for (const { slug, ipAllowlist } of routed) {
+    routers[slug] = {
+      rule: `Host(\`${slug}.${baseDomain}\`)`,
+      entryPoints: ['websecure'],
+      tls: {},
+      middlewares: [`${slug}-ipallow@http`, 'ratelimit-user@file', 'secure-headers@file'],
+      service: slug,
+    };
+    services[slug] = { loadBalancer: { servers: [{ url: `http://lc-${slug}:3080` }] } };
+    middlewares[`${slug}-ipallow`] = {
+      ipAllowList: { sourceRange: ipAllowlist.length > 0 ? ipAllowlist : ['0.0.0.0/0', '::/0'] },
+    };
+  }
+  return { http: routed.length > 0 ? { routers, services, middlewares } : { middlewares } };
+};
 
 export function registerAccessRoutes(
   parent: FastifyInstance,
@@ -95,15 +143,21 @@ export function registerAccessRoutes(
   identity: IdentityClient,
   prefix: string,
   callerOf: (req: FastifyRequest) => Caller,
+  baseDomain: string,
 ): void {
   const app = parent.withTypeProvider<ZodTypeProvider>();
   const access = { roles: ['tenant_admin'], tenantParam: 'tid' } as const;
   const Response = RulesSchema.extend({ mfaRequired: z.boolean(), callerIp: z.string() });
 
-  // Outside /api: Traefik's public route only forwards /api here, and this holds no secrets.
-  app.get('/internal/traefik', { schema: { hide: true } }, async () =>
-    traefikConfig(await store.allIpAllowlists()),
-  );
+  // Outside /api: Traefik's public route only forwards /api here. It holds no secrets, but it
+  // does list every company's host and allowlist, so a LibreChat must not reach this port
+  // (isolation.mjs). If this fails, Traefik keeps the last answer it had.
+  app.get('/internal/traefik', { schema: { hide: true } }, async (req) => {
+    const tenants = await store.routedTenants();
+    const refused = tenants.filter(({ slug }) => !routableSlug(slug)).length;
+    if (refused > 0) req.log.warn({ refused }, 'companies with no route: slug is not usable');
+    return traefikConfig(tenants, baseDomain);
+  });
 
   app.get(
     `${prefix}/tenants/:tid/access-rules`,

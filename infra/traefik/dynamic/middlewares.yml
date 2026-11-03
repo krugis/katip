@@ -1,5 +1,5 @@
-# Dynamic middlewares referenced by routers (LLD-01 §2.2). Each company's IP allowlist
-# comes from console-api, over Traefik's HTTP provider (LLD-02 §6).
+# Dynamic middlewares referenced by routers (LLD-01 §2.2). Each company's route and IP
+# allowlist come from console-api, over Traefik's HTTP provider (LLD-02 §6).
 
 http:
   middlewares:
