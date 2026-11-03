@@ -47,6 +47,7 @@ const ConfigSchema = z.object({
     'deletion-finish',
     'daily-retention',
     'daily-record',
+    'fx-store',
   ]),
   TENANT_INPUT: z.string().min(1),
   /** Only for the stages that set a tenant up. */
@@ -134,6 +135,18 @@ try {
     'deletion-lookup': () => deletionLookup(forgetDeps, slug, requestOf()),
     'deletion-finish': () => finishDeletion(forgetDeps, slug, requestOf()),
     'daily-retention': () => store.enforceRetention(),
+    'fx-store': async () => ({
+      added: await store.saveFxRate(
+        z
+          .object({
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            currency: z.literal('USD'),
+            buying: z.string().regex(/^\d+\.\d+$/),
+            selling: z.string().regex(/^\d+\.\d+$/),
+          })
+          .parse(input),
+      ),
+    }),
     'daily-record': () =>
       store.recordDailyRun(
         z
@@ -143,6 +156,7 @@ try {
             failed: z.number(),
             expiredUsage: z.number(),
             expiredAudit: z.number(),
+            fxDate: z.string().nullable(),
           })
           .parse(input),
       ),

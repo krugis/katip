@@ -12,6 +12,13 @@ import type { TenantInput } from './provision.js';
 const DEFAULT_COUNTRIES =
   'TR AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE'.split(' ');
 
+export interface FxRate {
+  date: string;
+  currency: string;
+  buying: string;
+  selling: string;
+}
+
 export interface PurgeJob {
   jobId: string;
   status: string;
@@ -43,6 +50,7 @@ export interface ProvisionerStore {
   markPurgeRunning(jobId: string): Promise<void>;
   duePurges(now: Date): Promise<string[]>;
   anonymiseTenant(tenantId: string): Promise<void>;
+  saveFxRate(rate: FxRate): Promise<boolean>;
   enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }>;
   recordDailyRun(details: Record<string, unknown>): Promise<void>;
   deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
@@ -393,6 +401,21 @@ export class DbProvisionerStore implements ProvisionerStore {
       usageDaily: Number(row['expired_usage_daily']),
       audit: Number(row['expired_audit']),
     };
+  }
+
+  /** False if that date already has a rate: an invoice may rely on it, so it stays. */
+  async saveFxRate(rate: FxRate): Promise<boolean> {
+    const added = await this.db
+      .insert(schema.fxRates)
+      .values({
+        rateDate: rate.date,
+        currency: rate.currency,
+        buying: rate.buying,
+        selling: rate.selling,
+      })
+      .onConflictDoNothing()
+      .returning({ date: schema.fxRates.rateDate });
+    return added.length > 0;
   }
 
   async recordDailyRun(details: Record<string, unknown>): Promise<void> {

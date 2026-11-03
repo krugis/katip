@@ -89,7 +89,7 @@ The purge has two stages so a resume can't race it: once it starts, a tenant can
 
 ## 2c. The daily job (P1-65)
 
-`pnpm tenant:daily` carries out approved deletions, runs the purges that are due, and removes data past its retention period (LLD-10 §8): usage after 24 months, audit entries after 5 years. **The schedule is off by default.** Until someone sets `jobs.daily_at` in the config, nothing runs it and someone has to run the command. When it's set, `dev:up` adds one line to this user's crontab, and rollback takes it out. It needs Docker on the host, which is why it isn't in a container. Each part is safe to repeat, and one failing doesn't stop the rest.
+`pnpm tenant:daily` carries out approved deletions, runs the purges that are due, removes data past its retention period (LLD-10 §8), that is usage after 24 months and audit entries after 5 years, and stores the central bank's USD rate. **The schedule is off by default.** Until someone sets `jobs.daily_at` in the config, nothing runs it and someone has to run the command. When it's set, `dev:up` adds one line to this user's crontab, and rollback takes it out. It needs Docker on the host, which is why it isn't in a container. Each part is safe to repeat, and one failing doesn't stop the rest.
 
 Each run is recorded in the audit log, and the provider console's company list says if the job failed, has never run, or hasn't run for 26 hours. **That's a notice on a screen someone has to look at.** A phone alert needs monitoring (P1-43). A machine that's off at that time, such as WSL, runs nothing until the next day, when everything still due is picked up.
 

@@ -117,7 +117,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-37 | `billing-bridge`: hourly usage → Lago events (idempotent); seat sync | 06 | P0 | todo | P1-36, P1-14 | Replay doesn't double-bill | |
 | P1-38 | `EInvoiceProvider` interface + manual mode (+ provider adapter when decided) | 06 | P1 | blocked | e-Fatura decision | Draft PDF in TRY with FX rate | Manual mode can ship first |
 | P1-39 | Payment adapter (iyzico / PayTR) + dunning | 06 | P1 | blocked | payment decision | Recurring charge in sandbox | |
-| P1-40 | TCMB FX rate daily job (`fx_rates`) | 06 | P1 | todo | P1-17 | Rate stored daily; alert if missing | |
+| P1-40 | TCMB FX rate daily job (`fx_rates`) | 06 | P1 | review | P1-17 | Rate stored daily; alert if missing | In `pnpm tenant:daily`, so it depends on that being scheduled (P1-65). A failure shows on the provider console; a phone alert needs P1-43. Which rate fits which invoice date is for the accountant |
 | P1-41 | Budget threshold alerts (50/80/100%): email + console banner | 03, 06 | P0 | done | P1-09 | One alert per threshold per month | A company's tokens. Department budgets wait for a customer price (P1-37). Needs a real email sender to reach anyone in production |
 | P1-42 | Backups: wal-g/pg_dump, mongodump per tenant, restic → Storage Box; monthly restore test | 10 | P0 | todo | P0-09 | Restore test passes; alert if skipped | |
 | P1-43 | Monitoring: Prometheus, Grafana, Loki, exporters, alert rules (LLD-10 §5) | 10 | P0 | todo | P0-09 | Alerts reach phone in test | Must alert on the gateway's `pii_detector_failed` log event (P1-11); until then it is only an error log |
