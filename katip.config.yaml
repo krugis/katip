@@ -44,7 +44,7 @@ identity:
 #   daily_at: '03:30'
 
 # ------------------------------------------------------------------------------
-# Deploys (P1-71). `pnpm run deploy` keeps this many copies of the databases in
+# Deploys (P1-71). `pnpm dev:deploy` keeps this many copies of the databases in
 # .katip/backups/, and the images tagged with them. They sit on this disk: they are
 # a way back from a bad deploy, not the off-site backup of P1-42. Default 5.
 # ------------------------------------------------------------------------------

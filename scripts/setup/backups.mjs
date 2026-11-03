@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The copy `pnpm run deploy` takes before it migrates anything, and putting it back (P1-71).
+// The copy `pnpm dev:deploy` takes before it migrates anything, and putting it back (P1-71).
 // It sits on the same disk as the data, so it's a way back from a bad deploy and nothing more:
 // it isn't the off-site backup of P1-42. No password goes on a command line: the containers
 // expand their own, as `mongoshEval` in apps/console/e2e/run.mjs does.

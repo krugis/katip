@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// `pnpm run deploy` and `pnpm deploy:back` (P1-71). Everything that touches git or Docker comes
+// `pnpm dev:deploy` and `pnpm dev:deploy-back` (P1-71). Everything that touches git or Docker comes
 // in through `sys`, so the order of things and every refusal can be tested with fakes.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -276,7 +276,7 @@ export async function runDeploy(sys, { config, stateDir, root }) {
     entry.status = 'failed';
     saveDeploys(stateDir, [...deploys, entry]);
     sys.printError(`Deploy of ${short(commit)} failed. The log is under .katip/logs/.`);
-    sys.printError('To go back: pnpm deploy:back (add --restore-data if a migration ran).');
+    sys.printError('To go back: pnpm dev:deploy-back (add --restore-data if a migration ran).');
     return code;
   }
   entry.status = 'ok';
@@ -322,7 +322,7 @@ export function decideBack({ undo, pins, restoreData, yes, interactive, project 
   if (needs.length > 0 && !restoreData) {
     return {
       action: 'refuse',
-      message: `Refusing to go back on images alone: ${needs.join('; ')}. This needs the database restore: pnpm deploy:back --restore-data. It loses everything written since the backup. Nothing was changed.`,
+      message: `Refusing to go back on images alone: ${needs.join('; ')}. This needs the database restore: pnpm dev:deploy-back --restore-data. It loses everything written since the backup. Nothing was changed.`,
     };
   }
   if (restoreData) {
@@ -510,7 +510,7 @@ export async function runBack(sys, { config, stateDir, root, restoreData, yes, i
     sys.printError(
       'The images and data are back, but the stack did not come up or failed its checks.',
     );
-    sys.printError('Read .katip/logs/, then run pnpm deploy:back again.');
+    sys.printError('Read .katip/logs/, then run pnpm dev:deploy-back again.');
     return code;
   }
   const updated = deploys.map((d) => (d.id === cur.id ? { ...d, rolledBack: true } : d));

@@ -1,6 +1,6 @@
 # Runbook: deploy
 
-**Tested:** `pnpm run deploy` with fakes for git and Docker (`pnpm test:setup`), and its dump and restore commands against throwaway containers (`pnpm test:backup`). **It has not been run against a real stack, or real data.** The rest of this page is written from the scripts, not rehearsed.
+**Tested:** `pnpm dev:deploy` with fakes for git and Docker (`pnpm test:setup`), and its dump and restore commands against throwaway containers (`pnpm test:backup`). **It has not been run against a real stack, or real data.** The rest of this page is written from the scripts, not rehearsed.
 **Applies to:** the dev stack on WSL. Production does not exist yet.
 
 ## What a deploy is today
@@ -9,7 +9,7 @@ There are three commands, and they cover different parts.
 
 | Command                          | Covers                                                                                  |
 | -------------------------------- | --------------------------------------------------------------------------------------- |
-| `pnpm run deploy`                | A new version of our code: backs up, keeps the old images, rebuilds, migrates, checks. **Use this one** |
+| `pnpm dev:deploy`                | A new version of our code: backs up, keeps the old images, rebuilds, migrates, checks. **Use this one** |
 | `pnpm dev:up`                    | The platform: Traefik, Postgres, Keycloak, Mongo, Valkey, Mailpit, LiteLLM, Presidio, policy gateway, console, console API, identity service. Also creates and starts the tenants listed in `katip.config.yaml` |
 | `pnpm tenant:upgrade --slug X` or `--all` | Only the companies' stacks: LibreChat, Meilisearch, RAG API, vector database |
 
@@ -23,18 +23,18 @@ Traefik has no access to Docker. The platform's routes are in `infra/traefik/dyn
 
 ## Deploy a new version of our code
 
-**Type `pnpm run deploy`.** `pnpm deploy` without `run` is pnpm's own command for copying a workspace package, and it never reaches our script. (`pnpm deploy:back` doesn't have this problem.)
+**Type `pnpm dev:deploy`.** `pnpm deploy` without `run` is pnpm's own command for copying a workspace package, and it never reaches our script. (`pnpm dev:deploy-back` doesn't have this problem.)
 
 1. Check the stack is healthy now: `pnpm dev:status`. If it is already broken, fix that first.
 2. Update the code: `git pull` (or `git checkout <tag>`), then `pnpm install --frozen-lockfile`.
-3. `pnpm run deploy`. It does these, in this order:
+3. `pnpm dev:deploy`. It does these, in this order:
 
 | Step | What happens | If it fails |
 | ---- | ------------ | ----------- |
 | 1 | Refuses if the git tree has uncommitted changes, untracked files included. Says which commit it's deploying. HEAD is what gets deployed: it doesn't pull | Nothing changed |
 | 2 | Dumps the governance database and each company's Mongo database to `.katip/backups/<timestamp>-<sha>/` (mode 700), and checks them | Nothing changed. It needs the stack running: start it with `pnpm dev:up` |
 | 3 | Tags the running images with the commit they came from (`:deploy-<sha>`), so the rebuild can't take them away | Nothing rebuilt |
-| 4 | `dev:up --redo=config,build,governance-db,aiplane,tenant,smoke,isolation` | The new version may be part-way in. `pnpm deploy:back`, see [rollback.md](rollback.md) |
+| 4 | `dev:up --redo=config,build,governance-db,aiplane,tenant,smoke,isolation` | The new version may be part-way in. `pnpm dev:deploy-back`, see [rollback.md](rollback.md) |
 | 5 | Records it in `.katip/deploys.json`, and prunes old copies and their image tags | |
 
 Expect a short outage: containers are recreated.
@@ -57,13 +57,13 @@ Ctrl+C during the rebuild reaches `dev:up`, which asks keep or rollback. Answer 
 - It holds the governance database and each company's Mongo database, nothing else. Keycloak, uploads, vectors and secrets aren't in it. For those, see [restore.md](restore.md), "Take a copy by hand".
 - It holds personal data. Directories are mode 700 and files 600. Don't copy it anywhere casual.
 - **It keeps deleted people's chats until it's pruned.** LLD-10 §8 has rules for backups, and this counts.
-- It keeps the last 5, deploys and `deploy:back` copies together. To change that, set `deploy.keep_backups` in `katip.config.yaml`. The copy of the latest deploy is never pruned.
+- It keeps the last 5, deploys and `dev:deploy-back` copies together. To change that, set `deploy.keep_backups` in `katip.config.yaml`. The copy of the latest deploy is never pruned.
 - It's taken while the stack is running. `pg_dump` is consistent. Each company's `mongodump` is not a point-in-time snapshot if people are writing during it.
 - "Checked" means the Postgres dump lists a `tenants` table through `pg_restore -l`, and each Mongo archive decompresses whole and lists its collections through `mongorestore --dryRun`. No restore happens at deploy time, so it can't prove every document is there. `pnpm test:backup` runs a real restore, but only on made-up data.
 
 ### The first deploy
 
-Nothing says which commit the running images came from, so they're tagged `:deploy-unknown-<timestamp>`. Image pins of the earlier version aren't known either. `pnpm deploy:back` can still restore those images, but it can't check out the older compose files: it stays on the current ones, and says so. Note the commit yourself before the first one. The same happens if someone ran `dev:up --redo=build` since the last deploy, as the record no longer matches what's running.
+Nothing says which commit the running images came from, so they're tagged `:deploy-unknown-<timestamp>`. Image pins of the earlier version aren't known either. `pnpm dev:deploy-back` can still restore those images, but it can't check out the older compose files: it stays on the current ones, and says so. Note the commit yourself before the first one. The same happens if someone ran `dev:up --redo=build` since the last deploy, as the record no longer matches what's running.
 
 ### Without the deploy command
 
@@ -78,7 +78,7 @@ Changing `project.name` or removing a tenant from the config is refused while th
 ## Roll out a new LibreChat, Meilisearch or RAG API version
 
 1. Change the pinned image in `katip.config.yaml` (`images.librechat`, `images.meilisearch`, `images.rag_api`, `images.postgres`). Never use `latest`.
-2. Take a Mongo copy of each company first ([restore.md](restore.md)). `tenant:upgrade` doesn't take one; `pnpm run deploy` does, and rolls out to all companies at once. To try one company first, use these steps.
+2. Take a Mongo copy of each company first ([restore.md](restore.md)). `tenant:upgrade` doesn't take one; `pnpm dev:deploy` does, and rolls out to all companies at once. To try one company first, use these steps.
 3. Try one company: `pnpm tenant:upgrade --slug acme`. It renders the files, pulls the image, recreates the containers and runs the smoke check.
 4. If it passes, run `pnpm tenant:upgrade --all`. It goes one company at a time and stops at the first failure. The ones before it are upgraded; the ones after it are untouched. The message says which.
 
@@ -88,7 +88,7 @@ A chat image uploaded by a person is kept inside the LibreChat container, not on
 
 ## How to check it worked
 
-1. `pnpm run deploy` ended with "Deployed", after `dev:up` ended with "Kâtip dev stack is up." The `smoke` and `isolation` steps passed. This is the main check.
+1. `pnpm dev:deploy` ended with "Deployed", after `dev:up` ended with "Kâtip dev stack is up." The `smoke` and `isolation` steps passed. This is the main check.
 2. `pnpm dev:status` shows every step done and every container healthy.
 3. Gateway ready: `docker exec katip-policy-gateway-1 wget -qO- http://127.0.0.1:8080/readyz` should print `"ok"`.
 4. Open `https://console.localhost` and one company, for example `https://demo.localhost`. Log in.
@@ -101,7 +101,7 @@ A chat image uploaded by a person is kept inside the LibreChat container, not on
 - A pull failure is usually network. A build failure is in the log.
 - A `governance-db` failure with a password error: someone changed a database password in `katip.env` without changing it in Postgres. See [secret-rotation.md](secret-rotation.md).
 - **If you press Ctrl+C during `dev:up`, it asks keep or rollback. Answer `k`.** `r` shows what it would delete and asks, and then deletes everything ([rollback.md](rollback.md)). Stopping this way now exits with 130, not 0.
-- Still broken after one retry: `pnpm deploy:back`. See [rollback.md](rollback.md), "Going back a version". Do not use `dev:rollback`.
+- Still broken after one retry: `pnpm dev:deploy-back`. See [rollback.md](rollback.md), "Going back a version". Do not use `dev:rollback`.
 
 ## Stop and start
 
@@ -110,7 +110,7 @@ A chat image uploaded by a person is kept inside the LibreChat container, not on
 
 ## What will change for production
 
-- There is no host (P0-09), so there is nothing to deploy to. Images will need versioned tags and a registry. Today they are `:dev` and built on the same machine. `pnpm run deploy` keeps the previous ones under a tag, on this machine only.
+- There is no host (P0-09), so there is nothing to deploy to. Images will need versioned tags and a registry. Today they are `:dev` and built on the same machine. `pnpm dev:deploy` keeps the previous ones under a tag, on this machine only.
 - Secrets will be SOPS-encrypted (P0-22). Today `katip.env` is plaintext.
 - `dev.yml` (mock model, dev certificates, host ports) will not be used. A production profile does not exist yet.
 - Edge: Cloudflare and Traefik with origin certificates (P1-44). Not built.

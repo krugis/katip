@@ -276,7 +276,7 @@ describe('runDeploy', () => {
     const sys = machine(root, { upCode: 130 });
     expect(await runDeploy(sys, where())).toBe(130);
     expect(loadDeploys(stateDir)[0].status).toBe('failed');
-    expect(errors(sys)).toContain('pnpm deploy:back');
+    expect(errors(sys)).toContain('pnpm dev:deploy-back');
   });
 
   it('tags by commit when an earlier deploy says which one is running', async () => {

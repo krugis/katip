@@ -1,6 +1,6 @@
 # Runbook: rollback
 
-**Tested:** the checks, with fakes for Docker and the database (`pnpm test:setup`). The dump and restore commands, against throwaway containers of the pinned images (`pnpm test:backup`). **Neither `pnpm dev:rollback` nor `pnpm deploy:back` has been run against a real stack, or against real data.**
+**Tested:** the checks, with fakes for Docker and the database (`pnpm test:setup`). The dump and restore commands, against throwaway containers of the pinned images (`pnpm test:backup`). **Neither `pnpm dev:rollback` nor `pnpm dev:deploy-back` has been run against a real stack, or against real data.**
 **Applies to:** the dev stack on WSL. Production does not exist yet.
 
 ## Do not confuse these two
@@ -9,7 +9,7 @@
 | -------------------- | ------------------------------------------ | -------------------------------------------- |
 | What it is           | Run the older code again                   | **Tear down the whole install**              |
 | Data                 | Kept (but see "database changes" below)    | **Deleted**                                  |
-| Use it for a bad deploy? | Yes: `pnpm deploy:back`                 | **No. Never.**                               |
+| Use it for a bad deploy? | Yes: `pnpm dev:deploy-back`                 | **No. Never.**                               |
 
 The name `dev:rollback` is misleading. It is not "go back one version". It undoes the bootstrap: it is the uninstall.
 
@@ -67,11 +67,11 @@ Use it only on an install you want to throw away. If you are unsure, do not run 
 
 ## Going back a version
 
-Use this after a bad deploy ([deploy.md](deploy.md)). `pnpm run deploy` kept what's needed.
+Use this after a bad deploy ([deploy.md](deploy.md)). `pnpm dev:deploy` kept what's needed.
 
 ```
-pnpm deploy:back                  # the images from before the last deploy; the data stays
-pnpm deploy:back --restore-data   # and the database copy from before it
+pnpm dev:deploy-back                  # the images from before the last deploy; the data stays
+pnpm dev:deploy-back --restore-data   # and the database copy from before it
 ```
 
 It prints where it's going from and to, the images, which migrations differ and which image pins change, then asks. `--yes` skips the question for images alone. Nothing skips it for `--restore-data`, and without a terminal that's refused. It then:
@@ -81,13 +81,13 @@ It prints where it's going from and to, the images, which migrations differ and 
 3. Tags the kept images back as `:dev`. Checks out the earlier commit with a detached HEAD, so the compose files and pins match the images.
 4. Runs `dev:up --redo=config,governance-db,aiplane,tenant,smoke,isolation --skip=build,images`. Nothing is built or pulled. The `smoke` and `isolation` steps are the check.
 
-A deploy that stopped at its backup or its tagging changed nothing, so it isn't gone back from. Running `pnpm deploy:back` again after a success goes one deploy further back. If it fails part-way, fix the cause and run it again: it goes to the same place.
+A deploy that stopped at its backup or its tagging changed nothing, so it isn't gone back from. Running `pnpm dev:deploy-back` again after a success goes one deploy further back. If it fails part-way, fix the cause and run it again: it goes to the same place.
 
-Afterwards you're on a detached HEAD. Check out a branch with the fix before the next `pnpm run deploy`.
+Afterwards you're on a detached HEAD. Check out a branch with the fix before the next `pnpm dev:deploy`.
 
 ### Across a migration you need the restore
 
-Migrations only go forward. If the database holds a migration from after the kept version, or that can't be read, or LibreChat's pinned version changes (it migrates its own data), **`pnpm deploy:back` alone refuses**, and names what differs. There's no override. The older code has never seen that schema.
+Migrations only go forward. If the database holds a migration from after the kept version, or that can't be read, or LibreChat's pinned version changes (it migrates its own data), **`pnpm dev:deploy-back` alone refuses**, and names what differs. There's no override. The older code has never seen that schema.
 
 ### What `--restore-data` costs
 
@@ -105,7 +105,7 @@ Migrations only go forward. If the database holds a migration from after the kep
 
 ### Doing it by hand
 
-If `pnpm deploy:back` can't help (`.katip/deploys.json` is gone, or no deploy went through `pnpm run deploy`), rebuild from source. Going back across a migration still needs a restore from a copy ([restore.md](restore.md)).
+If `pnpm dev:deploy-back` can't help (`.katip/deploys.json` is gone, or no deploy went through `pnpm dev:deploy`), rebuild from source. Going back across a migration still needs a restore from a copy ([restore.md](restore.md)).
 
 ```
 git checkout <good>
@@ -125,4 +125,4 @@ To lock out one company: `pnpm tenant:suspend --slug X`. To bring it back: `pnpm
 
 - Images will carry version tags in a registry, so going back means starting the old tag. Today the kept tags are only on this machine.
 - `dev:rollback` does not belong on a production host. A production profile (P0-22) must not offer it. Today the only thing in its way is the check above, and the project name.
-- A database restore from off-site backups (P1-42) will be the way back from a lost machine. The copy `pnpm run deploy` takes sits on the same disk as the data, and is no use for that.
+- A database restore from off-site backups (P1-42) will be the way back from a lost machine. The copy `pnpm dev:deploy` takes sits on the same disk as the data, and is no use for that.

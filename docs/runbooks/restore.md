@@ -4,7 +4,7 @@
 
 **Nothing is backed up.** Backups are tracker item P1-42, and it is `todo`. No scheduled `pg_dump`, `mongodump`, restic or WAL archive job exists anywhere in this repository. No alert fires when a backup is missing.
 
-The one exception is `pnpm run deploy`, which copies the governance database and each company's Mongo database to `.katip/backups/` before it migrates. That copy sits on the same disk, and is for going back from that deploy: see [rollback.md](rollback.md). Its restore (`pnpm deploy:back --restore-data`) replaces section B below for the governance database, and is what `pnpm test:backup` tests.
+The one exception is `pnpm dev:deploy`, which copies the governance database and each company's Mongo database to `.katip/backups/` before it migrates. That copy sits on the same disk, and is for going back from that deploy: see [rollback.md](rollback.md). Its restore (`pnpm dev:deploy-back --restore-data`) replaces section B below for the governance database, and is what `pnpm test:backup` tests.
 
 If the Docker volumes or the WSL disk are lost, **the data is lost**. The only copy is the one on this machine.
 

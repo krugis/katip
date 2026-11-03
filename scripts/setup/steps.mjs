@@ -93,7 +93,14 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-export const PLATFORM_SERVICES = ['traefik', 'postgres', 'keycloak', 'mongodb', 'valkey', 'mailpit'];
+export const PLATFORM_SERVICES = [
+  'traefik',
+  'postgres',
+  'keycloak',
+  'mongodb',
+  'valkey',
+  'mailpit',
+];
 
 /**
  * What an install from before Traefik lost Docker still has: compose leaves a container it no

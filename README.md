@@ -87,8 +87,8 @@ pnpm dev:up        # install or resume the bootstrap (Ctrl+C: keep or rollback)
 pnpm dev:status    # step state + service health
 pnpm dev:down      # stop everything (data kept)
 pnpm dev:rollback  # remove everything the bootstrap created (asks for more if real data may exist)
-pnpm run deploy    # a new version: back up, keep the old images, rebuild, migrate, check
-pnpm deploy:back   # go back to the previous deploy
+pnpm dev:deploy    # a new version: back up, keep the old images, rebuild, migrate, check
+pnpm dev:deploy-back   # go back to the previous deploy
 ```
 
 - All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, names, domain, models, tenant). `pnpm dev:up` rejects unknown settings, and re-running it applies your edits. To change `project.name` or `tenant.slug`, run `pnpm dev:rollback` first.

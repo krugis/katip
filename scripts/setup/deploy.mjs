@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * pnpm run deploy                      # back up, keep the running images, rebuild, migrate, check
- * pnpm deploy:back [--yes]             # the images from before the last deploy
- * pnpm deploy:back --restore-data      # and its database copy. Always asks
+ * pnpm dev:deploy                      # back up, keep the running images, rebuild, migrate, check
+ * pnpm dev:deploy-back [--yes]             # the images from before the last deploy
+ * pnpm dev:deploy-back --restore-data      # and its database copy. Always asks
  *
  * `pnpm deploy` without `run` is pnpm's own command, which never reaches this file.
  */
@@ -96,7 +96,7 @@ const main = async () => {
       interactive: Boolean(process.stdin.isTTY),
     });
   }
-  console.error(dim('usage: pnpm run deploy | pnpm deploy:back [--yes] [--restore-data]'));
+  console.error(dim('usage: pnpm dev:deploy | pnpm dev:deploy-back [--yes] [--restore-data]'));
   return 2;
 };
 

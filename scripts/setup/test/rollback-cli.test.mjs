@@ -254,7 +254,7 @@ describe('r at the Ctrl+C prompt of pnpm dev:up', () => {
   }, 30_000);
 });
 
-describe('pnpm run deploy, the refusals', () => {
+describe('pnpm dev:deploy, the refusals', () => {
   it('refuses a dirty tree without calling docker', async () => {
     const c = command(['scripts/setup/deploy.mjs', 'deploy'], 'demo', { FAKE_DIRTY: ' M a.ts\n' });
     const { code, out } = await c.done;
@@ -263,7 +263,7 @@ describe('pnpm run deploy, the refusals', () => {
     expect(existsSync(log)).toBe(false);
   });
 
-  it('deploy:back says when there is nothing to go back from', async () => {
+  it('dev:deploy-back says when there is nothing to go back from', async () => {
     const c = command(['scripts/setup/deploy.mjs', 'back', '--yes'], 'demo');
     const { code, out } = await c.done;
     expect(code).toBe(1);
