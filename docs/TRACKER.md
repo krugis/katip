@@ -125,7 +125,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-45 | Pilot load test: 200 simulated users; measure RAM per tenant instance | 01, 07 | P0 | todo | P1-34 | Report updates sizing + ADR-002 cost | |
 | P1-46 | Security review: threat model, CI gates (Trivy, gitleaks), book external pentest | 10 | P0 | todo | P1-44 | Threat model doc; pentest date set | |
 | P1-47 | Provider margin dashboard | 06 | P1 | todo | P1-37 | Margin per tenant/month shown | |
-| P1-48 | Runbooks: deploy, rollback, secret rotation, restore, incident | 10 | P0 | todo | P1-42 | Tabletop exercise done | |
+| P1-48 | Runbooks: deploy, rollback, secret rotation, restore, incident | 10 | P0 | review | P1-42 | Tabletop exercise done | Runbooks in `docs/runbooks/`. Nothing in them has been run or rehearsed. The tabletop is for the owner: script and result template in `docs/runbooks/tabletop.md`. Restore is a plan until P1-42 gives backups; `tenant:rotate-secrets` does not exist, so rotation is manual |
 | P1-49 | KVKK docs: DPA template, sub-processor list, privacy texts (with counsel) | 10 | P0 | todo | – | Reviewed by counsel | Owner: product owner |
 | P1-50 | Pilot kit: Turkish admin guide, user quick start, short video | – | P1 | todo | P1-34 | Kit shared with pilot customers | |
 | P1-51 | Status page + external uptime checks | 10 | P1 | todo | P1-43 | Status page public | |
