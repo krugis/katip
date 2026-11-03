@@ -52,6 +52,9 @@ export interface ProvisionerStore {
   anonymiseTenant(tenantId: string): Promise<void>;
   saveFxRate(rate: FxRate): Promise<boolean>;
   enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }>;
+  chatRetentionPeriods(
+    slug?: string,
+  ): Promise<{ tenantId: string; slug: string; months: number }[]>;
   recordDailyRun(details: Record<string, unknown>): Promise<void>;
   deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
   deletionSubject(
@@ -401,6 +404,27 @@ export class DbProvisionerStore implements ProvisionerStore {
       usageDaily: Number(row['expired_usage_daily']),
       audit: Number(row['expired_audit']),
     };
+  }
+
+  /** Not a suspended company's: its search index is stopped, so it waits until it's resumed. */
+  async chatRetentionPeriods(
+    slug?: string,
+  ): Promise<{ tenantId: string; slug: string; months: number }[]> {
+    const rows = await this.db
+      .select({
+        tenantId: schema.tenants.id,
+        slug: schema.tenants.slug,
+        months: schema.tenantPolicies.chatRetentionMonths,
+      })
+      .from(schema.tenants)
+      .leftJoin(schema.tenantPolicies, eq(schema.tenantPolicies.tenantId, schema.tenants.id))
+      .where(
+        and(eq(schema.tenants.status, 'active'), slug ? eq(schema.tenants.slug, slug) : undefined),
+      );
+    return rows.map((r) => ({
+      ...r,
+      months: r.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS,
+    }));
   }
 
   /** False if that date already has a rate: an invoice may rely on it, so it stays. */

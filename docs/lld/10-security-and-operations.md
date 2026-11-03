@@ -106,7 +106,7 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 - A data processing agreement (DPA) template for customers, plus a sub-processor list (each LLM provider, Hetzner, Cloudflare, Lago host, e-Fatura provider).
 - Cross-border transfer: EU-region tenants get a disclosure plus the appropriate KVKK transfer mechanism (counsel to confirm). The TR region keeps all data and models in Turkey.
 - Retention defaults:
-  - chats: tenant-defined (default 12 months);
+  - chats: tenant-defined (default 12 months, 1 to 120), enforced by the daily job (LLD-07 §2c);
   - usage events: 24 months;
   - audit log: 5 years;
   - backups: 30 days;

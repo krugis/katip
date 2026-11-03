@@ -697,6 +697,92 @@ describe('departments', () => {
   });
 });
 
+describe('chat retention', () => {
+  const path = (tenant: string) => `/api/v1/tenants/${tenant}/chat-retention`;
+  const stored = async (tenant: string) => {
+    const [row] = await admin`select chat_retention_months as months, policy, version
+      from tenant_policies where tenant_id = ${tenant}`;
+    return row;
+  };
+
+  it('is 12 months until the company says otherwise, even with no policy yet', async () => {
+    await admin`delete from tenant_policies where tenant_id = ${a}`;
+    const res = await send('GET', path(a));
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ months: 12 });
+  });
+
+  it('can be set, and is audited with both values', async () => {
+    const res = await send('PUT', path(a), { months: 6 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ months: 6 });
+    expect((await send('GET', path(a))).json()).toEqual({ months: 6 });
+    const [entry] = await admin`select * from audit_log
+      where tenant_id = ${a} and action = 'chat_retention.update' order by ts desc limit 1`;
+    expect(entry).toMatchObject({ actor_id: ownerId, target_type: 'policy' });
+    expect(entry!['details']).toEqual({ months: 6, previousMonths: 12 });
+  });
+
+  it("creates a row the gateway and the policy page can still read, if there wasn't one", async () => {
+    await admin`delete from tenant_policies where tenant_id = ${a}`;
+    await send('PUT', path(a), { months: 7 });
+    expect(await stored(a)).toMatchObject({ months: 7, policy: {}, version: 0 });
+    const policy = await send('GET', `/api/v1/tenants/${a}/policy`);
+    expect(policy.statusCode).toBe(200);
+    expect(policy.json().version).toBe(0);
+  });
+
+  it("doesn't change the policy, its version, or the gateway's cache", async () => {
+    const before = (await send('GET', `/api/v1/tenants/${a}/policy`)).json();
+    announced.length = 0;
+    await send('PUT', path(a), { months: 24 });
+    const after = (await send('GET', `/api/v1/tenants/${a}/policy`)).json();
+    expect(after.version).toBe(before.version);
+    expect(after.policy).toEqual(before.policy);
+    expect(announced).toEqual([]);
+  });
+
+  it('survives someone saving the policy', async () => {
+    await send('PUT', path(a), { months: 9 });
+    const current = (await send('GET', `/api/v1/tenants/${a}/policy`)).json();
+    const res = await send('PUT', `/api/v1/tenants/${a}/policy`, {
+      policy: current.policy,
+      version: current.version,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((await send('GET', path(a))).json()).toEqual({ months: 9 });
+  });
+
+  it('refuses anything out of range or not a whole number of months', async () => {
+    await send('PUT', path(a), { months: 12 });
+    for (const months of [0, -1, 121, 1.5, '12', null]) {
+      const res = await send('PUT', path(a), { months });
+      expect(res.statusCode, String(months)).toBe(400);
+    }
+    expect((await send('PUT', path(a), {})).statusCode).toBe(400);
+    expect((await send('PUT', path(a), { months: 12, never: true })).statusCode).toBe(400);
+    expect((await send('GET', path(a))).json()).toEqual({ months: 12 });
+    for (const months of [1, 120]) {
+      expect((await send('PUT', path(a), { months })).statusCode).toBe(200);
+    }
+  });
+
+  it("can't reach another company's", async () => {
+    await admin`insert into tenant_policies (tenant_id, policy, chat_retention_months)
+      values (${b}, '{}'::jsonb, 3)
+      on conflict (tenant_id) do update set chat_retention_months = 3`;
+    expect((await send('GET', path(b))).statusCode).toBe(404);
+    expect((await send('PUT', path(b), { months: 120 })).statusCode).toBe(404);
+    expect(await stored(b)).toMatchObject({ months: 3 });
+  });
+
+  it("isn't for someone who isn't an admin", async () => {
+    const bearer = await token('owner@a.test', 'tenant-a', ['user']);
+    expect((await send('GET', path(a), undefined, bearer)).statusCode).toBe(403);
+    expect((await send('PUT', path(a), { months: 1 }, bearer)).statusCode).toBe(403);
+  });
+});
+
 describe('the policy', () => {
   const path = (tenant: string) => `/api/v1/tenants/${tenant}/policy`;
   const read = async () => (await send('GET', path(a))).json();

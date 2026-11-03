@@ -20,8 +20,19 @@ import {
   rollbackTenant,
   type ProvisionDeps,
 } from './provision.js';
+import {
+  chatRetentionDue,
+  finishExpiredChats,
+  selectExpiredChats,
+  type ChatRetentionDeps,
+} from './chat-retention.js';
 import { deletionLookup, deletionsDue, finishDeletion, type ForgetDeps } from './forget.js';
-import { findLibreChatUser, forgetLibreChatUser } from './librechat-data.js';
+import {
+  deleteExpiredChats,
+  findExpiredChats,
+  findLibreChatUser,
+  forgetLibreChatUser,
+} from './librechat-data.js';
 import { DbProvisionerStore } from './store.js';
 
 const ConfigSchema = z.object({
@@ -46,6 +57,9 @@ const ConfigSchema = z.object({
     'deletion-lookup',
     'deletion-finish',
     'daily-retention',
+    'chat-retention-due',
+    'chat-retention-select',
+    'chat-retention-finish',
     'daily-record',
     'fx-store',
   ]),
@@ -120,6 +134,16 @@ const forgetDeps: ForgetDeps = {
     ),
 };
 
+const chatDeps: ChatRetentionDeps = {
+  store,
+  findExpiredChats: (database, cutoff) =>
+    withMongo(config.MONGO_ROOT_URI, (client) => findExpiredChats(client.db(database), cutoff)),
+  deleteExpiredChats: (database, conversationIds, fileIds, cutoff) =>
+    withMongo(config.MONGO_ROOT_URI, (client) =>
+      deleteExpiredChats(client.db(database), conversationIds, fileIds, cutoff),
+    ),
+};
+
 try {
   const input: unknown = JSON.parse(config.TENANT_INPUT);
   const { slug } = z.object({ slug: z.string() }).parse(input);
@@ -135,6 +159,20 @@ try {
     'deletion-lookup': () => deletionLookup(forgetDeps, slug, requestOf()),
     'deletion-finish': () => finishDeletion(forgetDeps, slug, requestOf()),
     'daily-retention': () => store.enforceRetention(),
+    'chat-retention-due': async () => ({ slugs: await chatRetentionDue(chatDeps) }),
+    'chat-retention-select': () => selectExpiredChats(chatDeps, slug),
+    'chat-retention-finish': () =>
+      finishExpiredChats(
+        chatDeps,
+        slug,
+        z
+          .object({
+            conversationIds: z.array(z.string().min(1)).max(1000),
+            fileIds: z.array(z.string().uuid()).max(5000),
+            filesKept: z.number().int().nonnegative(),
+          })
+          .parse(input),
+      ),
     'fx-store': async () => ({
       added: await store.saveFxRate(
         z
@@ -156,6 +194,11 @@ try {
             failed: z.number(),
             expiredUsage: z.number(),
             expiredAudit: z.number(),
+            expiredChats: z.number(),
+            expiredChatMessages: z.number(),
+            expiredChatFiles: z.number(),
+            chatFilesKept: z.number(),
+            chatBacklog: z.number(),
             fxDate: z.string().nullable(),
           })
           .parse(input),
