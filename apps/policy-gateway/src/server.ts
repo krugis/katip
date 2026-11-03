@@ -2,6 +2,8 @@
 import { Redis } from 'ioredis';
 import { createLogger } from '@katip/shared';
 import { PresidioClient } from '@katip/pii';
+import { GatewayMetrics, buildMetricsServer } from './metrics.js';
+import { startTracing } from '@katip/shared/tracing';
 import { buildGateway } from './app.js';
 import { loadConfig } from './config.js';
 import {
@@ -55,7 +57,16 @@ if (!config.PII_TOKEN_KEY) {
 
 const catalogStore = useDb ? new DbCatalogStore(config.DATABASE_URL!) : null;
 
+const metrics = new GatewayMetrics({ processMetrics: true });
+const metricsServer = config.METRICS_TOKEN
+  ? buildMetricsServer(metrics, config.METRICS_TOKEN)
+  : null;
+const stopTracing = config.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+  ? startTracing(config.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+  : null;
+
 const app = buildGateway({
+  metrics,
   litellmBaseUrl: config.LITELLM_BASE_URL,
   litellmApiKey: config.LITELLM_API_KEY,
   upstreamTimeoutMs: config.UPSTREAM_TIMEOUT_MS,
@@ -78,6 +89,8 @@ const app = buildGateway({
 const shutdown = async (signal: string) => {
   log.info({ signal }, 'shutting down');
   await app.close();
+  await metricsServer?.close();
+  await stopTracing?.();
   if (tenants instanceof DbTenantStore) await tenants.close();
   if (usage instanceof DbUsageSink) await usage.close();
   if (policySource) await policySource.close();
@@ -88,3 +101,4 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
 await app.listen({ host: config.HOST, port: config.PORT });
+await metricsServer?.listen({ host: config.HOST, port: config.METRICS_PORT });

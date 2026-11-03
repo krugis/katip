@@ -3,6 +3,8 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AppError, Errors, createLogger, type Logger } from '@katip/shared';
+import { trace, withSpan, type Tracer } from '@katip/shared/tracing';
+import { GatewayMetrics, UNKNOWN } from './metrics.js';
 import { ToolCallLog } from './tool-calls.js';
 import {
   PlaceholderMap,
@@ -67,6 +69,9 @@ export interface GatewayDeps {
   /** Readiness beyond "the process is up", e.g. the governance DB is migrated. */
   ready?: () => Promise<boolean>;
   upstreamTimeoutMs?: number;
+  metrics?: GatewayMetrics;
+  /** Without a tracing provider, the default does nothing. */
+  tracer?: Tracer;
   logger?: Logger;
   fetchImpl?: typeof fetch;
 }
@@ -121,11 +126,31 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     deps.catalogStore ? await deps.catalogStore.getRules() : staticRules;
   const doFetch = deps.fetchImpl ?? fetch;
   const base = deps.litellmBaseUrl.replace(/\/$/, '');
+  const metrics = deps.metrics ?? new GatewayMetrics();
+  const tracer = deps.tracer ?? trace.getTracer('policy-gateway');
+  /** Filled in as a chat request learns them. Never what a caller typed. */
+  const requestLabels = new WeakMap<
+    FastifyRequest,
+    { tenant: string; alias: string; model: string }
+  >();
+  const countRequest = (req: FastifyRequest, status: number) => {
+    const { tenant, alias, model } = requestLabels.get(req) ?? {
+      tenant: UNKNOWN,
+      alias: UNKNOWN,
+      model: UNKNOWN,
+    };
+    metrics.requests.inc({ tenant, alias, model, status: String(status) });
+  };
 
   const app = Fastify({
     loggerInstance: log,
     disableRequestLogging: false,
     bodyLimit: 20 * 1024 * 1024,
+  });
+
+  // A streamed reply comes here too, when it has ended.
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.routeOptions.url === '/v1/chat/completions') countRequest(req, reply.statusCode);
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -183,184 +208,222 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     };
   });
 
-  app.post('/v1/chat/completions', async (req, reply) => {
-    const ctx = await authenticate(req);
-    const body = ChatBodySchema.parse(req.body);
-    const messages = body.messages as ChatMessage[];
-    const conversationId = header(req, 'x-conversation-id');
+  app.post('/v1/chat/completions', async (req, reply) =>
+    withSpan(tracer, 'gateway.chat', async (root) => {
+      const started = performance.now();
+      const ctx = await withSpan(tracer, 'auth', () => authenticate(req));
+      root.setAttribute('tenant.slug', ctx.tenant.slug);
+      const labels = { tenant: ctx.tenant.slug, alias: UNKNOWN, model: UNKNOWN };
+      requestLabels.set(req, labels);
+      const body = ChatBodySchema.parse(req.body);
+      labels.alias = ALIASES.has(body.model as Alias) ? body.model : 'explicit';
+      root.setAttribute('model.alias', labels.alias);
+      const messages = body.messages as ChatMessage[];
+      const conversationId = header(req, 'x-conversation-id');
 
-    // 1. Route
-    const decision = await route(ctx, body.model, messages, req);
+      // 1. Route
+      const decision = await withSpan(tracer, 'route', () => route(ctx, body.model, messages, req));
 
-    // 2. Quota reservation (may downgrade premium → standard)
-    let routed = decision;
-    const estimate = estimateTokens(textOf(messages)) + (body.max_tokens ?? DEFAULT_MAX_OUTPUT);
-    let q = await deps.quota.reserve(ctx.tenant, quotaClassOf(routed.class), estimate);
-    if (q.decision === 'downgrade') {
-      routed = chooseRoute(
-        {
-          alias: 'fast',
-          inputTokens: estimateTokens(textOf(messages)),
-          background: false,
-          reasoningHint: false,
-          premiumQuotaAvailable: false,
-        },
-        await getRules(),
-        await getCatalog(),
-        ctx.tenant.policy,
+      // 2. Quota reservation (may downgrade premium → standard)
+      let routed = decision;
+      const estimate = estimateTokens(textOf(messages)) + (body.max_tokens ?? DEFAULT_MAX_OUTPUT);
+      const reservation = await withSpan(tracer, 'policy', async () => {
+        let q = await deps.quota.reserve(ctx.tenant, quotaClassOf(routed.class), estimate);
+        if (q.decision === 'downgrade') {
+          routed = chooseRoute(
+            {
+              alias: 'fast',
+              inputTokens: estimateTokens(textOf(messages)),
+              background: false,
+              reasoningHint: false,
+              premiumQuotaAvailable: false,
+            },
+            await getRules(),
+            await getCatalog(),
+            ctx.tenant.policy,
+          );
+          q = await deps.quota.reserve(ctx.tenant, quotaClassOf(routed.class), estimate);
+        }
+        if (!q.reservation) {
+          metrics.quotaDenials.inc({ tenant: ctx.tenant.slug, class: quotaClassOf(routed.class) });
+          throw Errors.quotaExceeded(quotaClassOf(routed.class));
+        }
+        return q.reservation;
+      });
+      root.setAttribute('quota.class', quotaClassOf(routed.class));
+
+      // 3. PII masking
+      // An unfilled "{{...}}" header would put every chat in one conversation.
+      const map = new PlaceholderMap(
+        deps.piiTokenKey && conversationId && !conversationId.includes('{{')
+          ? conversationTokens(deps.piiTokenKey, ctx.tenant.id, conversationId)
+          : undefined,
       );
-      q = await deps.quota.reserve(ctx.tenant, quotaClassOf(routed.class), estimate);
-    }
-    if (!q.reservation) throw Errors.quotaExceeded(quotaClassOf(routed.class));
-    const reservation = q.reservation;
-
-    // 3. PII masking
-    // An unfilled "{{...}}" header would put every chat in one conversation.
-    const map = new PlaceholderMap(
-      deps.piiTokenKey && conversationId && !conversationId.includes('{{')
-        ? conversationTokens(deps.piiTokenKey, ctx.tenant.id, conversationId)
-        : undefined,
-    );
-    let outbound: Record<string, unknown>;
-    let piiDegraded = false;
-    try {
-      const r = await maskChatRequest(body, ctx.tenant.pii, map, deps.piiDetector);
-      if (r.detectorFailed) {
-        const reject = ctx.tenant.pii.onDetectorFailure === 'block';
-        // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
-        req.log.error(
-          {
-            event: 'pii_detector_failed',
-            tenant_id: ctx.tenant.id,
-            user_id: ctx.user.id,
+      let outbound: Record<string, unknown>;
+      let piiDegraded = false;
+      try {
+        const r = await withSpan(tracer, 'pii', async (span) => {
+          const masked = await maskChatRequest(body, ctx.tenant.pii, map, deps.piiDetector);
+          span.setAttribute(
+            'pii.entities_count',
+            Object.values(map.counts() as Record<string, number>).reduce((a, b) => a + b, 0),
+          );
+          return masked;
+        });
+        if (r.detectorFailed) {
+          const reject = ctx.tenant.pii.onDetectorFailure === 'block';
+          metrics.piiDetectorFailures.inc({
+            tenant: ctx.tenant.slug,
             action: reject ? 'blocked' : 'allowed',
-          },
-          'PII detector failed',
-        );
-        if (reject) throw Errors.piiUnavailable();
-        piiDegraded = true;
+          });
+          // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
+          req.log.error(
+            {
+              event: 'pii_detector_failed',
+              tenant_id: ctx.tenant.id,
+              user_id: ctx.user.id,
+              action: reject ? 'blocked' : 'allowed',
+            },
+            'PII detector failed',
+          );
+          if (reject) throw Errors.piiUnavailable();
+          piiDegraded = true;
+        }
+        if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
+        if (r.dropped.length > 0) {
+          req.log.warn(
+            { event: 'request_fields_dropped', tenant_id: ctx.tenant.id, fields: r.dropped },
+            'dropped fields not on the allow list',
+          );
+        }
+        // Sent unscanned, by the product owner's decision for now (LLD-03 §5, P3-11).
+        if (Object.keys(r.nonTextParts).length > 0) {
+          req.log.info(
+            {
+              event: 'non_text_content_sent',
+              tenant_id: ctx.tenant.id,
+              user_id: ctx.user.id,
+              parts: r.nonTextParts,
+            },
+            'images or files sent unscanned',
+          );
+        }
+        outbound = r.body;
+      } catch (e) {
+        await deps.quota.settle(reservation, 0);
+        throw e;
       }
-      if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
-      if (r.dropped.length > 0) {
-        req.log.warn(
-          { event: 'request_fields_dropped', tenant_id: ctx.tenant.id, fields: r.dropped },
-          'dropped fields not on the allow list',
-        );
-      }
-      // Sent unscanned, by the product owner's decision for now (LLD-03 §5, P3-11).
-      if (Object.keys(r.nonTextParts).length > 0) {
-        req.log.info(
-          {
-            event: 'non_text_content_sent',
-            tenant_id: ctx.tenant.id,
-            user_id: ctx.user.id,
-            parts: r.nonTextParts,
-          },
-          'images or files sent unscanned',
-        );
-      }
-      outbound = r.body;
-    } catch (e) {
-      await deps.quota.settle(reservation, 0);
-      throw e;
-    }
 
-    // 4. Upstream with fallback
-    const { model, response, fallback } = await callUpstream(routed, {
-      ...outbound,
-      user: `${ctx.tenant.slug}:${ctx.user.id}`,
-      metadata: {
-        tenant: ctx.tenant.slug,
-        user_id: ctx.user.id,
-        conversation_id: conversationId,
-        rule: routed.ruleId,
-      },
-      ...(body.stream ? { stream_options: { include_usage: true } } : {}),
-    }).catch(async (e: unknown) => {
-      await deps.quota.settle(reservation, 0);
-      throw e;
-    });
-
-    reply.header('x-katip-model', model.id);
-    reply.header('x-katip-rule', routed.ruleId);
-    if (fallback) reply.header('x-katip-fallback', 'true');
-    if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
-
-    const toolCalls = new ToolCallLog();
-    const finish = async (inputTokens: number, outputTokens: number) => {
-      await deps.quota.settle(reservation, inputTokens + outputTokens);
-      const tools = toolCalls.list();
-      if (tools.length > 0) {
-        // Names only. Users can add any MCP tool, and this shows which ones models call.
-        req.log.info(
-          {
-            event: 'tool_calls_requested',
-            tenant_id: ctx.tenant.id,
+      // 4. Upstream with fallback
+      metrics.overhead.observe({ tenant: ctx.tenant.slug }, (performance.now() - started) / 1000);
+      const { model, response, fallback } = await withSpan(tracer, 'upstream', () =>
+        callUpstream(ctx.tenant.slug, routed, {
+          ...outbound,
+          user: `${ctx.tenant.slug}:${ctx.user.id}`,
+          metadata: {
+            tenant: ctx.tenant.slug,
             user_id: ctx.user.id,
             conversation_id: conversationId,
-            tools,
+            rule: routed.ruleId,
           },
-          'model asked to call tools',
-        );
-      }
-      await deps.usage.record({
-        tenantId: ctx.tenant.id,
-        userId: ctx.user.id,
-        departmentId: ctx.user.departmentId,
-        ts: new Date().toISOString(),
-        alias: body.model,
-        modelId: model.id,
-        modelClass: model.class,
-        ruleId: routed.ruleId,
-        inputTokens,
-        outputTokens,
-        costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
-        fallback,
-        overage: reservation.overage,
-        piiEntities: map.counts() as Record<string, number>,
-        conversationId,
-        source: 'chat',
-        toolCalls: tools,
+          ...(body.stream ? { stream_options: { include_usage: true } } : {}),
+        }),
+      ).catch(async (e: unknown) => {
+        await deps.quota.settle(reservation, 0);
+        throw e;
       });
-      req.log.info(
-        {
-          tenant: ctx.tenant.slug,
-          user: ctx.user.id,
-          model: model.id,
-          rule: routed.ruleId,
+      labels.model = model.id;
+      root.setAttribute('model.name', model.id);
+
+      reply.header('x-katip-model', model.id);
+      reply.header('x-katip-rule', routed.ruleId);
+      if (fallback) reply.header('x-katip-fallback', 'true');
+      if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
+
+      const toolCalls = new ToolCallLog();
+      const finish = async (inputTokens: number, outputTokens: number) => {
+        await withSpan(tracer, 'settle', () =>
+          deps.quota.settle(reservation, inputTokens + outputTokens),
+        );
+        const tokenLabels = { tenant: ctx.tenant.slug, class: model.class };
+        metrics.tokens.inc({ ...tokenLabels, dir: 'input' }, inputTokens);
+        metrics.tokens.inc({ ...tokenLabels, dir: 'output' }, outputTokens);
+        for (const [type, n] of Object.entries(map.counts() as Record<string, number>)) {
+          metrics.piiEntities.inc({ type }, n);
+        }
+        const tools = toolCalls.list();
+        if (tools.length > 0) {
+          // Names only. Users can add any MCP tool, and this shows which ones models call.
+          req.log.info(
+            {
+              event: 'tool_calls_requested',
+              tenant_id: ctx.tenant.id,
+              user_id: ctx.user.id,
+              conversation_id: conversationId,
+              tools,
+            },
+            'model asked to call tools',
+          );
+        }
+        await deps.usage.record({
+          tenantId: ctx.tenant.id,
+          userId: ctx.user.id,
+          departmentId: ctx.user.departmentId,
+          ts: new Date().toISOString(),
+          alias: body.model,
+          modelId: model.id,
+          modelClass: model.class,
+          ruleId: routed.ruleId,
           inputTokens,
           outputTokens,
+          costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
           fallback,
-          pii: map.counts(),
-        },
-        'chat completed',
-      );
-    };
-
-    if (!body.stream) {
-      const json = (await response.json()) as {
-        choices?: Array<{
-          index?: number;
-          message?: { content?: unknown; tool_calls?: unknown; function_call?: unknown };
-        }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-        model?: string;
+          overage: reservation.overage,
+          piiEntities: map.counts() as Record<string, number>,
+          conversationId,
+          source: 'chat',
+          toolCalls: tools,
+        });
+        req.log.info(
+          {
+            tenant: ctx.tenant.slug,
+            user: ctx.user.id,
+            model: model.id,
+            rule: routed.ruleId,
+            inputTokens,
+            outputTokens,
+            fallback,
+            pii: map.counts(),
+          },
+          'chat completed',
+        );
       };
-      for (const c of json.choices ?? []) {
-        if (c.message && typeof c.message.content === 'string')
-          // Text for the user only. tool_calls stay masked: real values must not
-          // reach tools, which may be any MCP server a user added (LLD-03 §5).
-          c.message.content = unmaskText(c.message.content, map);
-        if (c.message) toolCalls.add(c.index ?? 0, c.message);
-      }
-      json.model = model.id;
-      await finish(json.usage?.prompt_tokens ?? 0, json.usage?.completion_tokens ?? 0);
-      return json;
-    }
 
-    await streamThrough(reply, response, map, model.id, finish, reservation, toolCalls);
-    return reply;
-  });
+      if (!body.stream) {
+        const json = (await response.json()) as {
+          choices?: Array<{
+            index?: number;
+            message?: { content?: unknown; tool_calls?: unknown; function_call?: unknown };
+          }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+          model?: string;
+        };
+        for (const c of json.choices ?? []) {
+          if (c.message && typeof c.message.content === 'string')
+            // Text for the user only. tool_calls stay masked: real values must not
+            // reach tools, which may be any MCP server a user added (LLD-03 §5).
+            c.message.content = unmaskText(c.message.content, map);
+          if (c.message) toolCalls.add(c.index ?? 0, c.message);
+        }
+        json.model = model.id;
+        await finish(json.usage?.prompt_tokens ?? 0, json.usage?.completion_tokens ?? 0);
+        return json;
+      }
+
+      await streamThrough(reply, response, map, model.id, finish, reservation, toolCalls);
+      return reply;
+    }),
+  );
 
   async function route(
     ctx: Ctx,
@@ -402,6 +465,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
   }
 
   async function callUpstream(
+    tenantSlug: string,
     decision: RouteDecision,
     payload: Record<string, unknown>,
   ): Promise<{ model: ModelEntry; response: Response; fallback: boolean }> {
@@ -409,6 +473,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     for (const model of decision.candidates) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deps.upstreamTimeoutMs ?? 120_000);
+      const called = performance.now();
       try {
         const res = await doFetch(`${base}/chat/completions`, {
           method: 'POST',
@@ -419,7 +484,13 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
           body: JSON.stringify({ ...payload, model: model.litellmName }),
           signal: controller.signal,
         });
-        if (res.ok) return { model, response: res, fallback: index > 0 };
+        if (res.ok) {
+          metrics.upstreamLatency.observe(
+            { tenant: tenantSlug, model: model.id },
+            (performance.now() - called) / 1000,
+          );
+          return { model, response: res, fallback: index > 0 };
+        }
         if (res.status < 500 && res.status !== 429) {
           const text = await res.text();
           log.warn({ model: model.id, status: res.status }, 'upstream rejected request');
@@ -432,10 +503,12 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
             },
           );
         }
+        metrics.upstreamErrors.inc({ model: model.id });
         log.warn({ model: model.id, status: res.status }, 'upstream failed, trying fallback');
         await res.body?.cancel();
       } catch (e) {
         if (e instanceof AppError) throw e;
+        metrics.upstreamErrors.inc({ model: model.id });
         log.warn({ model: model.id, err: (e as Error).name }, 'upstream error, trying fallback');
       } finally {
         clearTimeout(timer);

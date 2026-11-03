@@ -202,7 +202,13 @@ Rules:
   - `gw_tokens_total{tenant,class,dir}`
   - `gw_upstream_latency_seconds`
   - `gw_pii_entities_total{type}`
-  - `gw_quota_denials_total`
+  - `gw_quota_denials_total{tenant,class}`
+  - `gw_overhead_seconds{tenant}`: what the gateway adds before calling a model, for the 120 ms budget
+  - `gw_upstream_errors_total{model}`
+  - `gw_pii_detector_failures_total{tenant,action}`
+- **`/metrics` asks for a token (`KATIP_METRICS_TOKEN`), on port 9464.** It isn't routed from outside, but every company's LibreChat can reach this container, and these numbers show every company's usage.
+- **Labels are company slugs, model ids and fixed words.** An alias that isn't one of ours is counted as `explicit`, so nothing a caller types becomes a label.
+- **The dashboard** is `infra/monitoring/grafana/dashboards/gateway.json`. `pnpm test:metrics` runs a real Prometheus for the length of the test, and checks every query in it. Nothing runs Prometheus or Grafana for good yet, or collects traces (P1-43). Traces go out when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
 
 ## 8. Acceptance criteria
 

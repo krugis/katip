@@ -29,6 +29,11 @@ export const ConfigSchema = z.object({
    * DATABASE_URL for local runs without Postgres. See dev-tenants.example.json.
    */
   DEV_TENANTS_FILE: z.string().optional(),
+  /** Without a token, nothing listens on the metrics port (LLD-03 §7). */
+  METRICS_TOKEN: z.string().min(32).optional(),
+  METRICS_PORT: z.coerce.number().int().positive().default(9464),
+  /** OTLP endpoint for traces (optional). Nothing collects them yet: P1-43. */
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: z.string().url().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

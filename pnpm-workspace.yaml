@@ -3,3 +3,7 @@ packages:
   - 'packages/*'
 onlyBuiltDependencies:
   - esbuild
+overrides:
+  # One version everywhere. drizzle-orm has it as an optional peer, so a second one would
+  # give two copies of drizzle-orm whose types don't match.
+  '@opentelemetry/api': 1.9.0
