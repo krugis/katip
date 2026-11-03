@@ -218,3 +218,20 @@ Rules:
 - A tenant at 100% with `block` gets HTTP 429 with an OpenAI-style error that LibreChat displays. `downgrade` routes `best` → standard.
 - `GET /v1/models` for a tenant without the KVKK add-on does not list `tr-local`.
 - Load test: 50 concurrent streaming chats through the gateway against a mock provider. Gateway CPU stays under 1 vCPU and p95 overhead under 120 ms.
+
+### Load baseline (P1-16)
+
+`pnpm test:load`, on the 12-core dev machine in WSL (3 Nov 2026), with a short new message each time, so nothing comes from the cache. The analyzer is limited to the CPUs shown and has 2 workers. The gateway has no CPU limit, and is measured.
+
+| Chats at once | Answer length | Analyzer CPUs | Messages per second | Overhead within 120 ms | First byte p95 | Gateway CPU, average |
+| --- | --- | --- | --- | --- | --- | --- |
+| 50 | about 17 s | 2 | 2.8 | 98.2% | 77 ms | 5% |
+| 50 | about 2.7 s | 2 | 14.2 | 0% | 1.3 s | 23% |
+| 50 | about 2.7 s | 4 | 20.2 | 95.1% | 125 ms | 31% |
+| 100 | about 2.7 s | 2 | 14.2 | 0% | 5.0 s | 24% |
+
+- **The target is met at realistic answer lengths.** At short ones it depends on the analyzer's CPUs. What limits this is new messages per second: about 14 on 2 CPUs. Past that, requests queue, and nothing fails.
+- **The gateway itself isn't the limit.** The name model is (LLD-03 §5).
+- **The p50 budget of 40 ms isn't met.** Under 0.1% of requests here were within 50 ms, and first byte is about 70 ms at p50. The model takes most of that.
+- **A name check timing out sends a request without name masking** under the default `allow`. None failed in these runs, but messages were short and each chat waits for its answer, which limits the queue. Long pasted text under load wasn't measured. A company that needs names always masked should use `onDetectorFailure: block`.
+- **LiteLLM isn't in this path,** and nor are real providers. The gateway calls the mock directly, to measure the gateway. Each run adds usage to the first company in the config.
