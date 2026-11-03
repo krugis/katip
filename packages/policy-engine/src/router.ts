@@ -72,6 +72,31 @@ export function chooseRoute(
   throw new RouteDeniedError('no routing rule matched an allowed model');
 }
 
+/**
+ * Picks the model for an embedding request: `auto` is the tenant's first allowed embedding
+ * model, `tr-local` the first hosted in Türkiye, anything else one by its id. Always one model:
+ * a vector only compares with vectors from the same model, so a fallback would quietly leave
+ * a file unsearchable. Throws RouteDeniedError if it isn't allowed.
+ */
+export function chooseEmbeddingRoute(
+  requested: string,
+  catalog: ModelEntry[],
+  policy: TenantPolicy,
+): RouteDecision {
+  if ((requested === 'auto' || requested === 'tr-local') && !policy.aliases[requested]) {
+    throw new RouteDeniedError(`model alias "${requested}" is not enabled for this company`);
+  }
+  const allowed = catalog.filter((m) => m.class === 'embedding' && allowedForTenant(m, policy));
+  const model =
+    requested === 'auto'
+      ? allowed[0]
+      : requested === 'tr-local'
+        ? allowed.find((m) => m.region === 'tr')
+        : allowed.find((m) => m.id === requested);
+  if (!model) throw new RouteDeniedError(`no allowed embedding model for "${requested}"`);
+  return { ruleId: 'embedding', class: model.class, candidates: [model] };
+}
+
 /** Aliases visible to a tenant in GET /v1/models. */
 export function visibleAliases(policy: TenantPolicy, kvkkAddon: boolean): Alias[] {
   return (Object.keys(policy.aliases) as Alias[]).filter(

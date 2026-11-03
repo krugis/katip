@@ -15,7 +15,7 @@ export class GatewayMetrics {
   readonly registry = new Registry();
   readonly requests = new Counter({
     name: 'gw_requests_total',
-    help: 'Chat requests, by how they ended',
+    help: 'Chat and embedding requests, by how they ended',
     labelNames: ['tenant', 'alias', 'model', 'status'] as const,
     registers: [this.registry],
   });

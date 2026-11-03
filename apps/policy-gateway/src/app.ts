@@ -11,6 +11,7 @@ import {
   conversationTokens,
   StreamingUnmasker,
   maskChatRequest,
+  maskEmbeddingRequest,
   unmaskText,
   type ChatMessage,
   type ExtraDetector,
@@ -20,6 +21,7 @@ import {
   DEFAULT_CATALOG,
   DEFAULT_RULES,
   RouteDeniedError,
+  chooseEmbeddingRoute,
   chooseRoute,
   costMicroUsd,
   estimateTokens,
@@ -31,11 +33,13 @@ import {
   type TenantPolicy,
 } from '@katip/policy-engine';
 import {
+  NO_PERSON,
   quotaClassOf,
   type QuotaStore,
   type Reservation,
   type Tenant,
   type TenantStore,
+  type UsageEvent,
   type UsageSink,
   type User,
 } from './stores.js';
@@ -103,6 +107,18 @@ const ChatBodySchema = z
   })
   .passthrough();
 
+/** Text only. Token ids can't be checked for personal data, so they never reach a provider. */
+const EmbeddingBodySchema = z
+  .object({
+    model: z.string().min(1),
+    input: z.union([z.string(), z.array(z.string()).min(1).max(2048)]),
+    encoding_format: z.enum(['float', 'base64']).optional(),
+    dimensions: z.number().int().positive().optional(),
+  })
+  .passthrough();
+
+const METERED_ROUTES = new Set(['/v1/chat/completions', '/v1/embeddings']);
+
 interface Ctx {
   tenant: Tenant;
   user: User;
@@ -143,7 +159,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
   const base = deps.litellmBaseUrl.replace(/\/$/, '');
   const metrics = deps.metrics ?? new GatewayMetrics();
   const tracer = deps.tracer ?? trace.getTracer('policy-gateway');
-  /** Filled in as a chat request learns them. Never what a caller typed. */
+  /** Filled in as a request learns them. Never what a caller typed. */
   const requestLabels = new WeakMap<
     FastifyRequest,
     { tenant: string; alias: string; model: string }
@@ -165,7 +181,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
 
   // A streamed reply comes here too, when it has ended.
   app.addHook('onResponse', async (req, reply) => {
-    if (req.routeOptions.url === '/v1/chat/completions') countRequest(req, reply.statusCode);
+    if (METERED_ROUTES.has(req.routeOptions.url ?? '')) countRequest(req, reply.statusCode);
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -186,17 +202,24 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       .send({ error: { message: 'Internal error', type: 'api_error', code: 'internal' } });
   });
 
-  async function authenticate(req: FastifyRequest): Promise<Ctx> {
+  /** A service key has no person behind it, so only routes that allow it accept one. */
+  async function authenticate(req: FastifyRequest, { allowService = false } = {}): Promise<Ctx> {
     const key = bearer(req);
     if (!key) throw Errors.unauthorized();
     const tenant = await deps.tenants.findTenantByKey(key);
     if (!tenant) throw Errors.unauthorized();
     if (tenant.status !== 'active') throw Errors.policyDenied('company account is suspended');
-    const email = header(req, 'x-user-email');
-    if (!email) throw Errors.userNotProvisioned();
-    const user = await deps.tenants.findUser(tenant.id, email);
-    if (!user) throw Errors.userNotProvisioned();
-    if (user.status !== 'active') throw Errors.userDisabled();
+    let user: User | null;
+    if (tenant.serviceKey) {
+      if (!allowService) throw Errors.policyDenied('this key can only create embeddings');
+      user = { id: NO_PERSON, tenantId: tenant.id, email: '', status: 'active' };
+    } else {
+      const email = header(req, 'x-user-email');
+      if (!email) throw Errors.userNotProvisioned();
+      user = await deps.tenants.findUser(tenant.id, email);
+      if (!user) throw Errors.userNotProvisioned();
+      if (user.status !== 'active') throw Errors.userDisabled();
+    }
     // Effective policy = tenant policy + department override (P1-10), cached
     // 30 s and invalidated by `policy.changed` pub/sub.
     if (deps.policySource) {
@@ -205,6 +228,79 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       tenant.pii = eff.pii;
     }
     return { tenant, user };
+  }
+
+  /** Applies the policy to a masking result. Throws to refuse; true if names went unchecked. */
+  function judgeMasking(
+    req: FastifyRequest,
+    ctx: Ctx,
+    r: { detectorFailed: boolean; blocked: string[]; dropped: string[] },
+  ): boolean {
+    if (r.detectorFailed) {
+      const reject = ctx.tenant.pii.onDetectorFailure === 'block';
+      metrics.piiDetectorFailures.inc({
+        tenant: ctx.tenant.slug,
+        action: reject ? 'blocked' : 'allowed',
+      });
+      // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
+      req.log.error(
+        {
+          event: 'pii_detector_failed',
+          tenant_id: ctx.tenant.id,
+          user_id: ctx.user.id,
+          action: reject ? 'blocked' : 'allowed',
+        },
+        'PII detector failed',
+      );
+      if (reject) throw Errors.piiUnavailable();
+    }
+    if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
+    if (r.dropped.length > 0) {
+      req.log.warn(
+        { event: 'request_fields_dropped', tenant_id: ctx.tenant.id, fields: r.dropped },
+        'dropped fields not on the allow list',
+      );
+    }
+    return r.detectorFailed;
+  }
+
+  /** Everything that follows a model's answer: quota, metrics and the usage row. */
+  async function settleAndRecord(
+    m: Pick<UsageEvent, 'alias' | 'fallback' | 'conversationId' | 'source' | 'toolCalls'> & {
+      ctx: Ctx;
+      model: ModelEntry;
+      ruleId: string;
+      reservation: Reservation;
+      map: PlaceholderMap;
+    },
+    inputTokens: number,
+    outputTokens: number,
+  ): Promise<void> {
+    const { ctx, model, ruleId, reservation, map, ...event } = m;
+    await withSpan(tracer, 'settle', () =>
+      deps.quota.settle(reservation, inputTokens + outputTokens),
+    );
+    const tokenLabels = { tenant: ctx.tenant.slug, class: model.class };
+    metrics.tokens.inc({ ...tokenLabels, dir: 'input' }, inputTokens);
+    metrics.tokens.inc({ ...tokenLabels, dir: 'output' }, outputTokens);
+    for (const [type, n] of Object.entries(map.counts() as Record<string, number>)) {
+      metrics.piiEntities.inc({ type }, n);
+    }
+    await deps.usage.record({
+      ...event,
+      tenantId: ctx.tenant.id,
+      userId: ctx.user.id,
+      departmentId: ctx.user.departmentId,
+      ts: new Date().toISOString(),
+      modelId: model.id,
+      modelClass: model.class,
+      ruleId,
+      inputTokens,
+      outputTokens,
+      costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
+      overage: reservation.overage,
+      piiEntities: map.counts() as Record<string, number>,
+    });
   }
 
   app.get('/healthz', async () => ({ status: 'ok' }));
@@ -285,32 +381,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
           );
           return masked;
         });
-        if (r.detectorFailed) {
-          const reject = ctx.tenant.pii.onDetectorFailure === 'block';
-          metrics.piiDetectorFailures.inc({
-            tenant: ctx.tenant.slug,
-            action: reject ? 'blocked' : 'allowed',
-          });
-          // Alert signal: monitoring (P1-43) alerts on this event. Ids only.
-          req.log.error(
-            {
-              event: 'pii_detector_failed',
-              tenant_id: ctx.tenant.id,
-              user_id: ctx.user.id,
-              action: reject ? 'blocked' : 'allowed',
-            },
-            'PII detector failed',
-          );
-          if (reject) throw Errors.piiUnavailable();
-          piiDegraded = true;
-        }
-        if (r.blocked.length > 0) throw Errors.piiBlocked(r.blocked);
-        if (r.dropped.length > 0) {
-          req.log.warn(
-            { event: 'request_fields_dropped', tenant_id: ctx.tenant.id, fields: r.dropped },
-            'dropped fields not on the allow list',
-          );
-        }
+        piiDegraded = judgeMasking(req, ctx, r);
         // Sent unscanned, by the product owner's decision for now (LLD-03 §5, P3-11).
         if (Object.keys(r.nonTextParts).length > 0) {
           req.log.info(
@@ -332,7 +403,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       // 4. Upstream with fallback
       metrics.overhead.observe({ tenant: ctx.tenant.slug }, (performance.now() - started) / 1000);
       const { model, response, fallback, abort } = await withSpan(tracer, 'upstream', () =>
-        callUpstream(ctx.tenant.slug, routed, {
+        callUpstream(ctx.tenant.slug, routed, '/chat/completions', {
           ...outbound,
           user: `${ctx.tenant.slug}:${ctx.user.id}`,
           metadata: {
@@ -362,15 +433,6 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       });
       const toolCalls = new ToolCallLog();
       const finish = async (inputTokens: number, outputTokens: number) => {
-        await withSpan(tracer, 'settle', () =>
-          deps.quota.settle(reservation, inputTokens + outputTokens),
-        );
-        const tokenLabels = { tenant: ctx.tenant.slug, class: model.class };
-        metrics.tokens.inc({ ...tokenLabels, dir: 'input' }, inputTokens);
-        metrics.tokens.inc({ ...tokenLabels, dir: 'output' }, outputTokens);
-        for (const [type, n] of Object.entries(map.counts() as Record<string, number>)) {
-          metrics.piiEntities.inc({ type }, n);
-        }
         const tools = toolCalls.list();
         if (tools.length > 0) {
           // Names only. Users can add any MCP tool, and this shows which ones models call.
@@ -385,25 +447,22 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
             'model asked to call tools',
           );
         }
-        await deps.usage.record({
-          tenantId: ctx.tenant.id,
-          userId: ctx.user.id,
-          departmentId: ctx.user.departmentId,
-          ts: new Date().toISOString(),
-          alias: body.model,
-          modelId: model.id,
-          modelClass: model.class,
-          ruleId: routed.ruleId,
+        await settleAndRecord(
+          {
+            ctx,
+            model,
+            ruleId: routed.ruleId,
+            reservation,
+            map,
+            alias: body.model,
+            fallback,
+            conversationId,
+            source: 'chat',
+            toolCalls: tools,
+          },
           inputTokens,
           outputTokens,
-          costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
-          fallback,
-          overage: reservation.overage,
-          piiEntities: map.counts() as Record<string, number>,
-          conversationId,
-          source: 'chat',
-          toolCalls: tools,
-        });
+        );
         req.log.info(
           {
             tenant: ctx.tenant.slug,
@@ -451,6 +510,137 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     }),
   );
 
+  app.post('/v1/embeddings', async (req, reply) =>
+    withSpan(tracer, 'gateway.embeddings', async (root) => {
+      const started = performance.now();
+      // The RAG API can't send a person's email, so it has a service key (LLD-03 §1).
+      const ctx = await withSpan(tracer, 'auth', () => authenticate(req, { allowService: true }));
+      root.setAttribute('tenant.slug', ctx.tenant.slug);
+      const labels = { tenant: ctx.tenant.slug, alias: UNKNOWN, model: UNKNOWN };
+      requestLabels.set(req, labels);
+      const body = EmbeddingBodySchema.parse(req.body);
+      labels.alias = ALIASES.has(body.model as Alias) ? body.model : 'explicit';
+      root.setAttribute('model.alias', labels.alias);
+      const inputs = typeof body.input === 'string' ? [body.input] : body.input;
+
+      const routed = await withSpan(tracer, 'route', async () => {
+        try {
+          return chooseEmbeddingRoute(body.model, await getCatalog(), ctx.tenant.policy);
+        } catch (e) {
+          if (e instanceof RouteDeniedError) throw Errors.policyDenied(e.reason);
+          throw e;
+        }
+      });
+
+      // Counted as standard tokens. There's no cheaper class to downgrade to.
+      const cls = quotaClassOf(routed.class);
+      const estimate = estimateTokens(inputs.join('\n'));
+      const reservation = await withSpan(tracer, 'policy', async () => {
+        const q = await deps.quota.reserve(ctx.tenant, cls, estimate);
+        if (!q.reservation) {
+          metrics.quotaDenials.inc({ tenant: ctx.tenant.slug, class: cls });
+          throw Errors.quotaExceeded(cls);
+        }
+        return q.reservation;
+      });
+      root.setAttribute('quota.class', cls);
+
+      // Numbered per request, whatever the conversation: nothing comes back to unmask, and
+      // the provider shouldn't be able to link one person across a company's documents.
+      const map = new PlaceholderMap();
+      let outbound: Record<string, unknown>;
+      let piiDegraded = false;
+      try {
+        const r = await withSpan(tracer, 'pii', async (span) => {
+          const masked = await maskEmbeddingRequest(body, ctx.tenant.pii, map, deps.piiDetector);
+          span.setAttribute(
+            'pii.entities_count',
+            Object.values(map.counts() as Record<string, number>).reduce((a, b) => a + b, 0),
+          );
+          return masked;
+        });
+        piiDegraded = judgeMasking(req, ctx, r);
+        outbound = r.body;
+      } catch (e) {
+        await deps.quota.settle(reservation, 0);
+        throw e;
+      }
+
+      metrics.overhead.observe({ tenant: ctx.tenant.slug }, (performance.now() - started) / 1000);
+      const conversationId = header(req, 'x-conversation-id');
+      const { model, response, abort } = await withSpan(tracer, 'upstream', () =>
+        callUpstream(ctx.tenant.slug, routed, '/embeddings', {
+          ...outbound,
+          user: `${ctx.tenant.slug}:${ctx.user.id}`,
+          metadata: {
+            tenant: ctx.tenant.slug,
+            user_id: ctx.user.id,
+            rule: routed.ruleId,
+          },
+        }),
+      ).catch(async (e: unknown) => {
+        await deps.quota.settle(reservation, 0);
+        throw e;
+      });
+      labels.model = model.id;
+      root.setAttribute('model.name', model.id);
+      reply.header('x-katip-model', model.id);
+      if (piiDegraded) reply.header('x-katip-pii-degraded', 'true');
+
+      const quiet = watchForSilence(deps.upstreamTimeoutMs ?? 120_000, () => {
+        metrics.upstreamErrors.inc({ model: model.id });
+        req.log.warn({ model: model.id }, 'upstream went quiet part-way');
+        abort();
+      });
+      const json = (await response
+        .json()
+        .catch(() => null)
+        .finally(quiet.stop)) as {
+        data?: unknown[];
+        usage?: { prompt_tokens?: number; total_tokens?: number };
+      } | null;
+      // One vector per input, or the wrong text would be found under them.
+      if (json?.data?.length !== inputs.length) {
+        await deps.quota.settle(reservation, 0);
+        throw Errors.upstream();
+      }
+      // Some providers report no usage. It must still count, so then the estimate does.
+      const inputTokens = json.usage?.prompt_tokens || json.usage?.total_tokens || estimate;
+      await settleAndRecord(
+        {
+          ctx,
+          model,
+          ruleId: routed.ruleId,
+          reservation,
+          map,
+          alias: body.model,
+          fallback: false,
+          conversationId,
+          source: 'embedding',
+        },
+        inputTokens,
+        0,
+      );
+      req.log.info(
+        {
+          tenant: ctx.tenant.slug,
+          user: ctx.user.id,
+          model: model.id,
+          inputs: inputs.length,
+          inputTokens,
+          pii: map.counts(),
+        },
+        'embeddings completed',
+      );
+      return {
+        object: 'list',
+        data: json.data,
+        model: model.id,
+        usage: { prompt_tokens: inputTokens, total_tokens: inputTokens },
+      };
+    }),
+  );
+
   async function route(
     ctx: Ctx,
     requested: string,
@@ -493,6 +683,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
   async function callUpstream(
     tenantSlug: string,
     decision: RouteDecision,
+    path: '/chat/completions' | '/embeddings',
     payload: Record<string, unknown>,
   ): Promise<{ model: ModelEntry; response: Response; fallback: boolean; abort: () => void }> {
     let index = 0;
@@ -501,7 +692,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       const timer = setTimeout(() => controller.abort(), deps.upstreamTimeoutMs ?? 120_000);
       const called = performance.now();
       try {
-        const res = await doFetch(`${base}/chat/completions`, {
+        const res = await doFetch(`${base}${path}`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',

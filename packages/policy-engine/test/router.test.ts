@@ -5,6 +5,7 @@ import {
   DEFAULT_POLICY,
   DEFAULT_RULES,
   RouteDeniedError,
+  chooseEmbeddingRoute,
   chooseRoute,
   costMicroUsd,
   crossedThresholds,
@@ -89,6 +90,67 @@ describe('router rules v1', () => {
     };
     expect(visibleAliases(p, false)).not.toContain('tr-local');
     expect(visibleAliases(p, true)).toContain('tr-local');
+  });
+});
+
+describe('embedding route', () => {
+  const emb = DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!;
+  const emTr = { ...emb, id: 'emb-tr', region: 'tr' as const };
+  const emEu = { ...emb, id: 'emb-eu', region: 'eu' as const };
+  const catalog = [...DEFAULT_CATALOG, emEu, emTr];
+  const ids = (requested: string, policy: TenantPolicy = DEFAULT_POLICY, c = catalog) =>
+    chooseEmbeddingRoute(requested, c, policy).candidates.map((m) => m.id);
+  const trOn: TenantPolicy = {
+    ...DEFAULT_POLICY,
+    aliases: { ...DEFAULT_POLICY.aliases, 'tr-local': true },
+  };
+
+  it('gives one model, never a fallback: vectors from another would not compare', () => {
+    expect(ids('auto')).toEqual(['emb-bge-m3']);
+    expect(ids('emb-eu')).toEqual(['emb-eu']);
+    expect(chooseEmbeddingRoute('auto', catalog, DEFAULT_POLICY).class).toBe('embedding');
+  });
+
+  it('refuses anything that is not an embedding model', () => {
+    for (const requested of ['fast', 'best', 'std-deepseek-v4-flash', 'bilinmeyen']) {
+      expect(() => ids(requested)).toThrow(RouteDeniedError);
+    }
+  });
+
+  it('follows allowedModels, a disabled model and the data policy', () => {
+    expect(ids('auto', { ...DEFAULT_POLICY, allowedModels: ['emb-eu'] })).toEqual(['emb-eu']);
+    expect(() => ids('emb-bge-m3', { ...DEFAULT_POLICY, allowedModels: ['emb-eu'] })).toThrow(
+      RouteDeniedError,
+    );
+    expect(() => ids('auto', DEFAULT_POLICY, [{ ...emb, enabled: false }])).toThrow(
+      RouteDeniedError,
+    );
+    expect(() => ids('auto', DEFAULT_POLICY, [{ ...emb, dataPolicy: 'may_train' }])).toThrow(
+      RouteDeniedError,
+    );
+  });
+
+  it('follows residency', () => {
+    expect(ids('auto', { ...DEFAULT_POLICY, residency: 'TR_ONLY' })).toEqual(['emb-tr']);
+    expect(ids('auto', { ...DEFAULT_POLICY, residency: 'EU_ONLY' })).toEqual(['emb-eu']);
+    expect(() => ids('emb-bge-m3', { ...DEFAULT_POLICY, residency: 'TR_ONLY' })).toThrow(
+      RouteDeniedError,
+    );
+    expect(() => ids('auto', { ...DEFAULT_POLICY, residency: 'TR_ONLY' }, DEFAULT_CATALOG)).toThrow(
+      RouteDeniedError,
+    );
+  });
+
+  it('keeps tr-local to Türkiye and to companies with it on', () => {
+    expect(ids('tr-local', trOn)).toEqual(['emb-tr']);
+    expect(() => ids('tr-local')).toThrow(RouteDeniedError);
+    expect(() => ids('tr-local', trOn, DEFAULT_CATALOG)).toThrow(RouteDeniedError);
+  });
+
+  it('follows auto being off', () => {
+    const off = { ...DEFAULT_POLICY, aliases: { ...DEFAULT_POLICY.aliases, auto: false } };
+    expect(() => ids('auto', off)).toThrow(RouteDeniedError);
+    expect(ids('emb-bge-m3', off)).toEqual(['emb-bge-m3']);
   });
 });
 

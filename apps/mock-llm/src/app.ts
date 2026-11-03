@@ -3,6 +3,7 @@
 // It echoes the last user message, so tests can check what the gateway sent upstream.
 // With tools offered and TOOL_TRIGGER in that message, it calls the first tool instead,
 // with the message as the argument, so tests can follow a tool call end to end.
+import { createHash } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 export interface MockOptions {
@@ -18,7 +19,13 @@ interface ChatBody {
   model: string;
   stream?: boolean;
   messages: Array<{ role: string; content: unknown }>;
-  tools?: Array<{ function?: { name?: string } }>;
+  tools?: Array<{ function?: { name?: string; parameters?: { required?: string[] } } }>;
+}
+
+interface EmbeddingBody {
+  model: string;
+  input: string | string[];
+  encoding_format?: 'float' | 'base64';
 }
 
 export const TOOL_TRIGGER = '[[use-tool]]';
@@ -26,6 +33,11 @@ export const TOOL_TRIGGER = '[[use-tool]]';
 export interface RecordedRequest {
   headers: Record<string, unknown>;
   body: ChatBody;
+}
+
+export interface RecordedEmbedding {
+  headers: Record<string, unknown>;
+  body: EmbeddingBody;
 }
 
 function lastUserText(messages: ChatBody['messages']): string {
@@ -43,15 +55,38 @@ function lastUserText(messages: ChatBody['messages']): string {
 const tokens = (s: string) => Math.max(1, Math.ceil(s.length / 4));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** BGE-M3's size, so a RAG API sees what it will see from the real one. */
+export const MOCK_EMBEDDING_SIZE = 1024;
+
+/**
+ * The same text always gets the same vector, and texts sharing words get close ones, so a
+ * search finds the right piece of a document without a model.
+ */
+function mockEmbedding(text: string): number[] {
+  const vector = new Array<number>(MOCK_EMBEDDING_SIZE).fill(0);
+  for (const word of text.toLocaleLowerCase('tr').match(/[\p{L}\p{N}]+/gu) ?? ['']) {
+    const hash = createHash('sha256').update(word).digest();
+    vector[hash.readUInt32BE(0) % MOCK_EMBEDDING_SIZE]! += hash[4]! % 2 === 0 ? 1 : -1;
+  }
+  const length = Math.hypot(...vector);
+  if (length === 0) vector[0] = 1;
+  return vector.map((n) => (length === 0 ? n : n / length));
+}
+
 export function buildMockApp(
   opts: MockOptions = {},
-): FastifyInstance & { requests: RecordedRequest[] } {
-  const app = Fastify({ logger: false }) as unknown as FastifyInstance & {
+): FastifyInstance & { requests: RecordedRequest[]; embeddingRequests: RecordedEmbedding[] } {
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 20 * 1024 * 1024,
+  }) as unknown as FastifyInstance & {
     requests: RecordedRequest[];
+    embeddingRequests: RecordedEmbedding[];
   };
   const fail = new Set(opts.failModels ?? []);
   const chunkSize = opts.chunkSize ?? 6;
   app.requests = [];
+  app.embeddingRequests = [];
 
   app.get('/healthz', async () => ({ status: 'ok' }));
 
@@ -80,7 +115,9 @@ export function buildMockApp(
     const toolName = lastUserText(body.messages).includes(TOOL_TRIGGER)
       ? body.tools?.[0]?.function?.name
       : undefined;
-    const toolArgs = JSON.stringify({ q: lastUserText(body.messages) });
+    // The name the tool asks for, as LibreChat checks a tool's arguments before running it.
+    const argName = body.tools?.[0]?.function?.parameters?.required?.[0] ?? 'q';
+    const toolArgs = JSON.stringify({ [argName]: lastUserText(body.messages) });
 
     if (!body.stream && toolName) {
       return {
@@ -172,13 +209,29 @@ export function buildMockApp(
     return reply;
   });
 
-  app.post<{ Body: { model: string; input: string | string[] } }>('/v1/embeddings', async (req) => {
-    const inputs = Array.isArray(req.body.input) ? req.body.input : [req.body.input];
+  app.post<{ Body: EmbeddingBody }>('/v1/embeddings', async (req, reply) => {
+    const body = req.body;
+    app.embeddingRequests.push({ headers: req.headers, body });
+    if (fail.has(body.model)) {
+      return reply.code(500).send({ error: { message: 'mock failure', type: 'api_error' } });
+    }
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    const used = inputs.reduce((a, s) => a + tokens(s), 0);
     return {
       object: 'list',
-      model: req.body.model,
-      data: inputs.map((_, index) => ({ object: 'embedding', index, embedding: [0.1, 0.2, 0.3] })),
-      usage: { prompt_tokens: inputs.reduce((a, s) => a + tokens(s), 0), total_tokens: 0 },
+      model: body.model,
+      data: inputs.map((text, index) => {
+        const vector = mockEmbedding(text);
+        return {
+          object: 'embedding',
+          index,
+          embedding:
+            body.encoding_format === 'base64'
+              ? Buffer.from(new Float32Array(vector).buffer).toString('base64')
+              : vector,
+        };
+      }),
+      usage: { prompt_tokens: used, total_tokens: used },
     };
   });
 
