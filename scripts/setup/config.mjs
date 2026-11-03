@@ -103,7 +103,14 @@ export function validateConfig(c) {
   const presidio = images.presidio_analyzer ?? {};
   unknown(
     presidio,
-    ['registry', 'version', 'spacy_model_version', 'spacy_model_sha256'],
+    [
+      'registry',
+      'version',
+      'spacy_model_version',
+      'spacy_model_sha256',
+      'ner_model',
+      'ner_model_revision',
+    ],
     'images.presidio_analyzer',
   );
   for (const k of ['registry', 'version', 'spacy_model_version']) {
@@ -198,6 +205,8 @@ export function composeEnv(config) {
     KATIP_PRESIDIO_VERSION: presidio.version,
     KATIP_SPACY_MODEL_VERSION: presidio.spacy_model_version,
     KATIP_SPACY_MODEL_SHA256: presidio.spacy_model_sha256,
+    KATIP_NER_MODEL: presidio.ner_model,
+    KATIP_NER_MODEL_REVISION: presidio.ner_model_revision,
   };
   for (const name of PINNED_IMAGES) env[`KATIP_IMAGE_${name.toUpperCase()}`] = config.images[name];
   return env;

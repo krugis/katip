@@ -1,0 +1,4293 @@
+{
+ "generatedBy": "gen-tr-recall.mjs",
+ "cases": [
+  {
+   "text": "Müşterinin T.C. kimlik numarası 56608501258 olarak kayıtlı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "56608501258"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "TCKN: 48677389394",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "48677389394"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Kimlik no 83050132990 ile başvuru yapıldı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "83050132990"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Lütfen 81171531074 numaralı kişinin dosyasını açın.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "81171531074"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "tc 54994886508 sisteme girilemedi, kontrol eder misiniz?",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "54994886508"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Sözleşmedeki kimlik numarasını 37651444846 olarak düzelttik.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "37651444846"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "89150479430, personelin T.C. numarasıdır.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "89150479430"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Başvuran: T.C. Kimlik No: 72585708428, tarih 12.03.2026.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "72585708428"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Müşterinin T.C. kimlik numarası 63256471598 olarak kayıtlı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "63256471598"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "TCKN: 14890683526",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "14890683526"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Kimlik no 25937459554 ile başvuru yapıldı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "25937459554"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Lütfen 73007534212 numaralı kişinin dosyasını açın.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "73007534212"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "tc 28389452944 sisteme girilemedi, kontrol eder misiniz?",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "28389452944"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Sözleşmedeki kimlik numarasını 67846300206 olarak düzelttik.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "67846300206"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "91127796204, personelin T.C. numarasıdır.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "91127796204"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Başvuran: T.C. Kimlik No: 21253004928, tarih 12.03.2026.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "21253004928"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Müşterinin T.C. kimlik numarası 84870070554 olarak kayıtlı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "84870070554"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "TCKN: 50407099824",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "50407099824"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Kimlik no 27565231090 ile başvuru yapıldı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "27565231090"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Lütfen 97084111326 numaralı kişinin dosyasını açın.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "97084111326"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "tc 12592449624 sisteme girilemedi, kontrol eder misiniz?",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "12592449624"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Sözleşmedeki kimlik numarasını 99044503622 olarak düzelttik.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "99044503622"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "49519357946, personelin T.C. numarasıdır.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "49519357946"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Başvuran: T.C. Kimlik No: 28279976482, tarih 12.03.2026.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "28279976482"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Müşterinin T.C. kimlik numarası 57090223468 olarak kayıtlı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "57090223468"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "TCKN: 29956339354",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "29956339354"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Kimlik no 18431496668 ile başvuru yapıldı.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "18431496668"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Lütfen 60844771580 numaralı kişinin dosyasını açın.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "60844771580"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "tc 59455505974 sisteme girilemedi, kontrol eder misiniz?",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "59455505974"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Sözleşmedeki kimlik numarasını 76986792116 olarak düzelttik.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "76986792116"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "67091263004, personelin T.C. numarasıdır.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "67091263004"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Başvuran: T.C. Kimlik No: 38453779938, tarih 12.03.2026.",
+   "entities": [
+    {
+     "type": "TR_TCKN",
+     "value": "38453779938"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Firmanın vergi numarası 3202104318 olarak geçiyor.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "3202104318"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "VKN: 7671330198",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "7671330198"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Faturadaki vergi kimlik numarası 5047632875 doğru mu?",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "5047632875"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Vergi no 4239727036 için e-fatura kaydı açıldı.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "4239727036"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Tedarikçi, vergi numarası: 1754134738, Kadıköy Vergi Dairesi.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "1754134738"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Firmanın vergi numarası 7119729229 olarak geçiyor.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "7119729229"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "VKN: 8768641648",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "8768641648"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Faturadaki vergi kimlik numarası 9952007943 doğru mu?",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "9952007943"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Vergi no 6092588512 için e-fatura kaydı açıldı.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "6092588512"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Tedarikçi, vergi numarası: 0701663200, Kadıköy Vergi Dairesi.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "0701663200"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Firmanın vergi numarası 8435226770 olarak geçiyor.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "8435226770"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "VKN: 7410972876",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "7410972876"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Faturadaki vergi kimlik numarası 3677485428 doğru mu?",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "3677485428"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Vergi no 3249232531 için e-fatura kaydı açıldı.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "3249232531"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Tedarikçi, vergi numarası: 9098077044, Kadıköy Vergi Dairesi.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "9098077044"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Firmanın vergi numarası 5323589285 olarak geçiyor.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "5323589285"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "VKN: 3431032980",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "3431032980"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Faturadaki vergi kimlik numarası 0989207958 doğru mu?",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "0989207958"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Vergi no 5480125402 için e-fatura kaydı açıldı.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "5480125402"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Tedarikçi, vergi numarası: 1904545734, Kadıköy Vergi Dairesi.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "1904545734"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Firmanın vergi numarası 1454560963 olarak geçiyor.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "1454560963"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "VKN: 7011272555",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "7011272555"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Faturadaki vergi kimlik numarası 5289473041 doğru mu?",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "5289473041"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Vergi no 6355249515 için e-fatura kaydı açıldı.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "6355249515"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Tedarikçi, vergi numarası: 0538138267, Kadıköy Vergi Dairesi.",
+   "entities": [
+    {
+     "type": "TR_VKN",
+     "value": "0538138267"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Ödemeyi TR353042302225323395377899 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR353042302225323395377899"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "IBAN: TR175589200074479342029342",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR175589200074479342029342"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Maaş hesabım TR306755301313997318004880, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR306755301313997318004880"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR415416109841127538984788 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR415416109841127538984788"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Havale için hesap: TR802130400306411546767096 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR802130400306411546767096"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Ödemeyi TR789894002987728387353338 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR789894002987728387353338"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "IBAN: TR775650601892525619246621",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR775650601892525619246621"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Maaş hesabım TR061132305377119989336604, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR061132305377119989336604"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR916949704024514533767993 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR916949704024514533767993"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Havale için hesap: TR826615000975530409338809 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR826615000975530409338809"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Ödemeyi TR881567201165772718734569 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR881567201165772718734569"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "IBAN: TR413797209676893815035404",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR413797209676893815035404"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Maaş hesabım TR128726609671111804806173, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR128726609671111804806173"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR248999902214196576806716 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR248999902214196576806716"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Havale için hesap: TR259048303475273379487203 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR259048303475273379487203"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Ödemeyi TR23 1026 9024 7700 5359 4179 79 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR23 1026 9024 7700 5359 4179 79"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "IBAN: TR11 4174 5088 6863 4001 0455 25",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR11 4174 5088 6863 4001 0455 25"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Maaş hesabım TR06 8437 7002 0270 2852 7345 19, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR06 8437 7002 0270 2852 7345 19"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR13 6810 2089 8575 3239 0034 21 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR13 6810 2089 8575 3239 0034 21"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Havale için hesap: TR64 3529 5025 3484 1351 7949 41 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR64 3529 5025 3484 1351 7949 41"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Ödemeyi TR73 0793 6028 9062 6824 1324 78 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR73 0793 6028 9062 6824 1324 78"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "IBAN: TR71 9249 0098 8485 1197 2331 28",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR71 9249 0098 8485 1197 2331 28"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Maaş hesabım TR59 1828 3089 5837 0738 3217 22, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR59 1828 3089 5837 0738 3217 22"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR70 9215 3039 9869 8700 9870 94 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR70 9215 3039 9869 8700 9870 94"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Havale için hesap: TR31 2920 2046 3904 0567 4017 67 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR31 2920 2046 3904 0567 4017 67"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Ödemeyi TR59 1891 9072 9438 6262 0598 67 numaralı hesaba yapın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR59 1891 9072 9438 6262 0598 67"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "IBAN: TR93 9389 3085 6064 2727 7174 00",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR93 9389 3085 6064 2727 7174 00"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Maaş hesabım TR87 8423 2036 6163 5765 8789 99, buna yatırılsın.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR87 8423 2036 6163 5765 8789 99"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Alıcı IBAN'ı TR71 6951 3075 9721 0785 1360 48 olarak değiştirildi.",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR71 6951 3075 9721 0785 1360 48"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Havale için hesap: TR10 8739 3076 0791 3833 0237 08 (Ziraat)",
+   "entities": [
+    {
+     "type": "TR_IBAN",
+     "value": "TR10 8739 3076 0791 3833 0237 08"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Beni 0535 683 56 53 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0535 683 56 53"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: 0 552 542 5588",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 552 542 5588"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu 05596728207 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "05596728207"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 0530 091 68 42 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0530 091 68 42"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0216 504 20 88, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0216 504 20 88"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni 0 555 565 3445 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 555 565 3445"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: +90 530 832 26 19",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 530 832 26 19"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu +90 544 468 00 93 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 544 468 00 93"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda (0544) 681 85 43 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "(0544) 681 85 43"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0505-599-92-47, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0505-599-92-47"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni +90 505 175 60 36 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 505 175 60 36"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: 0232 216 36 30",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0232 216 36 30"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu 0559 481 22 51 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0559 481 22 51"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 0 532 049 0345 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 532 049 0345"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi +905521109968, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+905521109968"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni +905326589138 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+905326589138"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: 0559 301 57 56",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0559 301 57 56"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu 0559 449 64 17 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0559 449 64 17"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 0 552 532 9094 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 552 532 9094"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0559 992 09 24, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0559 992 09 24"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni +90 (530) 039 19 34 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 (530) 039 19 34"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: 0322 337 40 32",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0322 337 40 32"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu +90 (535) 047 51 68 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 (535) 047 51 68"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 0 530 581 3658 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 530 581 3658"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0 559 791 6670, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 559 791 6670"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni +90 505 426 21 27 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "+90 505 426 21 27"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: (0559) 409 84 43",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "(0559) 409 84 43"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu (0505) 919 34 59 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "(0505) 919 34 59"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 05053603121 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "05053603121"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0312 061 95 97, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0312 061 95 97"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Beni 0 552 853 1780 numarasından arayabilirsiniz.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 552 853 1780"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Telefon: 0 532 874 9003",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 532 874 9003"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Müşteri cep telefonunu 0232 320 78 53 olarak güncelledi.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0232 320 78 53"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Acil durumda 0555 133 45 38 aranacak.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0555 133 45 38"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "İletişim bilgisi 0 555 730 8284, mesai saatlerinde ulaşılır.",
+   "entities": [
+    {
+     "type": "TR_PHONE",
+     "value": "0 555 730 8284"
+    }
+   ],
+   "style": "mixed"
+  },
+  {
+   "text": "Raporu ayse.yilmaz@ornek.com.tr adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ayse.yilmaz@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: ayse.yilmaz@ornek.com.tr",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ayse.yilmaz@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana zeynep_demir@kurum.gov.tr üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@kurum.gov.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura m.kaya@kurum.gov.tr adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "m.kaya@kurum.gov.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Raporu ahmet.celik85@ornek.com.tr adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: ik-birim@gmail.com",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana m.kaya@ornek.com.tr üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "m.kaya@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura ik-birim@sirket.net.tr adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@sirket.net.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Raporu ik-birim@firma.com adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@firma.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: zeynep_demir@ornek.com.tr",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana muhasebe@sirket.net.tr üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "muhasebe@sirket.net.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura ayse.yilmaz@gmail.com adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ayse.yilmaz@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Raporu ik-birim@sirket.net.tr adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@sirket.net.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: ayse.yilmaz@sirket.net.tr",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ayse.yilmaz@sirket.net.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana ahmet.celik85@gmail.com üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura ayse.yilmaz@ornek.com.tr adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ayse.yilmaz@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Raporu ik-birim@firma.com adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@firma.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: info@firma.com",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "info@firma.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana ik-birim@ornek.com.tr üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@ornek.com.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura ahmet.celik85@gmail.com adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Raporu ahmet.celik85@gmail.com adresine gönderin.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "E-posta: zeynep_demir@kurum.gov.tr",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@kurum.gov.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Bana ik-birim@kurum.gov.tr üzerinden yazabilirsiniz.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@kurum.gov.tr"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Fatura zeynep_demir@gmail.com adresine iletilsin lütfen.",
+   "entities": [
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@gmail.com"
+    }
+   ],
+   "style": "plain"
+  },
+  {
+   "text": "Kart numaram 4489326715532090, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4489326715532090"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Ödeme 4642296738162031 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4642296738162031"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Kredi kartı: 4072314547557520",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4072314547557520"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Müşterinin kartı 4249842945863965 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4249842945863965"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Kart numaram 4839487616207971, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4839487616207971"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Ödeme 4748539381705967 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4748539381705967"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Kredi kartı: 4104789794275300",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4104789794275300"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Müşterinin kartı 4230213927655475 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4230213927655475"
+    }
+   ],
+   "style": "compact"
+  },
+  {
+   "text": "Kart numaram 4865 6620 2209 3465, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4865 6620 2209 3465"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Ödeme 4591 6341 9801 0426 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4591 6341 9801 0426"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Kredi kartı: 4969 9315 4319 0950",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4969 9315 4319 0950"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Müşterinin kartı 4510 3028 5592 1883 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4510 3028 5592 1883"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Kart numaram 4131 4875 5371 5569, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4131 4875 5371 5569"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Ödeme 4046 8486 9114 1519 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4046 8486 9114 1519"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Kredi kartı: 4253 8644 0389 6140",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4253 8644 0389 6140"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Müşterinin kartı 4751 0566 4281 1892 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4751 0566 4281 1892"
+    }
+   ],
+   "style": "spaced"
+  },
+  {
+   "text": "Kart numaram 4072-6781-5534-6487, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4072-6781-5534-6487"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Ödeme 4796-6262-3349-7553 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4796-6262-3349-7553"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Kredi kartı: 4642-7107-6585-6703",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4642-7107-6585-6703"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Müşterinin kartı 4382-6985-0555-2738 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4382-6985-0555-2738"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Kart numaram 4972-2883-2944-7020, son kullanma 12/28.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4972-2883-2944-7020"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Ödeme 4306-3822-3051-7034 numaralı karttan alındı.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4306-3822-3051-7034"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Kredi kartı: 4886-6133-1600-1214",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4886-6133-1600-1214"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Müşterinin kartı 4117-1073-8515-0169 iade için kullanılacak.",
+   "entities": [
+    {
+     "type": "CREDIT_CARD",
+     "value": "4117-1073-8515-0169"
+    }
+   ],
+   "style": "dashed"
+  },
+  {
+   "text": "Ahmet Yılmaz bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Yılmaz"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sözleşmeyi Emine Kılıç imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Kılıç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Burak Koç ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Burak Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dosyayı Hüseyin Yıldız'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hüseyin Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Zeynep Yıldız'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Çağlar Aslan'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Çağlar Aslan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sayın Gökhan Polat, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Polat"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Müşterimiz Hasan Yıldız şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hasan Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Yönetici olarak Merve Polat atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Polat"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Merhaba, ben Gökhan Yıldız, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Tolga Doğan Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga Doğan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "İbrahim Yıldız Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Bu raporu Hüseyin Koç hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hüseyin Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Ekipten Şule Yıldız ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasta Hatice Kaya, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice Kaya"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Velisi Ümit Şimşek okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Şimşek"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Avukat Hatice Kılıç dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice Kılıç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dr. Ahmet Şahin randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Şahin"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "İrem Aydın bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Aydın"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sözleşmeyi Burak Kurt imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Burak Kurt"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "İrem Şahin ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Şahin"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dosyayı Merve Koç'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasan Kara'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hasan Kara"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sevgi Kurt'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Sevgi Kurt"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sayın Ümit Yılmaz, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Yılmaz"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Müşterimiz Ali Çelik şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Çelik"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Yönetici olarak Sevgi Doğan atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Sevgi Doğan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Merhaba, ben Derya Koç, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Derya Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Elif Kılıç Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Elif Kılıç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Merve Kurt Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Kurt"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Bu raporu Çağlar Çetin hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Çağlar Çetin"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Ekipten Mehmet Özdemir ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mehmet Özdemir"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasta Ümit Özdemir, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Özdemir"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Velisi Şule Koç okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Avukat Emine Aslan dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Aslan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dr. Ali Aslan randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Aslan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sevgi Arslan bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Sevgi Arslan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sözleşmeyi Zeynep Kara imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Kara"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasan Öztürk ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hasan Öztürk"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dosyayı Mustafa Çelik'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mustafa Çelik"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Mehmet Kurt'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mehmet Kurt"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasan Şahin'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hasan Şahin"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Sayın Özge Çelik, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Özge Çelik"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Müşterimiz İbrahim Yıldız şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Yönetici olarak Burak Yıldız atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Burak Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Merhaba, ben İrem Yıldız, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Elif Çelik Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Elif Çelik"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Özge Yıldız Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Özge Yıldız"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Bu raporu Emine Özkan hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Özkan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Ekipten Ali Demir ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Demir"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Hasta Gökhan Özkan, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Özkan"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Velisi İrem Koç okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Koç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Avukat Merve Aydın dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Aydın"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "Dr. Gökhan Kılıç randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Kılıç"
+    }
+   ],
+   "style": "title case"
+  },
+  {
+   "text": "zeynep polat bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "zeynep polat"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Sözleşmeyi hatice kara imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "hatice kara"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "ibrahim polat ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ibrahim polat"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Dosyayı mehmet yıldız'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "mehmet yıldız"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "fatma özkan'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "fatma özkan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "emine aydın'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "emine aydın"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Sayın burak çetin, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "burak çetin"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Müşterimiz zeynep özkan şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "zeynep özkan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Yönetici olarak ümit demir atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ümit demir"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Merhaba, ben hüseyin özkan, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "hüseyin özkan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "hüseyin aslan Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "hüseyin aslan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "merve aslan Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "merve aslan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Bu raporu mehmet çelik hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "mehmet çelik"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Ekipten burak yılmaz ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "burak yılmaz"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Hasta irem özkan, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "irem özkan"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Velisi burak öztürk okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "burak öztürk"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Avukat hatice şimşek dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "hatice şimşek"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "Dr. sevgi aydın randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "sevgi aydın"
+    }
+   ],
+   "style": "lower case"
+  },
+  {
+   "text": "MUSTAFA ÇETİN bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "MUSTAFA ÇETİN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Sözleşmeyi TOLGA KOÇ imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "TOLGA KOÇ"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "ELİF KURT ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ELİF KURT"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Dosyayı ÖZGE ÖZDEMİR'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ÖZGE ÖZDEMİR"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "AHMET ASLAN'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "AHMET ASLAN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "AYŞE ŞİMŞEK'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "AYŞE ŞİMŞEK"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Sayın ALİ POLAT, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ALİ POLAT"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Müşterimiz AHMET KURT şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "AHMET KURT"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Yönetici olarak FATMA ÇETİN atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "FATMA ÇETİN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Merhaba, ben ALİ DEMİR, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ALİ DEMİR"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "HATİCE ŞAHİN Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "HATİCE ŞAHİN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "MUSTAFA KOÇ Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "MUSTAFA KOÇ"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Bu raporu ZEYNEP POLAT hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ZEYNEP POLAT"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Ekipten SEVGİ KAYA ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "SEVGİ KAYA"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Hasta ÇAĞLAR ARSLAN, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ÇAĞLAR ARSLAN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Velisi ÖZGE ŞİMŞEK okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ÖZGE ŞİMŞEK"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Avukat ŞULE YILDIZ dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "ŞULE YILDIZ"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Dr. HATİCE ARSLAN randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "HATİCE ARSLAN"
+    }
+   ],
+   "style": "upper case"
+  },
+  {
+   "text": "Hamza Uçar bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hamza Uçar"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Sözleşmeyi Göksu Uçar imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Göksu Uçar"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Berfin Bingöl ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Berfin Bingöl"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Dosyayı Ecrin Bingöl'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ecrin Bingöl"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Tuğba Erdem'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tuğba Erdem"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Nilüfer Taşdemir'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Nilüfer Taşdemir"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Sayın Kaan Erdem, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Kaan Erdem"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Müşterimiz Hamza Taşdemir şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hamza Taşdemir"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Yönetici olarak Hamza Bozkurt atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hamza Bozkurt"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Merhaba, ben Rojda Akyüz, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Rojda Akyüz"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Tuğba Akyüz Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tuğba Akyüz"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Yağmur Ateş Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Yağmur Ateş"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Bu raporu Göksu Karadeniz hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Göksu Karadeniz"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Ekipten Mihriban Bingöl ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mihriban Bingöl"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Hasta Eymen Uçar, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Eymen Uçar"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Velisi Nilüfer Bingöl okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Nilüfer Bingöl"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Avukat Ecrin Erdem dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ecrin Erdem"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Dr. Yağmur Sarıgül randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Yağmur Sarıgül"
+    }
+   ],
+   "style": "less common"
+  },
+  {
+   "text": "Ahmet Nilüfer Aslan bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Nilüfer Aslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Sözleşmeyi Zeynep Yağmur Yılmaz imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Yağmur Yılmaz"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Burak Cemre Polat ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Burak Cemre Polat"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Dosyayı Ali Yağmur Aslan'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Yağmur Aslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Mustafa Göksu Öztürk'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mustafa Göksu Öztürk"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Elif Sude Arslan'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Elif Sude Arslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Sayın Hatice Nilüfer Arslan, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice Nilüfer Arslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Müşterimiz Mehmet Yağmur Kara şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mehmet Yağmur Kara"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Yönetici olarak Özge Yağmur Aslan atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Özge Yağmur Aslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Merhaba, ben Ümit Hamza Demir, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Hamza Demir"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Merve Ecrin Doğan Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Ecrin Doğan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Mustafa Sude Kara Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mustafa Sude Kara"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Bu raporu Derya Mihriban Öztürk hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Derya Mihriban Öztürk"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Ekipten Çağlar Eymen Arslan ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Çağlar Eymen Arslan"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Hasta Derya Ecrin Kaya, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Derya Ecrin Kaya"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Velisi Elif Göksu Aydın okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Elif Göksu Aydın"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Avukat Gökhan Hamza Çetin dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Hamza Çetin"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Dr. Fatma Göksu Demir randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Fatma Göksu Demir"
+    }
+   ],
+   "style": "three words"
+  },
+  {
+   "text": "Pierre Dubois bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Pierre Dubois"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Sözleşmeyi Anna Kowalska imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Anna Kowalska"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Olga Petrova ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Olga Petrova"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Dosyayı Ahmed Hassan'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmed Hassan"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Maria Garcia'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Maria Garcia"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Olga Petrova'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Olga Petrova"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Sayın Maria Garcia, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Maria Garcia"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Müşterimiz Maria Garcia şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Maria Garcia"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Yönetici olarak Anna Kowalska atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Anna Kowalska"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Merhaba, ben John Smith, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "John Smith"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Giorgi Beridze Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Giorgi Beridze"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Pierre Dubois Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Pierre Dubois"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Bu raporu Pierre Dubois hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Pierre Dubois"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Ekipten Hans Müller ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hans Müller"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Hasta Pierre Dubois, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Pierre Dubois"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Velisi Maria Garcia okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Maria Garcia"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Avukat Ahmed Hassan dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmed Hassan"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Dr. Pierre Dubois randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Pierre Dubois"
+    }
+   ],
+   "style": "foreign"
+  },
+  {
+   "text": "Nilüfer bugün toplantıya katılmayacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Nilüfer"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Sözleşmeyi Hatice imzaladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "İbrahim ile görüştüm, teklifi kabul etti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Dosyayı Hatice'a ilet lütfen.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Emine'ın izin talebi onaylandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Serhat'den gelen e-postayı okudun mu?",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Serhat"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Sayın Merve, başvurunuz alınmıştır.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Müşterimiz Mihriban şikayetini iletti.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mihriban"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Yönetici olarak Elif atandı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Elif"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Merhaba, ben Tolga, muhasebeden arıyorum.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Rojda Bey'e toplantı notlarını gönderdik.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Rojda"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Tolga Hanım yarın ofiste olacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Bu raporu Emine hazırladı, ona sorabilirsiniz.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Ekipten Mihriban ayrılıyor, yerine yeni biri alınacak.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mihriban"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Hasta İrem, kontrol için çağrıldı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Velisi Serhat okula geldi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Serhat"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Avukat Emine dilekçeyi hazırladı.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Dr. Ümit randevuyu erteledi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit"
+    }
+   ],
+   "style": "first name"
+  },
+  {
+   "text": "Personel: Ahmet Özkan, T.C. 13884289058, e-posta info@sirket.net.tr, telefon (0544) 325 81 77.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Özkan"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "13884289058"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "info@sirket.net.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "(0544) 325 81 77"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Şule Yılmaz, T.C. 23013932250, e-posta muhasebe@firma.com, telefon 05525787685.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Yılmaz"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "23013932250"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "muhasebe@firma.com"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "05525787685"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Sevgi Öztürk, T.C. 48211652526, e-posta ahmet.celik85@kurum.gov.tr, telefon +90 (542) 280 40 15.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Sevgi Öztürk"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "48211652526"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@kurum.gov.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "+90 (542) 280 40 15"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Ali Aydın, T.C. 22384516922, e-posta info@firma.com, telefon 0232 898 96 39.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Aydın"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "22384516922"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "info@firma.com"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "0232 898 96 39"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Ayşe Doğan, T.C. 75854851542, e-posta zeynep_demir@kurum.gov.tr, telefon 0559 945 48 68.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ayşe Doğan"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "75854851542"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@kurum.gov.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "0559 945 48 68"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Tolga Çelik, T.C. 60593517040, e-posta ahmet.celik85@gmail.com, telefon 05307921754.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga Çelik"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "60593517040"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ahmet.celik85@gmail.com"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "05307921754"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: İrem Aslan, T.C. 24537422548, e-posta info@firma.com, telefon 05358416615.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Aslan"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "24537422548"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "info@firma.com"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "05358416615"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Gökhan Kurt, T.C. 57585621458, e-posta zeynep_demir@kurum.gov.tr, telefon +90 530 385 12 02.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Kurt"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "57585621458"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@kurum.gov.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "+90 530 385 12 02"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Zeynep Özkan, T.C. 71972656700, e-posta ik-birim@ornek.com.tr, telefon 0 505 986 3117.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Özkan"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "71972656700"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@ornek.com.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "0 505 986 3117"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Ahmet Kurt, T.C. 56848888072, e-posta ik-birim@ornek.com.tr, telefon 0 532 152 0534.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Kurt"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "56848888072"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "ik-birim@ornek.com.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "0 532 152 0534"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: İbrahim Şimşek, T.C. 55437590884, e-posta zeynep_demir@sirket.net.tr, telefon (0505) 639 46 49.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Şimşek"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "55437590884"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "zeynep_demir@sirket.net.tr"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "(0505) 639 46 49"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Personel: Hasan Kurt, T.C. 31417723312, e-posta info@firma.com, telefon 0559-469-58-15.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hasan Kurt"
+    },
+    {
+     "type": "TR_TCKN",
+     "value": "31417723312"
+    },
+    {
+     "type": "EMAIL_ADDRESS",
+     "value": "info@firma.com"
+    },
+    {
+     "type": "TR_PHONE",
+     "value": "0559-469-58-15"
+    }
+   ],
+   "style": "record"
+  },
+  {
+   "text": "Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Merve Çelik bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Nilüfer Kılıç ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Ayşe Arslan toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Çelik"
+    },
+    {
+     "type": "PERSON",
+     "value": "Nilüfer Kılıç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ayşe Arslan"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Gökhan Polat bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Ecrin Aslan ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Mehmet Yıldız toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Polat"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ecrin Aslan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mehmet Yıldız"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Hatice Öztürk bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Tuğba Arslan ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Zeynep Şahin toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice Öztürk"
+    },
+    {
+     "type": "PERSON",
+     "value": "Tuğba Arslan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Zeynep Şahin"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. İbrahim Doğan bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Ecrin Kurt ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Ümit Kaya toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Doğan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ecrin Kurt"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ümit Kaya"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Zeynep Aydın bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Berfin Doğan ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Gökhan Yıldız toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Aydın"
+    },
+    {
+     "type": "PERSON",
+     "value": "Berfin Doğan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Gökhan Yıldız"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Çağlar Demir bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Kaan Şahin ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Hüseyin Polat toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Çağlar Demir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Kaan Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Hüseyin Polat"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. İrem Öztürk bunu onayladı. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Konuyu Ecrin Şahin ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Ali Çetin toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Öztürk"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ecrin Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ali Çetin"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Ahmet Yılmaz bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Tuğba Kılıç ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Mehmet Şahin toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmet Yılmaz"
+    },
+    {
+     "type": "PERSON",
+     "value": "Tuğba Kılıç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mehmet Şahin"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Hatice Öztürk bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Serhat Kılıç ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Ayşe Çetin toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hatice Öztürk"
+    },
+    {
+     "type": "PERSON",
+     "value": "Serhat Kılıç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ayşe Çetin"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Merve Demir bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Mihriban Demir ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Çağlar Yılmaz toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Merve Demir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mihriban Demir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Çağlar Yılmaz"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Özge Koç bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Sude Arslan ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Mehmet Kurt toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Özge Koç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Sude Arslan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mehmet Kurt"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Ümit Koç bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Cemre Kurt ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Derya Kara toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Koç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Cemre Kurt"
+    },
+    {
+     "type": "PERSON",
+     "value": "Derya Kara"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Şule Şahin bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Alperen Yıldız ile görüştük. Bütçe tablosu güncellendi ve yönetime iletildi. Ayşe Çelik toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Alperen Yıldız"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ayşe Çelik"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Şule Aydın bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Göksu Özdemir ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Ali Yıldız toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Aydın"
+    },
+    {
+     "type": "PERSON",
+     "value": "Göksu Özdemir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ali Yıldız"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Hüseyin Yılmaz bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Ecrin Kaya ile görüştük. Bütçe tablosu güncellendi ve yönetime iletildi. Özge Kaya toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hüseyin Yılmaz"
+    },
+    {
+     "type": "PERSON",
+     "value": "Ecrin Kaya"
+    },
+    {
+     "type": "PERSON",
+     "value": "Özge Kaya"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Tolga Polat bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Mihriban Kılıç ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Hatice Aydın toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga Polat"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mihriban Kılıç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Hatice Aydın"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Emine Öztürk bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Cemre Şahin ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Fatma Yılmaz toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Öztürk"
+    },
+    {
+     "type": "PERSON",
+     "value": "Cemre Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Fatma Yılmaz"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Şule Şimşek bunu onayladı. Bütçe tablosu güncellendi ve yönetime iletildi. Konuyu Kaan Şahin ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Şule Aydın toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Şimşek"
+    },
+    {
+     "type": "PERSON",
+     "value": "Kaan Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Şule Aydın"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Ayşe Doğan bunu onayladı. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Konuyu Göksu Özdemir ile görüştük. Bütçe tablosu güncellendi ve yönetime iletildi. Derya Çetin toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ayşe Doğan"
+    },
+    {
+     "type": "PERSON",
+     "value": "Göksu Özdemir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Derya Çetin"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Ümit Kaya bunu onayladı. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Konuyu Serhat Demir ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Gökhan Kurt toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ümit Kaya"
+    },
+    {
+     "type": "PERSON",
+     "value": "Serhat Demir"
+    },
+    {
+     "type": "PERSON",
+     "value": "Gökhan Kurt"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Şule Polat bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Eymen Çetin ile görüştük. Bütçe tablosu güncellendi ve yönetime iletildi. İbrahim Yıldız toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Polat"
+    },
+    {
+     "type": "PERSON",
+     "value": "Eymen Çetin"
+    },
+    {
+     "type": "PERSON",
+     "value": "İbrahim Yıldız"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Fatma Polat bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Sude Çetin ile görüştük. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Özge Öztürk toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Fatma Polat"
+    },
+    {
+     "type": "PERSON",
+     "value": "Sude Çetin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Özge Öztürk"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Fatma Yılmaz bunu onayladı. Herkes görüşlerini paylaştı, karar gelecek haftaya kaldı. Konuyu Nilüfer Kurt ile görüştük. Toplantıda satış rakamları ve yeni ürün planı konuşuldu. Özge Öztürk toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Fatma Yılmaz"
+    },
+    {
+     "type": "PERSON",
+     "value": "Nilüfer Kurt"
+    },
+    {
+     "type": "PERSON",
+     "value": "Özge Öztürk"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Bütçe tablosu güncellendi ve yönetime iletildi. Şule Kılıç bunu onayladı. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Konuyu Dilan Şahin ile görüştük. Depodaki stok sayımı tamamlandı, eksik ürünler listelendi. Mustafa Aydın toplantıya gelmedi.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Şule Kılıç"
+    },
+    {
+     "type": "PERSON",
+     "value": "Dilan Şahin"
+    },
+    {
+     "type": "PERSON",
+     "value": "Mustafa Aydın"
+    }
+   ],
+   "style": "paragraph"
+  },
+  {
+   "text": "Saygılarımla,\nAli Aslan\nİK Sorumlusu",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ali Aslan"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nKaan Taşdemir\nİK Sorumlusu",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Kaan Taşdemir"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nMehmet Aydın\nİK Sorumlusu",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Mehmet Aydın"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nTuğba Bingöl\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tuğba Bingöl"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nEmine Aydın\nSatış Uzmanı",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Aydın"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nDilan Ateş\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Dilan Ateş"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nZeynep Kurt\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Zeynep Kurt"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nEymen Yavuz\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Eymen Yavuz"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nİbrahim Kılıç\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Kılıç"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nKaan Bingöl\nİK Sorumlusu",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Kaan Bingöl"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nİrem Özkan\nMuhasebe Müdürü",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Özkan"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Saygılarımla,\nGöksu Yavuz\nİK Sorumlusu",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Göksu Yavuz"
+    }
+   ],
+   "style": "signature"
+  },
+  {
+   "text": "Please send the report to Ahmed Hassan by Friday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Ahmed Hassan"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Our customer Gökhan Arslan called about the invoice.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Gökhan Arslan"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "The meeting with John Smith is at noon.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "John Smith"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "İbrahim Koç approved the contract yesterday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İbrahim Koç"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Please send the report to Hans Müller by Friday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hans Müller"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Our customer Emine Öztürk called about the invoice.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Emine Öztürk"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "The meeting with Hans Müller is at noon.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hans Müller"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Hüseyin Yılmaz approved the contract yesterday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Hüseyin Yılmaz"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Please send the report to Maria Garcia by Friday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Maria Garcia"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "Our customer Tolga Koç called about the invoice.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Tolga Koç"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "The meeting with Giorgi Beridze is at noon.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "Giorgi Beridze"
+    }
+   ],
+   "style": "english"
+  },
+  {
+   "text": "İrem Öztürk approved the contract yesterday.",
+   "entities": [
+    {
+     "type": "PERSON",
+     "value": "İrem Öztürk"
+    }
+   ],
+   "style": "english"
+  }
+ ],
+ "clean": [
+  "Toplantı yarın saat 14.00’te başlayacak.",
+  "Ciro geçen yıla göre yüzde 12 arttı.",
+  "Sipariş numarası 12345678901 olan ürün depoda.",
+  "Stok kodu 10000000147 sistemde görünmüyor.",
+  "Fatura tutarı 1.250,00 TL olarak hesaplandı.",
+  "Proje teslim tarihi 15.04.2026 olarak güncellendi.",
+  "Ankara ofisi bu hafta kapalı olacak.",
+  "İstanbul’daki depo genişletilecek.",
+  "Yeni ürünümüz Mart ayında çıkıyor.",
+  "Satış raporunu Excel olarak hazırlayın.",
+  "Sunucu 192.168.1.10 adresinde çalışıyor.",
+  "Kargo takip numarası 4242424242424241 sorgulanamadı.",
+  "Bugün hava çok güzel, dışarı çıkalım.",
+  "Bilgisayar programı güncelleme istiyor.",
+  "Yönetim kurulu kararı tutanağa geçirildi.",
+  "Müşteri memnuniyeti anketi sonuçlandı.",
+  "Türkiye Cumhuriyet Merkez Bankası faizi açıkladı.",
+  "Kadıköy şubesi hafta sonu açık.",
+  "Vergi dairesine gidilmesi gerekiyor.",
+  "Güneş enerjisi yatırımı bu yıl arttı.",
+  "Demir çelik fiyatları yükseliyor.",
+  "Deniz kenarındaki tesis kapandı.",
+  "Umut verici sonuçlar aldık.",
+  "Kaya parçaları yolu kapattı.",
+  "Yıldız Teknik Üniversitesi ile anlaşma imzalandı.",
+  "Doğan Haber Ajansı açıklama yaptı.",
+  "Ankara Büyükşehir Belediyesi ihaleye çıktı.",
+  "Microsoft Teams toplantısı ertelendi.",
+  "Kaya Holding bu yıl halka arz oluyor.",
+  "Müşteri numarası 2123456789 sistemde görünmüyor."
+ ]
+}

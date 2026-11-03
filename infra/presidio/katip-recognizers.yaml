@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Kâtip recognizer registry (LLD-03 §5): Presidio contributes PERSON NER only
-# (SpacyRecognizer over xx_ent_wiki_sm, TR + EN). Structured TR recognizers
+# (the Turkish BERT model in katip-nlp.yaml, read through TransformersRecognizer). Structured TR recognizers
 # (TCKN/VKN/IBAN/phone) are TypeScript in packages/pii with checksums; keeping
 # them out of Presidio avoids double detection and keeps startup lean.
 supported_languages:
@@ -9,5 +9,5 @@ supported_languages:
 global_regex_flags: 26
 
 recognizers:
-  - name: SpacyRecognizer
+  - name: TransformersRecognizer
     type: predefined

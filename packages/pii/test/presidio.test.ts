@@ -46,7 +46,7 @@ describe('PresidioClient', () => {
   it('drops non-PERSON entities, low scores and out-of-range spans', async () => {
     const { fetch } = fetchStub([
       [
-        { entity_type: 'PERSON', start: 0, end: 5, score: 0.5 }, // below minScore
+        { entity_type: 'PERSON', start: 0, end: 5, score: 0.2 }, // below minScore
         { entity_type: 'LOCATION', start: 0, end: 6, score: 0.9 }, // unmapped type
         { entity_type: 'PERSON', start: 40, end: 50, score: 0.9 }, // out of range
         { entity_type: 'PERSON', start: 5, end: 5, score: 0.9 }, // empty span

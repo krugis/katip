@@ -12,7 +12,7 @@ export {
   PLACEHOLDER_CLOSE,
 } from './mask.js';
 export { maskChatRequest, type MaskRequestResult } from './request.js';
-export { PresidioClient, type PresidioClientOptions } from './presidio.js';
+export { PresidioClient, splitForAnalysis, type PresidioClientOptions } from './presidio.js';
 export {
   createMasker,
   maskMessages,
