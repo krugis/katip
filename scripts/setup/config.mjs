@@ -71,7 +71,11 @@ export function validateConfig(c) {
 
   unknown(c, ['project', 'identity', 'jobs', 'images', 'models', 'tenants'], 'config');
 
-  unknown(c.project, ['name', 'base_domain', 'tenant_network_prefix'], 'project');
+  unknown(
+    c.project,
+    ['name', 'base_domain', 'tenant_network_prefix', 'allow_mock_models'],
+    'project',
+  );
   if (!/^[a-z0-9][a-z0-9-]*$/.test(c.project?.name ?? '')) {
     errors.push('project.name: must match ^[a-z0-9][a-z0-9-]*$');
   }
@@ -226,6 +230,28 @@ export function composeEnv(config) {
 
 /** The model_list entries for LiteLLM. Without its API key, a model routes to mock-llm. */
 export const LOCAL_LLM_RELAY_PORT = 18090;
+
+/** The models that would answer from the mock, because nothing real is set up for them. */
+export const modelsOnMock = (config, env) =>
+  config.models
+    .filter(
+      (m) => !env[m.api_key_env] && !(env.KATIP_LOCAL_LLM_UPSTREAM && m.class !== 'embedding'),
+    )
+    .map((m) => m.alias);
+
+/**
+ * The mock echoes, so someone on a real site would get nonsense and think it's the product.
+ * Fine on localhost. Anywhere else it has to be asked for.
+ */
+export function mockModelsProblem(config, env) {
+  const models = modelsOnMock(config, env);
+  if (models.length === 0 || config.project.base_domain === 'localhost') return null;
+  if (config.project.allow_mock_models === true) return null;
+  return (
+    `these models have no provider key, so they would answer from the mock: ${models.join(', ')}. ` +
+    'Set their keys in infra/env/katip.env, or set project.allow_mock_models: true in the config.'
+  );
+}
 
 export function renderLiteLLMModels(config, env) {
   const lines = [];

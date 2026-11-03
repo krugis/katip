@@ -14,6 +14,8 @@ import {
   tenantSecretName,
   pickTenantSubnet,
   validateConfig,
+  mockModelsProblem,
+  modelsOnMock,
 } from '../config.mjs';
 import {
   adoptTenantSecretsFromEnvFile,
@@ -307,6 +309,37 @@ describe('tenants', () => {
       DEEPINFRA_API_KEY: 'k',
     });
     expect(key).toContain('deepinfra/deepseek-ai/DeepSeek-V4-Flash');
+  });
+
+  describe('models with nothing real behind them', () => {
+    const site = (extra = {}) => ({
+      ...config,
+      project: { ...config.project, base_domain: 'yzkatip.com.tr', ...extra },
+    });
+    const allKeys = Object.fromEntries(config.models.map((m) => [m.api_key_env, 'k']));
+
+    it('are fine on localhost', () => {
+      expect(mockModelsProblem(config, {})).toBeNull();
+    });
+
+    it('stop the install on a real domain, and name them', () => {
+      const embedding = config.models.find((m) => m.class === 'embedding').alias;
+      expect(mockModelsProblem(site(), {})).toContain(embedding);
+    });
+
+    it('still count when a local chat model covers the rest', () => {
+      const local = { KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080' };
+      const embedding = config.models.find((m) => m.class === 'embedding').alias;
+      expect(modelsOnMock(site(), local)).toEqual([embedding]);
+    });
+
+    it('are allowed when the config says so', () => {
+      expect(mockModelsProblem(site({ allow_mock_models: true }), {})).toBeNull();
+    });
+
+    it('are no problem once every model has a key', () => {
+      expect(mockModelsProblem(site(), allKeys)).toBeNull();
+    });
   });
 
   it("keeps the gateway key out of the file LibreChat's user has to read", () => {

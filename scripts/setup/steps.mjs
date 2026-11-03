@@ -12,6 +12,8 @@ import {
   identityInput,
   platformIdentityInput,
   provisionInput,
+  mockModelsProblem,
+  modelsOnMock,
   renderLiteLLMModels,
   seedInput,
   tenantNetworkName,
@@ -365,6 +367,10 @@ const fill = (tmpl, vars) =>
 
 function renderLiteLLMConfig(ctx) {
   const tmpl = readFileSync(join(ctx.infra, 'litellm', 'config.dev.tmpl.yaml'), 'utf8');
+  const mockProblem = mockModelsProblem(ctx.config, ctx.env);
+  if (mockProblem) throw new Error(mockProblem);
+  const onMock = modelsOnMock(ctx.config, ctx.env);
+  if (onMock.length > 0) ctx.log(`models answering from the mock: ${onMock.join(', ')}`);
   const out = tmpl.replace('%%MODELS%%', () => renderLiteLLMModels(ctx.config, ctx.env));
   mkdirSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true });
   writeFileSync(join(ctx.infra, 'litellm', 'rendered', 'config.dev.yaml'), out);

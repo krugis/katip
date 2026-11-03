@@ -17,6 +17,9 @@ project:
   name: katip
   # Services get <service>.<base_domain>; tenant demo → demo.localhost
   base_domain: localhost
+  # On any other domain, a model with no provider key stops the install, because the mock
+  # only echoes. Set this to true to allow it, such as for a test site using a local model.
+  # allow_mock_models: false
   # Each tenant gets its own /24 under this, so a host can run many: Docker's
   # default address pools allow only about 30 networks.
   tenant_network_prefix: 10.77
