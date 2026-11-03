@@ -7,13 +7,22 @@
  * pnpm tenant:delete  --slug acme --confirm acme # locks it out; the purge comes 30 days later
  * pnpm tenant:purge-due                          # runs the purges whose wait is over
  * pnpm tenant:forget-due                         # carries out the deletions admins approved
+ * pnpm tenant:daily                              # all of the above that's due, and retention
  * pnpm tenant:upgrade --slug acme | --all        # rolls out the image and settings in the config
  */
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
 import { AUTO_KEYS, createAndStartTenant, deriveEnv, loadAllTenantSecrets } from './steps.mjs';
-import { forgetDue, purgeDue, resume, softDelete, suspend, upgrade } from './tenant-lifecycle.mjs';
+import {
+  daily,
+  forgetDue,
+  purgeDue,
+  resume,
+  softDelete,
+  suspend,
+  upgrade,
+} from './tenant-lifecycle.mjs';
 import { adoptTenantSecretsFromEnvFile } from './tenants.mjs';
 import { ensureEnvFile, INFRA } from './util.mjs';
 
@@ -119,6 +128,13 @@ const COMMANDS = {
     if (failed.length > 0) {
       throw new Error(`Failed, so run this again:\n  ${failed.join('\n  ')}`);
     }
+  },
+  async daily(ctx) {
+    const { deleted, purged, expired, failed } = await daily(ctx);
+    console.log(
+      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}.`,
+    );
+    if (failed.length > 0) throw new Error(`Failed:\n  ${failed.join('\n  ')}`);
   },
   async upgrade(ctx, values) {
     if (!values.all && !values.slug) throw new Error('add --slug <slug> or --all');

@@ -43,6 +43,8 @@ export interface ProvisionerStore {
   markPurgeRunning(jobId: string): Promise<void>;
   duePurges(now: Date): Promise<string[]>;
   anonymiseTenant(tenantId: string): Promise<void>;
+  enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }>;
+  recordDailyRun(details: Record<string, unknown>): Promise<void>;
   deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
   deletionSubject(
     slug: string,
@@ -380,6 +382,29 @@ export class DbProvisionerStore implements ProvisionerStore {
         targetId: userId,
         details: { slug, requestId },
       });
+    });
+  }
+
+  async enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }> {
+    const rows = await this.db.execute(sql`select * from enforce_retention()`);
+    const row = rows[0] as Record<string, unknown>;
+    return {
+      usage: Number(row['expired_usage']),
+      usageDaily: Number(row['expired_usage_daily']),
+      audit: Number(row['expired_audit']),
+    };
+  }
+
+  async recordDailyRun(details: Record<string, unknown>): Promise<void> {
+    await this.db.insert(schema.auditLog).values({
+      id: randomUUID(),
+      tenantId: null,
+      actorType: 'system',
+      actorId: 'provisioner',
+      action: 'platform.daily',
+      targetType: 'platform',
+      targetId: null,
+      details,
     });
   }
 

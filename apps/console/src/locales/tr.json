@@ -1,4 +1,10 @@
 {
+  "dailyJob": {
+    "ok": "Günlük iş son olarak {{when}} tarihinde sorunsuz çalıştı.",
+    "never": "Günlük iş henüz hiç çalışmadı. Onaylanan silme işlemleri ve temizlikler bekliyor.",
+    "late": "Günlük iş bir günden uzun süredir çalışmıyor (son çalışma: {{when}}). Onaylanan silme işlemleri bekliyor.",
+    "failed": "Günlük işin son çalışmasında {{failed}} hata oldu ({{when}}). Sunucudaki günlük dosyasına bakın."
+  },
   "app": {
     "name": "Kâtip",
     "openChat": "Sohbete git",

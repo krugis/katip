@@ -132,6 +132,39 @@ export async function forgetDue(ctx) {
 }
 
 /**
+ * What has to happen every day with nobody there: deletions, purges and retention. One part
+ * failing doesn't stop the rest, and the run is recorded either way, so the provider console
+ * can say if it failed or stopped running. Everything in it is safe to repeat.
+ */
+export async function daily(ctx) {
+  const failed = [];
+  const part = async (name, fn, otherwise) => {
+    try {
+      return await fn();
+    } catch (e) {
+      failed.push(`${name}: ${e.message.trim().split('\n').at(-1)}`);
+      return otherwise;
+    }
+  };
+  const forget = await part('deletions', () => forgetDue(ctx), { done: 0, failed: [] });
+  const purge = await part('purges', () => purgeDue(ctx), { purged: [], failed: [] });
+  const expired = await part('retention', () => runTenantAction(ctx, 'daily-retention', 'none'), {
+    usage: 0,
+    audit: 0,
+  });
+  failed.push(...forget.failed, ...purge.failed);
+  await runProvisionerWith(ctx, 'daily-record', {
+    slug: 'none',
+    deleted: forget.done,
+    purged: purge.purged.length,
+    failed: failed.length,
+    expiredUsage: expired.usage,
+    expiredAudit: expired.audit,
+  });
+  return { deleted: forget.done, purged: purge.purged, expired, failed };
+}
+
+/**
  * Rolls the tenants onto the image and settings in the config, one at a time, and stops at
  * the first that fails its health check, so a bad version can't reach the rest.
  */

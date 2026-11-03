@@ -45,6 +45,8 @@ const ConfigSchema = z.object({
     'deletions-due',
     'deletion-lookup',
     'deletion-finish',
+    'daily-retention',
+    'daily-record',
   ]),
   TENANT_INPUT: z.string().min(1),
   /** Only for the stages that set a tenant up. */
@@ -131,6 +133,19 @@ try {
     'deletions-due': async () => ({ deletions: await deletionsDue(forgetDeps) }),
     'deletion-lookup': () => deletionLookup(forgetDeps, slug, requestOf()),
     'deletion-finish': () => finishDeletion(forgetDeps, slug, requestOf()),
+    'daily-retention': () => store.enforceRetention(),
+    'daily-record': () =>
+      store.recordDailyRun(
+        z
+          .object({
+            deleted: z.number(),
+            purged: z.number(),
+            failed: z.number(),
+            expiredUsage: z.number(),
+            expiredAudit: z.number(),
+          })
+          .parse(input),
+      ),
   };
   const action = lifecycle[config.TENANT_ACTION];
   if (action) {

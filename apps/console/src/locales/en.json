@@ -1,4 +1,10 @@
 {
+  "dailyJob": {
+    "ok": "The daily job last ran without problems on {{when}}.",
+    "never": "The daily job has never run. Approved deletions and purges are waiting.",
+    "late": "The daily job has not run for over a day (last run: {{when}}). Approved deletions are waiting.",
+    "failed": "The daily job had {{failed}} failures in its last run ({{when}}). Check the log on the server."
+  },
   "app": {
     "name": "Kâtip",
     "openChat": "Go to chat",
