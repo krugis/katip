@@ -15,6 +15,7 @@ import {
 } from './lifecycle.js';
 import {
   createTenant,
+  ensureGatewayKey,
   ensureRagKey,
   finishTenant,
   ProvisionError,
@@ -49,6 +50,7 @@ const ConfigSchema = z.object({
     'create',
     'finish',
     'rag-key',
+    'gateway-key',
     'rollback',
     'suspend',
     'resume',
@@ -156,6 +158,7 @@ try {
   const requestOf = () => z.object({ requestId: z.string().uuid() }).parse(input).requestId;
   const lifecycle: Record<string, () => Promise<unknown>> = {
     'rag-key': () => ensureRagKey(deps, slug, config.TENANT_RAG_GATEWAY_KEY),
+    'gateway-key': () => ensureGatewayKey(deps, slug, config.TENANT_GATEWAY_KEY),
     suspend: () => suspendTenant(deps, slug),
     resume: () => resumeTenant(deps, slug),
     delete: () => deleteTenant(deps, slug),

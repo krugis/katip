@@ -1,53 +1,79 @@
 # Runbook: secret rotation
 
-**Tested:** nothing. Written from `scripts/setup/steps.mjs`, `tenants.mjs`, `db-seed.mjs`, the compose files, the provisioner code and LLD-10 §3. No secret was rotated to write this.
+**Tested:** the commands themselves, on throwaway containers from the pinned images, with `pnpm test:secrets-real`: `ALTER ROLE` and Mongo's password change with awkward characters, a service connecting by URL afterwards, Meilisearch's master key on existing data, Keycloak's client secrets and admin password, and the order, failure, `--resume` and `--abort` on real Postgres and Mongo with a pretend restart. The order for every secret is in `scripts/setup/test/secret-rotation.test.mjs`.
+**Not tested:** a rotation on the running stack, so compose recreating real services, the smoke checks, and how long each outage lasts.
 **Applies to:** the dev stack on WSL. Production does not exist yet.
 
-## Read this first
+## The commands
 
-- **There is no rotation command.** LLD-10 §3 names `tenant:rotate-secrets`. It does not exist. Rotation today means editing a secret file by hand and re-running other commands.
-- **Some secrets cannot be rotated safely today.** They are marked "NOT POSSIBLE" below.
-- **Some secrets live inside a database.** Changing the env file alone then breaks the service. Those are marked "Change it in the database first".
-- **The files hold real secrets.** Never print them, paste them, or commit them. Use `sed` or an editor to change one line; do not `cat` the file.
-- LLD-10 §3 asks for a 90-day rotation of the LiteLLM master key, provider API keys, Keycloak admin, database passwords and the Cloudflare token. Nothing reminds anyone. The Cloudflare token does not exist yet.
+```
+pnpm secrets:rotate --list                      # each secret, can it rotate, when it last did
+pnpm secrets:rotate --list --tenant acme        # the platform's, and one company's
+pnpm secrets:rotate <NAME>                      # one platform secret
+pnpm secrets:rotate <NAME> --tenant acme        # one company's secret
+pnpm secrets:rotate --resume                    # finish one that stopped
+pnpm secrets:rotate --abort                     # or go back to the old value
+```
 
-## How secrets are stored today
+- A secret that disturbs people prints a warning and asks. `--yes` answers for you, and without a terminal it is required.
+- A provider's new key comes from a hidden prompt or stdin, never an argument: `pnpm secrets:rotate ANTHROPIC_API_KEY < file-holding-the-key`.
+- `--list` marks a secret `due` if it was never rotated here or last rotated over 90 days ago (LLD-10 §3). That is the only reminder. The dates are in `.katip/rotations.json`, by name and date, never a value. A rotation done by hand is not on it.
+- **`GATEWAY_KEY` needs a provisioner image with the `gateway-key` action.** An older image refuses it, and nothing changes. `pnpm dev:up --redo=build` builds it.
 
-| File                                | Holds                         | How a value gets there                                                          |
-| ----------------------------------- | ----------------------------- | ------------------------------------------------------------------------------- |
-| `infra/env/katip.env`               | Platform secrets              | Generated once by `pnpm dev:up`. **An existing value is never overwritten**     |
-| `infra/env/tenants/<slug>.secrets.env` | One company's secrets      | Generated once. A value missing from the file is generated on the next run. Its header says "Do not edit" |
+Rotate in a quiet hour.
 
-To make the bootstrap generate a new value:
+## What a rotation does
 
-- `katip.env`: set the key to `AUTO` (or leave it empty). Only keys in `AUTO_KEYS` in `scripts/setup/steps.mjs` are generated. Or type your own value, letters, digits, `-` and `_` only.
-- A company's file: delete that one line. The next run generates a value in the right format and writes the file back. This is the only way. Names are `KATIP_T_<SLUG>_<NAME>`, with the slug in capitals and `-` as `_`.
+For every secret, in this order:
 
-After editing `katip.env`, `pnpm dev:up` sees the change and re-applies everything, and recreates the containers. After editing a company's file, `dev:up` does **not** notice (only `katip.env` and `katip.config.yaml` are watched). Use the steps in the company table below.
+1. **Check.** The stack is up, a company is active and passes its smoke check, and the store accepts the value in the env file. If they were already out of step it stops here, and changes nothing.
+2. **Write down old and new** in `infra/env/rotation-pending.env`, mode 600. Mongo and Keycloak need the current password to change it, so a crash without this could lock you out.
+3. **Change the store**, then log in with the new value.
+4. **Write the env file**, in one step, mode 600.
+5. **Restart what uses it**, and wait for its health check.
+6. **Check again**, and only then record the date and delete the pending file.
 
-Rotate in a quiet hour. Expect a short outage.
+**If it fails:**
 
-## Platform secrets (`katip.env`)
+| Where | What it leaves | What to do |
+| ----- | -------------- | ---------- |
+| The store refused the change | The old value, everywhere | Nothing. Fix the cause and run it again |
+| The new value did not work, or the env file could not be written | The store is put back. The old value, everywhere | Nothing. If putting it back also fails, it says so, and it is as below |
+| The restart or its check failed | The new value in the store and the file | `pnpm secrets:rotate --resume` to try the restart again, or `--abort` to put the old value back everywhere. The message says so too |
 
-For every row: the rotation is `AUTO` or a new value in `katip.env`, then `pnpm dev:up`, unless the row says otherwise.
+While a rotation is unfinished, another one and `secrets:backup` refuse. **`rotation-pending.env` holds real secrets.** It goes when the rotation finishes or is aborted. Do not delete it by hand: it may hold the only copy of a working password.
 
-| Secret | Used by | How to rotate | What breaks or changes |
-| ------ | ------- | ------------- | ---------------------- |
-| `LITELLM_MASTER_KEY` | LiteLLM, and the gateway (as its key to LiteLLM) | Edit, `pnpm dev:up` | Short outage while both restart. LiteLLM has no database in dev, so nothing else stores it |
-| `KATIP_PII_TOKEN_KEY` | Gateway. The secret behind conversation placeholders (an HMAC of company, conversation and value, LLD-03 §5) | Edit, `pnpm dev:up` | **Placeholders change in ongoing conversations.** The same name gets a different placeholder than before. Where an old tool call or tool result in a conversation holds an old placeholder, the gateway cannot restore it, and the user may see `⟦PERSON_…⟧` in an answer. New conversations are fine. Nothing is exposed and nothing is lost. Do it out of hours, and tell companies. From LLD-03 §5, not tested |
-| `KATIP_METRICS_TOKEN` | Gateway's metrics port (9464). No scraper exists yet | Edit, `pnpm dev:up` | Nothing today. Update any scraper when one exists (P1-43) |
-| `VALKEY_PASSWORD` | Valkey (set as a start option), gateway, console API | Edit, `pnpm dev:up` | Short outage. Valkey's password is not stored in its data, so nothing else to change. I did not check what Valkey keeps (caches and counters, per the LLDs). Losing them is expected to be harmless; confirm before production |
-| `KATIP_GATEWAY_DB_PASSWORD`, `KATIP_CONSOLE_DB_PASSWORD`, `KATIP_PROVIDER_DB_PASSWORD` | Postgres roles `katip_gateway`, `katip_console`, `katip_provider` | Edit, `pnpm dev:up`. The `governance-db` step runs `ALTER ROLE` with the new value | Value must be 32 or more characters of letters, digits, `-`, `_` (`db-seed.mjs` refuses others). Between that step and the container restarts, the running gateway and console API can fail on new connections for a short while |
-| `KATIP_PROVISIONER_KC_SECRET` | Keycloak client `katip-provisioner`; the identity service; the provisioner | Edit, `pnpm dev:up`. The `identity` step writes it into Keycloak | The identity service fails until it restarts with the new value (short) |
-| `KATIP_IDENTITY_TOKEN` | Console API and the identity service (shared) | Edit, `pnpm dev:up` | Short outage of identity actions in the console |
-| Provider keys: `DEEPINFRA_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GCP_VERTEX_KEY`, `GCP_PROJECT`, `VLLM_TR_KEY` | LiteLLM | Create the new key at the provider, put it in `katip.env`, `pnpm dev:up`, check a chat, then revoke the old key at the provider | **If a key is left empty, that model silently routes to the mock model (it echoes).** Never clear a key to "turn it off". Not set by us: the provider's own console |
-| `MOCK_LLM_KEY` | Mock model, LiteLLM. Dev only | Edit, `pnpm dev:up` | Nothing |
-| `KATIP_LOCAL_LLM_KEY` | Local model relay. Dev only | Edit, `pnpm dev:up` | Nothing |
-| `POSTGRES_PASSWORD` | Postgres role `katip` (admin). Set only the first time Postgres starts. Host scripts connect with it (database setup, tenant tidy-up) | **Change it in the database first.** (1) `docker exec -it katip-postgres-1 psql -U katip -d governance`, then `\password katip` and type the new value. (2) Put the same value in `katip.env`. (3) `pnpm dev:up` | Edit alone: `governance-db` and `tenant:create` fail with a password error. Use letters, digits, `-`, `_` only |
-| `KC_DB_PASSWORD` | Postgres role `keycloak`. Created with this password the first time only | **Change it in the database first.** `docker exec -it katip-postgres-1 psql -U katip -d governance`, `\password keycloak`. Then `katip.env`, then `pnpm dev:up` | Edit alone: **Keycloak cannot reach its database after it restarts, so nobody can log in** |
-| `LITELLM_DB_PASSWORD` | Postgres role `litellm`. Nothing uses the database in dev (no `database_url` in the LiteLLM config) | As `KC_DB_PASSWORD`, with `\password litellm`. **Also set `LITELLM_DATABASE_URL` to `AUTO`**, because it is derived once and keeps the old password | Nothing today |
-| `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak's first admin, created only on Keycloak's first start. Also used by our scripts to administer Keycloak (identity step, tests) | **Change it in Keycloak first.** Log in at `https://auth.localhost`, change the password of the admin user, then put the same value in `katip.env` | Edit alone: the `identity` step fails to log in, so `dev:up` fails. Keycloak itself keeps working |
-| `MONGO_PASSWORD` | Mongo root user. Set only the first time Mongo starts. Used by the provisioner. Companies do not use it | **Change it in Mongo first.** `docker exec -it katip-mongodb-1 mongosh -u katip --authenticationDatabase admin admin`, then `db.changeUserPassword("katip", passwordPrompt())`. Then `katip.env`, then `pnpm dev:up` | Edit alone: provisioning, suspend, purge and chat retention fail. Chats keep working |
+**Afterwards:**
+
+- **Take a new secrets backup.** Earlier ones hold the old value, which no longer opens the database.
+- The next `pnpm dev:up` sees that `katip.env` changed, and re-applies everything, recreating the containers. That is expected and harmless, and it is also when Postgres's container gets its new environment. It does not need it: Postgres only reads its passwords the first time it starts.
+
+## Platform secrets (`infra/env/katip.env`)
+
+| Secret | Where it's changed first | What restarts | What people notice |
+| ------ | ------------------------ | ------------- | ------------------ |
+| `LITELLM_MASTER_KEY` | Nowhere else | `litellm`, `policy-gateway` | Short outage of chats |
+| `KATIP_PII_TOKEN_KEY` | Nowhere else | `policy-gateway` | **Asks first. Placeholders change in ongoing conversations.** The same name gets a different placeholder than before. Where an old tool call or tool result holds an old placeholder, the gateway cannot restore it, and a user may see `⟦PERSON_…⟧` in an answer. New conversations are fine. Nothing is exposed and nothing is lost. Do it out of hours, and tell companies. From LLD-03 §5, not tested |
+| `KATIP_METRICS_TOKEN` | Nowhere else | `policy-gateway` | Nothing. Update any scraper when one exists (P1-43) |
+| `VALKEY_PASSWORD` | Nowhere else: it is a start option | `valkey`, `policy-gateway`, `console-api` | Short outage |
+| `KATIP_GATEWAY_DB_PASSWORD` | `ALTER ROLE katip_gateway` | `policy-gateway` | Short outage |
+| `KATIP_CONSOLE_DB_PASSWORD` | `ALTER ROLE katip_console` | `console-api` | Short outage of the console |
+| `KATIP_PROVIDER_DB_PASSWORD` | `ALTER ROLE katip_provider` | Nothing: the provisioner runs once per action | Nothing |
+| `KATIP_PROVISIONER_KC_SECRET` | Keycloak client `katip-provisioner` | `identity` | Identity actions in the console fail for a moment |
+| `KATIP_IDENTITY_TOKEN` | Nowhere else | `identity`, `console-api` | Short outage of identity actions |
+| `MOCK_LLM_KEY` | Nowhere else | `litellm` | Dev only |
+| `POSTGRES_PASSWORD` | `ALTER ROLE` on `POSTGRES_USER` | Nothing: only host scripts use it | Nothing |
+| `KC_DB_PASSWORD` | `ALTER ROLE keycloak` | `keycloak` | **Asks first.** Nobody can log in while Keycloak restarts |
+| `LITELLM_DB_PASSWORD` | `ALTER ROLE litellm` | Nothing: nothing uses it in dev | Nothing. `LITELLM_DATABASE_URL` is rewritten in the same write, unless someone wrote their own |
+| `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak, the admin user | Nothing: Keycloak reads it only at its first start | Nothing |
+| `MONGO_PASSWORD` | Mongo's `changeUserPassword`, on the root user | `mongodb` | **Asks first.** Every company loses chats for a few seconds. It restarts because the backup commands in [restore.md](restore.md) read the password from its container |
+| `DEEPINFRA_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GCP_VERTEX_KEY`, `VLLM_TR_KEY`, `KATIP_LOCAL_LLM_KEY` | **Create it at the provider first.** It comes from stdin, and is never generated | `litellm` | Short outage. Check a chat, **then revoke the old key at the provider** |
+
+**Refused, and why:**
+
+- `LITELLM_DATABASE_URL`: made from `LITELLM_DB_PASSWORD`. Rotate that.
+- **A provider key that is empty.** Empty means that model silently routes to the mock (it echoes), so the tool never clears a key. Setting one for the first time changes which model answers: put it in `katip.env` and run `pnpm dev:up`.
+- A value with a space or any of `` # $ ' " \ ` ``, which an env file would change.
 
 Not in `katip.env`, and not covered here:
 
@@ -57,44 +83,43 @@ Not in `katip.env`, and not covered here:
 
 ## A company's secrets (`infra/env/tenants/<slug>.secrets.env`)
 
-The provisioner copies several of these into other systems (Keycloak, Mongo, the gateway database). It copies them again each time `create` runs for that company, so the file is the source of truth. LibreChat only reads its new values when its containers are recreated. So most rotations are two steps: copy the new value to where it lives, then recreate the containers.
+Add `--tenant <slug>`. Every one of these recreates the company's containers, and passes its smoke check, so **each asks first.** A suspended or deleted company refuses: resume it first. `tenant:rotate-secrets` in LLD-10 was never built. This is what replaced it, and it needs no `--redo=provision` or `tenant:upgrade` afterwards.
 
-**Procedure for rows marked "A"** (the value is stored elsewhere too):
+| Secret | Where it's changed first | What people notice |
+| ------ | ------------------------ | ------------------ |
+| `GATEWAY_KEY` | The gateway's hash, through the provisioner. The old key is revoked as this runs, though the gateway caches keys for 60 s | Chats fail until LibreChat restarts |
+| `RAG_GATEWAY_KEY` | The gateway's hash: every start stores it | File search and chats stop during the restart |
+| `LC_OIDC_CLIENT_SECRET` | Keycloak client `lc-<slug>` | Login fails until LibreChat restarts. Existing sessions continue |
+| `MONGO_PASSWORD` | Mongo's `changeUserPassword`, on `lc_<slug>` | Chats stop during the restart |
+| `LC_JWT_SECRET` | Nowhere else. LibreChat and the company's RAG API share it | **Everyone in that company is logged out** and signs in again through Keycloak. Chats are not affected |
+| `LC_JWT_REFRESH_SECRET`, `LC_OIDC_SESSION_SECRET` | Nowhere else | Everyone in that company is logged out |
+| `MEILI_KEY` | Nowhere else: the new one takes effect as Meilisearch restarts. Tested on v1.56.0: existing data stays searchable, and the old key is refused | Chats stop during the restart |
+| `RAG_DB_PASSWORD` | `ALTER ROLE rag` in the company's vector database | File search and chats stop during the restart |
+| `DEMO_USER_PASSWORD` | The demo users in Keycloak, which `keycloak-dev-users.mjs` does not do for a user who exists | Dev only |
 
-1. Delete that one line from the company's secrets file.
-2. Copy the new value to where it lives:
-   - A company listed in `katip.config.yaml` (such as `demo`, `acme`): `pnpm dev:up --redo=provision`
-   - Any other company: run `pnpm tenant:create` again with the same `--slug --name --plan --seats --admin-email`. For an existing company it changes nothing except re-syncing these secrets, and prints "already exists".
-3. Recreate the company's containers: `pnpm tenant:upgrade --slug <slug>`.
-4. Log in to the company and send a chat to check.
+### `LC_CREDS_KEY`, `LC_CREDS_IV`: refused
 
-Between steps 2 and 3 the company's LibreChat still holds the old value. Chat or login may fail for that gap. Do 2 and 3 back to back.
+Read from LibreChat v0.8.7's code, in its image. It encrypts with these, in three formats: a fixed IV (`encrypt`), a random IV (`encryptV2`) and AES-CTR (`encryptV3`). Among what it encrypts: users' own API keys and tool credentials (`PluginService`, `methods/key`, `agents/auth`), agent action credentials (`ActionService`), MCP server secrets and OAuth tokens (`mcp/registry/db/ServerConfigsDB`, `mcp/oauth/tokens`, `oauth/tokens`), skill sync tokens (`methods/skillSync`) and two-factor secrets (`TwoFactorController`).
 
-**Procedure for rows marked "B"** (the value is only in the company's files): delete the line, then step 3 only.
+A safe re-encryption would have to find every such field in every collection, tell the formats apart, and be kept in step with each LibreChat upgrade. A miss makes that data unreadable with no way back. There is no such tool, so the command refuses.
 
-| Secret | Used by | Procedure | What breaks or changes |
-| ------ | ------- | --------- | ---------------------- |
-| `GATEWAY_KEY` | LibreChat's key to the gateway (in its rendered `librechat.yaml`). The gateway keeps a hash | A | The old key is revoked as soon as step 2 runs. The gateway caches keys for 60 s, so the old key may still work for a minute. Chats fail until step 3 |
-| `RAG_GATEWAY_KEY` | The company's RAG API, which can only embed. The gateway keeps a hash | B. `tenant:upgrade` stores the new hash itself (every start does) | File search fails for the gap between the hash and the container restart |
-| `LC_OIDC_CLIENT_SECRET` | Keycloak client `lc-<slug>`; LibreChat | A | Login fails for the gap. Existing sessions continue |
-| `MONGO_PASSWORD` (the company's) | Mongo user `lc_<slug>`; LibreChat | A | A restarted LibreChat cannot reach its chats until step 3 |
-| `LC_JWT_SECRET` | LibreChat and the company's RAG API (shared) | B | **Everyone in that company is logged out** and signs in again through Keycloak. Chats are not affected |
-| `LC_JWT_REFRESH_SECRET`, `LC_OIDC_SESSION_SECRET` | LibreChat | B | Everyone in that company is logged out |
-| `MEILI_KEY` | The company's Meilisearch, and LibreChat | B | Believed to work with existing data; Meilisearch derives its own keys from it. **Check the Meilisearch v1.56.0 documentation before relying on this.** If search fails afterwards, restarting LibreChat re-syncs it from Mongo (not tested) |
-| `RAG_DB_PASSWORD` | The company's vector database role `rag` (set only at its first start), and its RAG API | **Change it in the database first**: `docker exec -it katip-<slug>-ragdb-<slug>-1 psql -U rag -d rag`, `\password rag`. Then put the same value in the secrets file (replace the line, do not delete it), then step 3 | Without the database change, **file search stops working** and nothing says why |
-| `DEMO_USER_PASSWORD` | Dev demo user in Keycloak. Dev only | Delete the line, `pnpm dev:up --redo=provision` | I did not check whether the script resets an existing user's password |
-| `LC_CREDS_KEY`, `LC_CREDS_IV` | LibreChat encrypts credentials it stores for users (such as keys and tokens for tools people add) with these | **NOT POSSIBLE today.** There is no tool to decrypt with the old key and re-encrypt | If you change them, every stored credential in that company becomes unreadable, and people must enter them again. LibreChat behaviour from memory; verify on v0.8.7. If one leaks, change it only if you accept that loss. Format if you do: key 64 hex characters, IV 32 |
+**If one leaked:** the values it protects are exposed only to someone who also has that company's Mongo data. Rotate that company's `MONGO_PASSWORD` and suspend the company if needed ([incident.md](incident.md)). To change them anyway, accept the loss: stored credentials become unreadable and people enter them again, and anyone with two-factor set up in LibreChat loses it. Keep `LC_CREDS_KEY` at 64 hex characters and `LC_CREDS_IV` at 32, edit the file by hand, and run `pnpm tenant:upgrade --slug <slug>`.
 
 ## If a secret leaked
 
-1. Rotate it with the rows above.
+1. Rotate it with the commands above.
 2. For a provider key, revoke it at the provider as well, whatever else happens.
-3. If personal data may be involved, start [incident.md](incident.md).
-4. If you cannot rotate it safely (marked NOT POSSIBLE), say so in the incident note. Suspending the company ([incident.md](incident.md)) is the containment.
+3. Take a new secrets backup, and destroy older ones if the leak could reach them.
+4. If personal data may be involved, start [incident.md](incident.md).
+5. If you cannot rotate it (`LC_CREDS_*`), say so in the incident note. Suspending the company ([incident.md](incident.md)) is the containment.
+
+## Backing up the secrets
+
+`pnpm secrets:backup --to <path>` and `pnpm secrets:restore --from <path>`: see [restore.md](restore.md).
 
 ## What will change for production
 
-- Secrets will be SOPS and age encrypted (P0-06, P0-22). The files and the edit steps above change. Today they are plaintext.
-- A `tenant:rotate-secrets` command is planned (LLD-10 §3) and should replace the manual steps for company secrets.
+- Secrets will be SOPS and age encrypted (P0-06, P0-22). `updateEnvFile` in `scripts/setup/secret-rotation.mjs` is the one place that writes them, and is what changes.
 - OpenBao for per-company encryption keys is planned for phase 2 (LLD-10 §3).
 - The Cloudflare token (LLD-10 §3) will be added when the edge exists.
+- Today's values are also in each container's environment. A rotated value is replaced as its container is recreated (P1-71 lists moving them out).

@@ -261,10 +261,14 @@ export function run(cmd, args, opts = {}) {
   return new Promise((resolveP, rejectP) => {
     const p = spawn(cmd, args, {
       cwd: opts.cwd ?? ROOT,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...(opts.env ?? {}) },
       shell: false,
     });
+    if (opts.input !== undefined) {
+      p.stdin.on('error', () => {}); // it may exit without reading: its exit code says why
+      p.stdin.end(opts.input);
+    }
     let out = '';
     let forwarded = false;
     let timedOut = false;
