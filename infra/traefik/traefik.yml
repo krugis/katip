@@ -15,13 +15,15 @@ entryPoints:
     address: ':443'
     http:
       tls: {}
+  # Traefik's own: metrics name every company. Traefik is on each company's network, and an
+  # address with no host would listen there too.
+  traefik:
+    address: '127.0.0.1:8080'
 
 providers:
-  docker:
-    endpoint: 'tcp://docker-socket-proxy:2375'
-    exposedByDefault: false
-    # Network: set per container with the traefik.docker.network label.
-  # Each company's IP allowlist. No files to write, and no route opens if this fails.
+  # Each company's route and IP allowlist, active companies only. No Docker, and no files to
+  # write. It keeps the last good answer if console-api goes away; with none, the company's
+  # host answers 404. Platform routes don't depend on it: they're in dynamic/routes.yml.
   http:
     endpoint: http://console-api:8081/internal/traefik
     pollInterval: 5s

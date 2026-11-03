@@ -96,7 +96,7 @@ pnpm deploy:back   # go back to the previous deploy
 - An interrupted run keeps finished layers working; re-running resumes from where it stopped.
 - Login goes through Keycloak, with MFA enrolment at first login. Demo users are `admin@`, `manager@` and `user@demo.localhost`, with the password `KATIP_T_DEMO_DEMO_USER_PASSWORD` from `infra/env/tenants/demo.secrets.env`. The dev certificate is self-signed, so your browser will warn about it.
 - It installs two tenants, `demo` and `acme`, and checks that neither can cross into the other. The same names work for acme.
-- After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.
+- After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`.
 
 The gateway alone against the mock provider (no Docker):
 

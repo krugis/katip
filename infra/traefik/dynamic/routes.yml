@@ -1,0 +1,47 @@
+# The platform's routes (LLD-01 §2.2). They don't depend on console-api, so login works while it
+# is down. Each company's route comes from console-api (/internal/traefik). Traefik fills in the
+# domain from its environment, and reaches each service by name over the edge network.
+
+http:
+  routers:
+    keycloak:
+      rule: 'Host(`auth.{{ env "KATIP_BASE_DOMAIN" }}`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: keycloak
+    mailpit:
+      rule: 'Host(`mailpit.{{ env "KATIP_BASE_DOMAIN" }}`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: mailpit
+    console:
+      rule: 'Host(`console.{{ env "KATIP_BASE_DOMAIN" }}`)'
+      entryPoints: [websecure]
+      tls: {}
+      middlewares: [secure-headers@file]
+      service: console
+    # On the console's address, and wins by its longer rule. Only /api: /internal stays private.
+    console-api:
+      rule: 'Host(`console.{{ env "KATIP_BASE_DOMAIN" }}`) && PathPrefix(`/api`)'
+      entryPoints: [websecure]
+      tls: {}
+      middlewares: [secure-headers@file]
+      service: console-api
+
+  services:
+    keycloak:
+      loadBalancer:
+        servers:
+          - url: http://keycloak:8080
+    mailpit:
+      loadBalancer:
+        servers:
+          - url: http://mailpit:8025
+    console:
+      loadBalancer:
+        servers:
+          - url: http://console:8080
+    console-api:
+      loadBalancer:
+        servers:
+          - url: http://console-api:8081

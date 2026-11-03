@@ -149,6 +149,7 @@ try {
   r = await cli('suspend', '--slug', slug);
   check(r.code === 0, 'tenant:suspend succeeds');
   check(!(await containers()), 'its containers are stopped');
+  await eventually(async () => (await health()) === '404', 'its route has gone', 20_000);
   await eventually(
     async () => (await gatewayStatus(ctx, { slug }, asAdmin())) === '403',
     'the gateway refuses it',
@@ -199,6 +200,7 @@ try {
   r = await cli('delete', '--slug', slug, '--confirm', slug);
   check(r.code === 0, 'tenant:delete succeeds');
   check(!(await containers()), 'its containers are stopped');
+  await eventually(async () => (await health()) === '404', 'its route has gone', 20_000);
   await eventually(
     async () => (await gatewayStatus(ctx, { slug }, asAdmin())) === '403',
     'the gateway refuses it',

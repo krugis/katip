@@ -93,15 +93,17 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-export const PLATFORM_SERVICES = [
-  'docker-socket-proxy',
-  'traefik',
-  'postgres',
-  'keycloak',
-  'mongodb',
-  'valkey',
-  'mailpit',
-];
+export const PLATFORM_SERVICES = ['traefik', 'postgres', 'keycloak', 'mongodb', 'valkey', 'mailpit'];
+
+/**
+ * What an install from before Traefik lost Docker still has: compose leaves a container it no
+ * longer knows, with the socket mounted, and its network. Only once Traefik has left them.
+ */
+async function removeOldSocketProxy(ctx) {
+  const { name } = ctx.config.project;
+  await run('docker', ['rm', '-f', `${name}-docker-socket-proxy-1`]);
+  await run('docker', ['network', 'rm', `${name}_docker-socket`]);
+}
 
 export const platformCompose = (args, ctx) =>
   tryRun('docker', [...platformComposeArgs(), ...args], {
@@ -1121,6 +1123,7 @@ export const steps = [
           ctx,
         );
       }
+      await removeOldSocketProxy(ctx);
       ctx.log('platform healthy');
     },
     async rollback(ctx) {

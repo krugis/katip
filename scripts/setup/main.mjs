@@ -334,7 +334,6 @@ function printSummary(ctx) {
     `    ${bold('Keycloak admin')}    https://auth.${base}  (user: ${env.KC_BOOTSTRAP_ADMIN_USER ?? 'katip-admin'})`,
   );
   console.log(`    ${bold('Mailpit')}           https://mailpit.${base}`);
-  console.log(`    ${bold('Traefik dashboard')} http://127.0.0.1:9090`);
   console.log('');
   console.log(dim('    Gateway smoke passed: chat through policy-gateway → LiteLLM → mock.'));
   console.log(

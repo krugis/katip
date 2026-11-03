@@ -12,6 +12,8 @@ export const ConfigSchema = z.object({
   /** Where to fetch signing keys; may be an internal address. */
   OIDC_JWKS_URL: z.string().url(),
   OIDC_AUDIENCE: z.string().default('console-api'),
+  /** A company's address is <slug>.<this>. It goes into Traefik's router rules. */
+  BASE_DOMAIN: z.string().regex(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/),
   /** The internal identity service, which holds the Keycloak rights this API must not. */
   IDENTITY_URL: z.string().url(),
   IDENTITY_TOKEN: z.string().min(32),

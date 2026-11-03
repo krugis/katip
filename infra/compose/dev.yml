@@ -6,12 +6,7 @@ name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
 
 services:
   traefik:
-    # dev: dev TLS certs + dashboard on 127.0.0.1:9090 (host)
-    ports: !override
-      - '80:80'
-      - '443:443'
-      # dashboard moved to 9090: 8080 often taken by local dev servers
-      - '127.0.0.1:9090:8080'
+    # dev: dev TLS certs. The dashboard's API listens inside the container only (traefik.dev.yml).
     volumes: !override
       - ../traefik/traefik.dev.yml:/etc/traefik/traefik.yml:ro
       - ../traefik/dynamic:/etc/traefik/dynamic:ro
@@ -169,14 +164,6 @@ services:
       KATIP_BASE_DOMAIN: ${KATIP_BASE_DOMAIN:?from katip.config.yaml}
     networks:
       - edge
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
-      - traefik.http.routers.console.rule=Host(`console.${KATIP_BASE_DOMAIN:?from katip.config.yaml}`)
-      - traefik.http.routers.console.entrypoints=websecure
-      - traefik.http.routers.console.tls=true
-      - traefik.http.routers.console.middlewares=secure-headers@file
-      - traefik.http.services.console.loadbalancer.server.port=8080
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1']
       interval: 10s
@@ -235,6 +222,7 @@ services:
       DATABASE_URL: postgres://katip_console:${KATIP_CONSOLE_DB_PASSWORD:?from katip.env}@postgres:5432/governance
       OIDC_ISSUER: https://auth.${KATIP_BASE_DOMAIN:?from katip.config.yaml}/realms/${KATIP_REALM:?from katip.config.yaml}
       OIDC_JWKS_URL: http://keycloak:8080/realms/${KATIP_REALM:?from katip.config.yaml}/protocol/openid-connect/certs
+      BASE_DOMAIN: ${KATIP_BASE_DOMAIN:?from katip.config.yaml}
       VALKEY_URL: redis://:${VALKEY_PASSWORD:?from katip.env}@valkey:6379
       SMTP_HOST: mailpit
       SMTP_PORT: '1025'
@@ -253,14 +241,6 @@ services:
         condition: service_healthy
       identity:
         condition: service_healthy
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
-      - traefik.http.routers.console-api.rule=Host(`console.${KATIP_BASE_DOMAIN:?from katip.config.yaml}`) && PathPrefix(`/api`)
-      - traefik.http.routers.console-api.entrypoints=websecure
-      - traefik.http.routers.console-api.tls=true
-      - traefik.http.routers.console-api.middlewares=secure-headers@file
-      - traefik.http.services.console-api.loadbalancer.server.port=8081
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8081/readyz || exit 1']
       interval: 10s
