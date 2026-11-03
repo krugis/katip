@@ -118,11 +118,16 @@ export const tenantCompose = (args, ctx, t) =>
  * `docker run` waits forever for a process that already ended, so every run has a
  * time limit, and the container is removed if it hits it.
  */
-export async function dockerRun(args, env = {}, { timeoutMs = 300_000, attempts = 1 } = {}) {
+export async function dockerRun(args, env = {}, { timeoutMs = 300_000, attempts = 1, input } = {}) {
   for (let attempt = 1; ; attempt++) {
     const name = `katip-tool-${randomBytes(6).toString('hex')}`;
     try {
-      return await tryRun('docker', ['run', '--rm', '--name', name, ...args], { env, timeoutMs });
+      const stdin = input === undefined ? [] : ['-i'];
+      return await tryRun('docker', ['run', '--rm', ...stdin, '--name', name, ...args], {
+        env,
+        timeoutMs,
+        input,
+      });
     } catch (e) {
       if (e.name !== 'TimedOut') throw e;
       await run('docker', ['rm', '-f', name]).catch(() => {});
@@ -169,7 +174,7 @@ async function traefikEdgeIp(ctx) {
 const CURL_LIMITS = { timeoutMs: 30_000, attempts: 3 };
 
 /** curl from a throwaway container inside the backend network. */
-const curlBackend = (ctx, path, extra = []) =>
+const curlBackend = (ctx, path, extra = [], input = undefined) =>
   dockerRun(
     [
       '--network',
@@ -182,8 +187,11 @@ const curlBackend = (ctx, path, extra = []) =>
       ...extra,
     ],
     ctx.env,
-    CURL_LIMITS,
+    { ...CURL_LIMITS, input },
   ).then((r) => r.out);
+
+/** Sends a key in a header, from curl's config on stdin, so it's not on a command line. */
+export const curlKeyConfig = (key) => `header = "authorization: Bearer ${key}"\n`;
 
 /** curl via traefik from the edge network. curl resolves *.localhost to
  * 127.0.0.1 (RFC 6761), so we hit the traefik IP directly with a Host header. */
@@ -702,15 +710,12 @@ export async function startTenant(ctx, t, { recreate = false } = {}) {
 
 export const gatewayStatus = async (ctx, t, headers = []) =>
   (
-    await curlBackend(ctx, '/v1/models', [
-      '-o',
-      '/dev/null',
-      '-w',
-      '%{http_code}',
-      '-H',
-      `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
-      ...headers,
-    ])
+    await curlBackend(
+      ctx,
+      '/v1/models',
+      ['-o', '/dev/null', '-w', '%{http_code}', '-K', '-', ...headers],
+      curlKeyConfig(tenantSecret(ctx, t, 'GATEWAY_KEY')),
+    )
   ).trim();
 
 /** What the tenant depends on: login can be discovered, and the gateway knows its key. */

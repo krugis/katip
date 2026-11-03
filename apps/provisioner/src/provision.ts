@@ -129,6 +129,17 @@ export async function ensureRagKey(
   return { changed: await ensureKey(deps.store, id, key, 'service') };
 }
 
+/** The key a tenant's LibreChat uses, replaced on its own by `pnpm secrets:rotate`. */
+export async function ensureGatewayKey(
+  deps: Pick<ProvisionDeps, 'store'>,
+  slug: string,
+  key: string,
+): Promise<{ changed: boolean }> {
+  const id = await deps.store.tenantId(slug);
+  if (!id) throw new Error('the tenant does not exist');
+  return { changed: await ensureKey(deps.store, id, key, 'tenant') };
+}
+
 /** Everything a tenant's LibreChat needs before it can start. */
 export async function createTenant(
   deps: ProvisionDeps,
