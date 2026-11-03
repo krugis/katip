@@ -147,7 +147,7 @@ export async function promptKeepOrRollback() {
     `  ${bold('[K]')} keep current state — finished layers stay up; re-run resumes\n`,
   );
   process.stdout.write(
-    `  ${bold('[R]')} rollback — stop and remove everything the bootstrap created\n`,
+    `  ${bold('[R]')} rollback — remove everything the bootstrap created (it shows what first)\n`,
   );
   process.stdout.write(`  ${bold('[Q]')} quit without further action (same as keep, exits now)\n`);
   process.stdout.write('\n  choose [K/r/q]: ');
@@ -158,9 +158,24 @@ import { createInterface } from 'node:readline';
 function readLine() {
   return new Promise((res) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
-    rl.on('line', (l) => {
-      rl.close();
+    rl.once('line', (l) => {
       res(l.trim().toLowerCase());
+      rl.close();
     });
+    // No more input is the same as no answer, so the default applies.
+    rl.once('close', () => res(''));
+  });
+}
+
+/** One line from the person, exactly as typed. Null if the input ended without one. */
+export function askLine(question) {
+  process.stdout.write(question);
+  return new Promise((res) => {
+    const rl = createInterface({ input: process.stdin, terminal: false });
+    rl.once('line', (l) => {
+      res(l.trim());
+      rl.close();
+    });
+    rl.once('close', () => res(null));
   });
 }

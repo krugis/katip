@@ -7,7 +7,8 @@
 #
 # `pnpm dev:up` validates this file and rejects unknown settings. After an edit,
 # re-run it: it detects the change and re-applies. To change project.name or remove
-# a tenant, run `pnpm dev:rollback` first, because the old stack is not renamed.
+# a tenant, run `pnpm dev:rollback` first, because the old stack is not renamed. It
+# deletes everything, and asks for more than a yes if real data may exist.
 #
 # Licence: AGPL-3.0-only (this repo, see LICENSE)
 # ==============================================================================
@@ -41,6 +42,14 @@ identity:
 # ------------------------------------------------------------------------------
 # jobs:
 #   daily_at: '03:30'
+
+# ------------------------------------------------------------------------------
+# Deploys (P1-71). `pnpm run deploy` keeps this many copies of the databases in
+# .katip/backups/, and the images tagged with them. They sit on this disk: they are
+# a way back from a bad deploy, not the off-site backup of P1-42. Default 5.
+# ------------------------------------------------------------------------------
+# deploy:
+#   keep_backups: 5
 
 # ------------------------------------------------------------------------------
 # Image pins. Never use :latest (CLAUDE.md §7).

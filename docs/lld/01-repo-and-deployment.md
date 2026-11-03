@@ -167,6 +167,17 @@ Such a server usually listens on localhost only, which containers can't reach. S
    - `provisioner upgrade --all` rolls tenants with a health check.
 4. **Renovate** keeps images and packages updated. It groups minor and patch updates weekly. LibreChat and LiteLLM upgrades are manual-review only.
 
+### 4.1 Deploying on the dev stack, and going back (P1-71)
+
+`deploy.yml` above doesn't exist yet. What exists, on one host: `pnpm run deploy` and `pnpm deploy:back` (`scripts/setup/deploy.mjs`, `deploy-lib.mjs`, `backups.mjs`). `pnpm deploy` without `run` is pnpm's own command. Runbooks: [deploy](../runbooks/deploy.md), [rollback](../runbooks/rollback.md). Neither has run on a real stack.
+
+- **Deploy:** refuses a dirty tree; dumps the governance database and every `lc_*` Mongo database to `.katip/backups/<timestamp>-<sha>/`; tags the running images `:deploy-<sha>`; runs `dev:up --redo=config,build,governance-db,aiplane,tenant,smoke,isolation`, the same machinery as by hand; records it in `.katip/deploys.json`. A failed dump stops it before anything changes. `deploy.keep_backups` (default 5) sets how many are kept.
+- **Back:** restores the kept tags, checks out their commit, runs `dev:up` without build or pull. With `--restore-data`, and a typed confirmation, it also restores the dump. Going back across a migration or a LibreChat version is refused without it. Which migrations differ comes from the newest `created_at` in `drizzle.__drizzle_migrations`, before the deploy and now, against the journal.
+- **Not P1-42.** The dump is on the same disk, is not encrypted, and leaves out Keycloak, uploads, vectors and secrets.
+- `pnpm test:backup` runs the dump and restore commands for real against throwaway containers of the pinned images, with the real migrations and row-level security.
+
+`pnpm dev:rollback` is the uninstall, not this. Its rule for what counts as test data is in [the runbook](../runbooks/rollback.md) and `scripts/setup/rollback-guard.mjs`.
+
 ## 5. Configuration and secrets
 
 - Env files:

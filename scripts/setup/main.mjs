@@ -6,18 +6,21 @@
  *   pnpm dev:up        run or resume the bootstrap (default)
  *   pnpm dev:status    show step state + service health
  *   pnpm dev:down      stop all services (data and state kept)
- *   pnpm dev:rollback  remove everything the bootstrap created (asks)
+ *   pnpm dev:rollback  remove everything the bootstrap created (rollback-guard.mjs)
  *
- * Flags: --fresh (ignore state), --redo <ids> (force steps), --yes (no prompts)
+ * Flags: --fresh (ignore state), --redo=<ids> (force steps), --skip=<ids> (leave steps out),
+ * --yes (no prompts), --destroy-data <project> (rollback, when real data may exist)
  */
 import { join } from 'node:path';
 import process from 'node:process';
-import { adoptTenantSecretsFromEnvFile } from './tenants.mjs';
+import { adoptTenantSecretsFromEnvFile, knownTenantSlugs } from './tenants.mjs';
 import {
   ROOT,
   STATE_DIR,
+  clearInterruptPending,
   ensureEnvFile,
   loadState,
+  run,
   saveState,
   tryRun,
   requestInterrupt,
@@ -32,22 +35,30 @@ import {
   loadAllTenantSecrets,
   removeLocalLlmRelay,
   platformComposeArgs,
+  renderAll,
   steps,
   tenantComposeArgs,
 } from './steps.mjs';
-import { Tui, bold, dim, err, ok, warn } from './tui.mjs';
+import { containersOf } from './backups.mjs';
+import {
+  destroyDataFlag,
+  leftovers,
+  readSnapshot,
+  runRollback,
+  teardown,
+} from './rollback-guard.mjs';
+import { Tui, askLine, bold, dim, err, ok, warn } from './tui.mjs';
 
 const argv = process.argv.slice(2);
 const command = ['up', 'status', 'down', 'rollback'].includes(argv[0]) ? argv[0] : 'up';
 const fresh = argv.includes('--fresh');
-const redoRaw = argv.find((a) => a.startsWith('--redo='));
-const redo = redoRaw
-  ? redoRaw
-      .slice(7)
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
+const stepList = (flag) =>
+  (argv.find((a) => a.startsWith(flag))?.slice(flag.length) ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+const redo = stepList('--redo=');
+const skipped = stepList('--skip=');
 const yes = argv.includes('--yes');
 
 // ---------------------------------------------------------------------------
@@ -119,6 +130,7 @@ async function cmdUp() {
     }
   }
   for (const id of redo) skip.delete(id);
+  for (const id of skipped) skip.add(id);
 
   if (skip.size > 0) {
     console.log(dim(`resuming: skipping ${skip.size} completed step(s): ${[...skip].join(', ')}`));
@@ -169,14 +181,21 @@ async function cmdUp() {
     // ask keep/rollback unless --yes
     const choice = yes ? 'k' : await promptKeep();
     if (choice === 'r') {
-      console.log(dim('rolling back…'));
-      await rollbackAll(ctx, state);
-      console.log(ok('rollback complete. re-run `pnpm dev:up` to start over.'));
-      return;
+      // The same check as dev:rollback. Commands report Interrupted while the flag is up.
+      clearInterruptPending();
+      const outcome = await safeRollback(ctx, state, {
+        interactive: Boolean(process.stdin.isTTY),
+      });
+      if (outcome === 'done') {
+        console.log(ok('rollback complete. re-run `pnpm dev:up` to start over.'));
+        return;
+      }
+      if (outcome === 'failed') return;
     }
     console.log(
       warn('kept current state. re-run `pnpm dev:up` to resume from where you left off.'),
     );
+    process.exitCode ||= 130;
     return;
   }
 
@@ -257,22 +276,47 @@ async function promptKeep() {
   return 'k';
 }
 
+/** Removes everything, and returns what failed. A step may already be gone either way. */
 async function rollbackAll(ctx, state) {
-  // reverse order teardown
-  for (const step of [...steps].reverse()) {
-    if (typeof step.rollback === 'function') {
-      try {
-        await step.rollback(ctx);
-      } catch {
-        /* continue teardown */
-      }
-    }
+  const docker = (args) => run('docker', args);
+  // Compose needs its files to know the volumes, and an earlier attempt may have removed them.
+  try {
+    renderAll(ctx);
+  } catch (e) {
+    console.error(warn(`could not render the compose files: ${e.message}`));
   }
+  const failures = await teardown(steps, ctx, () => leftovers(docker, ctx.config.project.name));
   state.steps = {};
   delete state.configHash;
   delete state.identity;
   delete state.recreateAfterChange;
   saveState(state);
+  return failures;
+}
+
+/** Sets a non-zero exit unless it's done, or the person simply said no. */
+async function safeRollback(ctx, state, options) {
+  const project = ctx.config.project.name;
+  const outcome = await runRollback({
+    project,
+    options,
+    deps: {
+      config: ctx.config,
+      readSnapshot: () =>
+        readSnapshot(
+          (args) => run('docker', args),
+          project,
+          containersOf(ctx.config),
+          knownTenantSlugs(ctx.infra),
+        ),
+      teardown: () => rollbackAll(ctx, state),
+      ask: askLine,
+      print: (line) => console.log(line),
+      printError: (line) => console.error(err(line)),
+    },
+  });
+  if (outcome === 'refused' || outcome === 'failed') process.exitCode = 1;
+  return outcome;
 }
 
 function printSummary(ctx) {
@@ -383,27 +427,12 @@ async function cmdRollback() {
   const state = loadState();
   const ctx = makeCtx();
   ctx.ensureEnv();
-  if (!yes) {
-    const { createInterface } = await import('node:readline');
-    process.stdout.write(
-      warn(
-        'This removes containers, volumes and rendered files the bootstrap created. Continue? [y/N] ',
-      ),
-    );
-    const rl = createInterface({ input: process.stdin, terminal: false });
-    const answer = await new Promise((res) =>
-      rl.on('line', (l) => {
-        rl.close();
-        res(l.trim().toLowerCase());
-      }),
-    );
-    if (answer !== 'y' && answer !== 'yes') {
-      console.log('aborted.');
-      return;
-    }
-  }
-  await rollbackAll(ctx, state);
-  console.log(ok('rollback complete.'));
+  const outcome = await safeRollback(ctx, state, {
+    yes,
+    destroyData: destroyDataFlag(argv),
+    interactive: Boolean(process.stdin.isTTY),
+  });
+  if (outcome === 'done') console.log(ok('rollback complete.'));
 }
 
 main().catch((e) => {
