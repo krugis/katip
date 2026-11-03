@@ -334,7 +334,21 @@ export function TenantRequests({ me, getToken }: { me: Me; getToken: GetToken })
                     {t(`account.privacyStatus.${p.status}`, { defaultValue: p.status })}
                   </div>
                 </div>
-                {p.status === 'pending' && (
+                {p.status === 'pending' && p.type === 'delete' && (
+                  <Button
+                    data-testid="privacy-approve"
+                    onClick={() => {
+                      if (
+                        window.confirm(t('account.approveDeletionConfirm', { name: p.userName }))
+                      ) {
+                        void act(`/privacy-requests/${p.id}`, { status: 'approved' });
+                      }
+                    }}
+                  >
+                    {t('account.approveDeletion')}
+                  </Button>
+                )}
+                {p.status === 'pending' && p.type !== 'delete' && (
                   <Button
                     data-testid="privacy-complete"
                     onClick={() => void act(`/privacy-requests/${p.id}`, { status: 'completed' })}

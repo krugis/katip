@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import type { Caller } from './auth.js';
+import type { IdentityClient } from './identity.js';
 import type { Actor, ConsoleStore } from './stores.js';
 import { usageRange } from './usage.js';
 
@@ -58,6 +59,7 @@ const person = (caller: Caller) => {
 export function registerPortalRoutes(
   parent: FastifyInstance,
   store: ConsoleStore,
+  identity: IdentityClient,
   prefix: string,
   callerOf: (req: FastifyRequest) => Caller,
 ): void {
@@ -266,14 +268,27 @@ export function registerPortalRoutes(
     {
       config: { access: admin },
       schema: {
-        summary: 'Mark a privacy request as handled',
+        summary: 'Approve a deletion, which cannot be undone, or mark another request as handled',
         security: secured,
         params: TenantParams.extend({ pid: z.string().uuid() }),
-        body: z.object({ status: z.literal('completed') }).strict(),
+        body: z.object({ status: z.enum(['completed', 'approved']) }).strict(),
         response: { 200: PrivacyRequest, ...errors },
       },
     },
     async (req) => {
+      if (req.body.status === 'approved') {
+        const tenant = await store.tenantById(req.params.tid);
+        if (!tenant) throw Errors.notFound();
+        const approved = await store.approveDeletion(
+          req.params.tid,
+          req.params.pid,
+          actorOf(callerOf(req)),
+          // Inside the transaction: if Keycloak fails, the database doesn't change either.
+          (email) => identity.setEnabled(tenant.slug, email, false),
+        );
+        if (!approved) throw Errors.notFound();
+        return approved;
+      }
       const done = await store.completePrivacyRequest(
         req.params.tid,
         req.params.pid,

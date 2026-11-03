@@ -20,6 +20,8 @@ import {
   rollbackTenant,
   type ProvisionDeps,
 } from './provision.js';
+import { deletionLookup, deletionsDue, finishDeletion, type ForgetDeps } from './forget.js';
+import { findLibreChatUser, forgetLibreChatUser } from './librechat-data.js';
 import { DbProvisionerStore } from './store.js';
 
 const ConfigSchema = z.object({
@@ -40,6 +42,9 @@ const ConfigSchema = z.object({
     'purges-due',
     'purge-start',
     'purge-finish',
+    'deletions-due',
+    'deletion-lookup',
+    'deletion-finish',
   ]),
   TENANT_INPUT: z.string().min(1),
   /** Only for the stages that set a tenant up. */
@@ -68,14 +73,15 @@ const withMongo = async <T>(
 
 const config = loadEnv(ConfigSchema);
 const store = new DbProvisionerStore(config.DATABASE_URL);
+const keycloak = new KeycloakAdmin({
+  url: config.KEYCLOAK_URL,
+  realm: config.KEYCLOAK_REALM,
+  clientId: config.KEYCLOAK_CLIENT_ID,
+  clientSecret: config.KEYCLOAK_CLIENT_SECRET,
+});
 const deps: ProvisionDeps = {
   store,
-  identity: new KeycloakAdmin({
-    url: config.KEYCLOAK_URL,
-    realm: config.KEYCLOAK_REALM,
-    clientId: config.KEYCLOAK_CLIENT_ID,
-    clientSecret: config.KEYCLOAK_CLIENT_SECRET,
-  }),
+  identity: keycloak,
   // The tenant's Mongo login, limited to its own database (LLD-07 step 3).
   ensureMongoUser: (database, password) =>
     withMongo(config.MONGO_ROOT_URI, async (client) => {
@@ -98,9 +104,23 @@ const deps: ProvisionDeps = {
     }),
 };
 
+const forgetDeps: ForgetDeps = {
+  store,
+  identity: keycloak,
+  findLibreChatUser: (database, email, keycloakId) =>
+    withMongo(config.MONGO_ROOT_URI, (client) =>
+      findLibreChatUser(client.db(database), email, keycloakId),
+    ),
+  forgetLibreChatUser: (database, lcUserId, email) =>
+    withMongo(config.MONGO_ROOT_URI, (client) =>
+      forgetLibreChatUser(client.db(database), lcUserId, email),
+    ),
+};
+
 try {
   const input: unknown = JSON.parse(config.TENANT_INPUT);
   const { slug } = z.object({ slug: z.string() }).parse(input);
+  const requestOf = () => z.object({ requestId: z.string().uuid() }).parse(input).requestId;
   const lifecycle: Record<string, () => Promise<unknown>> = {
     suspend: () => suspendTenant(deps, slug),
     resume: () => resumeTenant(deps, slug),
@@ -108,6 +128,9 @@ try {
     'purges-due': async () => ({ slugs: await purgesDue(deps) }),
     'purge-start': () => startPurge(deps, slug),
     'purge-finish': () => finishPurge(deps, slug),
+    'deletions-due': async () => ({ deletions: await deletionsDue(forgetDeps) }),
+    'deletion-lookup': () => deletionLookup(forgetDeps, slug, requestOf()),
+    'deletion-finish': () => finishDeletion(forgetDeps, slug, requestOf()),
   };
   const action = lifecycle[config.TENANT_ACTION];
   if (action) {

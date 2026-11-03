@@ -6,13 +6,14 @@
  * pnpm tenant:resume  --slug acme                # also restores a deleted tenant
  * pnpm tenant:delete  --slug acme --confirm acme # locks it out; the purge comes 30 days later
  * pnpm tenant:purge-due                          # runs the purges whose wait is over
+ * pnpm tenant:forget-due                         # carries out the deletions admins approved
  * pnpm tenant:upgrade --slug acme | --all        # rolls out the image and settings in the config
  */
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
 import { AUTO_KEYS, createAndStartTenant, deriveEnv, loadAllTenantSecrets } from './steps.mjs';
-import { purgeDue, resume, softDelete, suspend, upgrade } from './tenant-lifecycle.mjs';
+import { forgetDue, purgeDue, resume, softDelete, suspend, upgrade } from './tenant-lifecycle.mjs';
 import { adoptTenantSecretsFromEnvFile } from './tenants.mjs';
 import { ensureEnvFile, INFRA } from './util.mjs';
 
@@ -108,6 +109,13 @@ const COMMANDS = {
   async 'purge-due'(ctx) {
     const { purged, failed } = await purgeDue(ctx);
     console.log(purged.length > 0 ? `Purged: ${purged.join(', ')}.` : 'Nothing was purged.');
+    if (failed.length > 0) {
+      throw new Error(`Failed, so run this again:\n  ${failed.join('\n  ')}`);
+    }
+  },
+  async 'forget-due'(ctx) {
+    const { done, failed } = await forgetDue(ctx);
+    console.log(`People deleted: ${done}.`);
     if (failed.length > 0) {
       throw new Error(`Failed, so run this again:\n  ${failed.join('\n  ')}`);
     }

@@ -297,6 +297,7 @@
       "delete": "Silme isteği"
     },
     "privacyStatus": {
+      "approved": "Onaylandı, siliniyor",
       "pending": "Bekliyor",
       "completed": "Tamamlandı"
     },
@@ -304,6 +305,8 @@
     "privacyRequests": "Kişisel veri istekleri (KVKK)",
     "privacyRequestsHelp": "KVKK başvuruları için yasal bir yanıt süresi olabilir. Silme işlemini yaptıktan sonra tamamlandı olarak işaretleyin.",
     "noPrivacyRequests": "Bekleyen kişisel veri isteği yok.",
+    "approveDeletion": "Silmeyi onayla",
+    "approveDeletionConfirm": "{{name}} hesabı ve tüm verileri silinecek. Giriş hemen kapanır. Bu işlem geri alınamaz.",
     "markDone": "Tamamlandı olarak işaretle",
     "otherRequests": "Diğer istekler"
   },

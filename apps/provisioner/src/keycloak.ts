@@ -222,6 +222,26 @@ export class KeycloakAdmin implements IdentityAdmin, IdentityDirectory {
     if (client) await this.api('DELETE', `/clients/${client.id}`);
   }
 
+  /**
+   * One person leaves one company. Someone who also belongs to another keeps their login, as
+   * it isn't this company's to remove. Platform staff are refused, as in the identity service.
+   */
+  async forgetMember(slug: string, email: string): Promise<void> {
+    const user = await this.findUser(email);
+    if (!user) return;
+    const orgs = await this.organizationsOf(user.id);
+    if (!orgs.includes(slug)) return;
+    if ((await this.realmRolesOf(user.id)).includes('provider_admin')) {
+      throw new Error('this login belongs to platform staff');
+    }
+    if (orgs.some((alias) => alias !== slug)) {
+      const org = await this.organization(slug);
+      await this.api('DELETE', `/organizations/${org!.id}/members/${user.id}`);
+      return;
+    }
+    await this.api('DELETE', `/users/${user.id}`);
+  }
+
   // ---- the identity service (identity.ts) ----------------------------------------------
 
   async findUser(email: string): Promise<DirectoryUser | null> {

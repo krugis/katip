@@ -31,6 +31,7 @@
     "tenant:resume": "node scripts/setup/tenant-cli.mjs resume",
     "tenant:delete": "node scripts/setup/tenant-cli.mjs delete",
     "tenant:purge-due": "node scripts/setup/tenant-cli.mjs purge-due",
+    "tenant:forget-due": "node scripts/setup/tenant-cli.mjs forget-due",
     "tenant:upgrade": "node scripts/setup/tenant-cli.mjs upgrade",
     "test:lifecycle": "node scripts/setup/lifecycle-e2e.mjs",
     "test:users": "node scripts/setup/users-e2e.mjs",

@@ -297,6 +297,7 @@
       "delete": "Deletion request"
     },
     "privacyStatus": {
+      "approved": "Approved, being deleted",
       "pending": "Waiting",
       "completed": "Done"
     },
@@ -304,6 +305,8 @@
     "privacyRequests": "Personal data requests (KVKK)",
     "privacyRequestsHelp": "KVKK requests may have a legal time limit for an answer. Mark one as done once you’ve carried it out.",
     "noPrivacyRequests": "No personal data requests are waiting.",
+    "approveDeletion": "Approve deletion",
+    "approveDeletionConfirm": "The account of {{name}} and all its data will be deleted. Login stops at once. This cannot be undone.",
     "markDone": "Mark as done",
     "otherRequests": "Other requests"
   },

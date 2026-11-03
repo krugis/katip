@@ -43,6 +43,12 @@ export interface ProvisionerStore {
   markPurgeRunning(jobId: string): Promise<void>;
   duePurges(now: Date): Promise<string[]>;
   anonymiseTenant(tenantId: string): Promise<void>;
+  deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
+  deletionSubject(
+    slug: string,
+    requestId: string,
+  ): Promise<{ tenantId: string; userId: string; email: string; keycloakId: string } | null>;
+  forgetUser(tenantId: string, userId: string, requestId: string, slug: string): Promise<void>;
   startJob(slug: string, type: string): Promise<string>;
   jobStep(jobId: string, step: string): Promise<void>;
   jobTenant(jobId: string, tenantId: string): Promise<void>;
@@ -292,6 +298,91 @@ export class DbProvisionerStore implements ProvisionerStore {
   }
 
   /** What stays after a purge says nothing about who it was (LLD-10 §8). */
+  /** Not a suspended company's: its containers are stopped, so it waits until it's resumed. */
+  async deletionsDue(): Promise<{ slug: string; requestId: string }[]> {
+    return this.db
+      .select({ slug: schema.tenants.slug, requestId: schema.privacyRequests.id })
+      .from(schema.privacyRequests)
+      .innerJoin(schema.tenants, eq(schema.tenants.id, schema.privacyRequests.tenantId))
+      .where(
+        and(
+          eq(schema.privacyRequests.type, 'delete'),
+          eq(schema.privacyRequests.status, 'approved'),
+          eq(schema.tenants.status, 'active'),
+        ),
+      );
+  }
+
+  async deletionSubject(
+    slug: string,
+    requestId: string,
+  ): Promise<{ tenantId: string; userId: string; email: string; keycloakId: string } | null> {
+    const [row] = await this.db
+      .select({
+        tenantId: schema.users.tenantId,
+        userId: schema.users.id,
+        email: schema.users.email,
+        keycloakId: schema.users.keycloakId,
+      })
+      .from(schema.privacyRequests)
+      .innerJoin(schema.tenants, eq(schema.tenants.id, schema.privacyRequests.tenantId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.privacyRequests.userId))
+      .where(
+        and(
+          eq(schema.tenants.slug, slug),
+          eq(schema.privacyRequests.id, requestId),
+          eq(schema.privacyRequests.type, 'delete'),
+          eq(schema.privacyRequests.status, 'approved'),
+        ),
+      );
+    return row ?? null;
+  }
+
+  /**
+   * As in anonymiseTenant, for one person. Their usage rows keep the id, so the company's
+   * totals still add up, but nothing is left to say who that was.
+   */
+  async forgetUser(
+    tenantId: string,
+    userId: string,
+    requestId: string,
+    slug: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`
+        update users set
+          email = 'deleted-' || id::text || '@deleted.invalid',
+          name = 'Deleted user',
+          keycloak_id = 'deleted-' || id::text,
+          status = 'deleted'
+        where id = ${userId} and tenant_id = ${tenantId}`);
+      await tx.execute(
+        sql`update requests set payload = '{}'::jsonb
+            where user_id = ${userId} and tenant_id = ${tenantId}`,
+      );
+      await tx.execute(
+        sql`update privacy_requests set file_url = null
+            where user_id = ${userId} and tenant_id = ${tenantId}`,
+      );
+      await tx.execute(sql`
+        update gateway_keys set revoked_at = now()
+        where user_id = ${userId} and tenant_id = ${tenantId} and revoked_at is null`);
+      await tx.execute(sql`
+        update privacy_requests set status = 'completed', completed_at = now()
+        where id = ${requestId} and tenant_id = ${tenantId}`);
+      await tx.insert(schema.auditLog).values({
+        id: randomUUID(),
+        tenantId,
+        actorType: 'system',
+        actorId: 'provisioner',
+        action: 'privacy.delete_done',
+        targetType: 'user',
+        targetId: userId,
+        details: { slug, requestId },
+      });
+    });
+  }
+
   async anonymiseTenant(tenantId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx.execute(sql`

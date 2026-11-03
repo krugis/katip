@@ -229,6 +229,12 @@ export interface ConsoleStore {
     to: string,
   ): Promise<Record<string, unknown>>;
   requestDeletion(tenantId: string, userId: string): Promise<PrivacyRequestView>;
+  approveDeletion(
+    tenantId: string,
+    id: string,
+    actor: Actor,
+    applyIdentity: (email: string) => Promise<void>,
+  ): Promise<PrivacyRequestView | null>;
   completePrivacyRequest(
     tenantId: string,
     id: string,
@@ -474,7 +480,7 @@ export class DbConsoleStore implements ConsoleStore {
       tx
         .select(managedColumns)
         .from(schema.users)
-        .where(eq(schema.users.tenantId, tenantId))
+        .where(and(eq(schema.users.tenantId, tenantId), ne(schema.users.status, 'deleted')))
         .orderBy(asc(schema.users.email)),
     );
   }
@@ -484,7 +490,13 @@ export class DbConsoleStore implements ConsoleStore {
       tx
         .select(managedColumns)
         .from(schema.users)
-        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.id, id))),
+        .where(
+          and(
+            eq(schema.users.tenantId, tenantId),
+            eq(schema.users.id, id),
+            ne(schema.users.status, 'deleted'),
+          ),
+        ),
     );
     return rows[0] ?? null;
   }
@@ -552,7 +564,23 @@ export class DbConsoleStore implements ConsoleStore {
         .select(managedColumns)
         .from(schema.users)
         .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.id, id)));
-      if (!current) throw Errors.notFound();
+      if (!current || current.status === 'deleted') throw Errors.notFound();
+      if (change.status === 'active') {
+        const [approved] = await tx
+          .select({ id: schema.privacyRequests.id })
+          .from(schema.privacyRequests)
+          .where(
+            and(
+              eq(schema.privacyRequests.tenantId, tenantId),
+              eq(schema.privacyRequests.userId, id),
+              eq(schema.privacyRequests.type, 'delete'),
+              eq(schema.privacyRequests.status, 'approved'),
+            ),
+          );
+        if (approved) {
+          throw Errors.conflict('deletion_approved', 'This account is being deleted');
+        }
+      }
 
       const losesAdmin =
         current.role === 'tenant_admin' &&
@@ -1170,7 +1198,7 @@ export class DbConsoleStore implements ConsoleStore {
             eq(schema.privacyRequests.tenantId, tenantId),
             eq(schema.privacyRequests.userId, userId),
             eq(schema.privacyRequests.type, 'delete'),
-            eq(schema.privacyRequests.status, 'pending'),
+            inArray(schema.privacyRequests.status, ['pending', 'approved']),
           ),
         );
       if (waiting) return this.privacyView(waiting);
@@ -1191,12 +1219,94 @@ export class DbConsoleStore implements ConsoleStore {
     });
   }
 
+  /**
+   * The admin's yes, which can't be undone: login stops now, and `pnpm tenant:forget-due`
+   * destroys the data (LLD-07 §2b). A company must keep an admin, so the last one is refused.
+   */
+  async approveDeletion(
+    tenantId: string,
+    id: string,
+    actor: Actor,
+    applyIdentity: (email: string) => Promise<void>,
+  ): Promise<PrivacyRequestView | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const [request] = await tx
+        .select()
+        .from(schema.privacyRequests)
+        .where(
+          and(eq(schema.privacyRequests.tenantId, tenantId), eq(schema.privacyRequests.id, id)),
+        );
+      if (!request || request.type !== 'delete' || !request.userId) return null;
+      if (request.status !== 'pending') {
+        throw Errors.conflict('already_decided', 'This request has already been decided');
+      }
+      const userId = request.userId;
+      const [person] = await tx
+        .select(managedColumns)
+        .from(schema.users)
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.id, userId)));
+      if (!person) return null;
+      if (person.role === 'tenant_admin') {
+        const [others] = await tx
+          .select({ n: count() })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.tenantId, tenantId),
+              eq(schema.users.role, 'tenant_admin'),
+              eq(schema.users.status, 'active'),
+              ne(schema.users.id, userId),
+            ),
+          );
+        if ((others?.n ?? 0) === 0) {
+          throw Errors.conflict('last_admin', 'A company must keep at least one active admin');
+        }
+      }
+      await applyIdentity(person.email);
+      await tx
+        .update(schema.users)
+        .set({ status: 'disabled', updatedAt: new Date() })
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.id, userId)));
+      await tx
+        .delete(schema.departmentManagers)
+        .where(eq(schema.departmentManagers.userId, userId));
+      const [row] = await tx
+        .update(schema.privacyRequests)
+        .set({ status: 'approved' })
+        .where(
+          and(eq(schema.privacyRequests.tenantId, tenantId), eq(schema.privacyRequests.id, id)),
+        )
+        .returning();
+      await this.audit(
+        tx,
+        tenantId,
+        actor,
+        'privacy.delete_approve',
+        id,
+        { userId },
+        'privacy_request',
+      );
+      return this.privacyView(row!);
+    });
+  }
+
   async completePrivacyRequest(
     tenantId: string,
     id: string,
     actor: Actor,
   ): Promise<PrivacyRequestView | null> {
     return this.inTenant(tenantId, async (tx) => {
+      const [request] = await tx
+        .select({ type: schema.privacyRequests.type })
+        .from(schema.privacyRequests)
+        .where(
+          and(eq(schema.privacyRequests.tenantId, tenantId), eq(schema.privacyRequests.id, id)),
+        );
+      if (request?.type === 'delete') {
+        // Only the deletion job can say a deletion is done.
+        throw Errors.conflict('deletion_needs_approval', 'Approve a deletion instead');
+      }
       const [row] = await tx
         .update(schema.privacyRequests)
         .set({ status: 'completed', completedAt: new Date() })

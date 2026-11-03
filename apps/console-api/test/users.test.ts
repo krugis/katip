@@ -1352,14 +1352,55 @@ describe('my account', () => {
       status: 'pending',
       userEmail: 'u@a.test',
     });
-    const done = await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${first.json().id}`, {
+    const url = `/api/v1/tenants/${a}/privacy-requests/${first.json().id}`;
+
+    // Only the deletion job can say a deletion is done.
+    const notDone = await send('PATCH', url, { status: 'completed' });
+    expect(notDone.statusCode).toBe(409);
+    expect(notDone.json().code).toBe('deletion_needs_approval');
+
+    const approved = await send('PATCH', url, { status: 'approved' });
+    expect(approved.json().status).toBe('approved');
+    const [off] = await admin`select status from users where id = ${userId}`;
+    expect(off!['status']).toBe('disabled');
+    const [entry] = await audit(a);
+    expect(entry).toMatchObject({ action: 'privacy.delete_approve', actor_id: ownerId });
+
+    const twice = await send('PATCH', url, { status: 'approved' });
+    expect(twice.statusCode).toBe(409);
+    const back = await send('PATCH', `/api/v1/tenants/${a}/users/${userId}`, { status: 'active' });
+    expect(back.statusCode).toBe(409);
+    expect(back.json().code).toBe('deletion_approved');
+  });
+
+  it('marks an export request as handled, which is not a deletion', async () => {
+    const [row] = await admin`insert into privacy_requests (tenant_id, user_id, type)
+      values (${a}, ${userId}, 'export') returning id`;
+    const done = await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${row!['id']}`, {
       status: 'completed',
     });
     expect(done.json().status).toBe('completed');
-    const mine = await send('GET', '/api/v1/me/privacy', undefined, bearer);
-    expect(mine.json().requests[0].status).toBe('completed');
-    const [entry] = await audit(a);
-    expect(entry).toMatchObject({ action: 'privacy.complete', actor_id: ownerId });
+    const approved = await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${row!['id']}`, {
+      status: 'approved',
+    });
+    expect(approved.statusCode).toBe(404);
+  });
+
+  it("won't delete a company's last admin, and hides someone once they're deleted", async () => {
+    const [own] = await admin`insert into privacy_requests (tenant_id, user_id, type)
+      values (${a}, ${ownerId}, 'delete') returning id`;
+    const last = await send('PATCH', `/api/v1/tenants/${a}/privacy-requests/${own!['id']}`, {
+      status: 'approved',
+    });
+    expect(last.statusCode).toBe(409);
+    expect(last.json().code).toBe('last_admin');
+    const [still] = await admin`select status from users where id = ${ownerId}`;
+    expect(still!['status']).toBe('active');
+    await admin`update users set status = 'deleted' where id = ${userId}`;
+    const list = await send('GET', `/api/v1/tenants/${a}/users`);
+    expect(JSON.stringify(list.json())).not.toContain(userId);
+    const edit = await send('PATCH', `/api/v1/tenants/${a}/users/${userId}`, { name: 'Geri' });
+    expect(edit.statusCode).toBe(404);
   });
 
   it("can't reach another company's requests or mark them handled", async () => {

@@ -205,7 +205,13 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
   registerCompanyRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
   registerUsageRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX);
   registerDepartmentRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
-  registerPortalRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX, callerOf);
+  registerPortalRoutes(
+    app as unknown as FastifyInstance,
+    deps.store,
+    deps.identity,
+    API_PREFIX,
+    callerOf,
+  );
   registerAuditRoutes(app as unknown as FastifyInstance, deps.store, API_PREFIX);
   registerAccessRoutes(
     app as unknown as FastifyInstance,
