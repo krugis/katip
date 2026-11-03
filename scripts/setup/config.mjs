@@ -69,7 +69,7 @@ export function validateConfig(c) {
     }
   };
 
-  unknown(c, ['project', 'identity', 'jobs', 'images', 'models', 'tenants'], 'config');
+  unknown(c, ['project', 'identity', 'jobs', 'deploy', 'images', 'models', 'tenants'], 'config');
 
   unknown(c.project, ['name', 'base_domain', 'tenant_network_prefix'], 'project');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(c.project?.name ?? '')) {
@@ -96,6 +96,13 @@ export function validateConfig(c) {
     unknown(c.jobs, ['daily_at'], 'jobs');
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(c.jobs?.daily_at ?? '')) {
       errors.push('jobs.daily_at: must be a time such as 03:30');
+    }
+  }
+
+  if (c.deploy !== undefined) {
+    unknown(c.deploy, ['keep_backups'], 'deploy');
+    if (!Number.isInteger(c.deploy?.keep_backups) || c.deploy.keep_backups < 1) {
+      errors.push('deploy.keep_backups: must be a positive integer');
     }
   }
 

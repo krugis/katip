@@ -91,7 +91,7 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-const PLATFORM_SERVICES = [
+export const PLATFORM_SERVICES = [
   'docker-socket-proxy',
   'traefik',
   'postgres',
@@ -101,7 +101,7 @@ const PLATFORM_SERVICES = [
   'mailpit',
 ];
 
-const platformCompose = (args, ctx) =>
+export const platformCompose = (args, ctx) =>
   tryRun('docker', [...platformComposeArgs(), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
@@ -477,7 +477,7 @@ export function renderTenantFiles(ctx, t) {
   writeFileSync(join(tDir, `${slug}.yml`), comp);
 }
 
-function renderAll(ctx) {
+export function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
   renderPlatformOverlay(ctx);
   for (const t of allTenants(ctx)) renderTenantFiles(ctx, t);
@@ -979,9 +979,12 @@ export const steps = [
         backendNetwork(ctx.config),
         ...allTenants(ctx).map((t) => tenantNetworkName(ctx.config, t)),
       ];
+      const failed = [];
       for (const name of names) {
-        await tryRun('docker', ['network', 'rm', name], {}).catch(() => {});
+        if ((await run('docker', ['network', 'inspect', name])).code !== 0) continue;
+        if ((await run('docker', ['network', 'rm', name])).code !== 0) failed.push(name);
       }
+      if (failed.length > 0) throw new Error(`could not remove network ${failed.join(', ')}`);
     },
   },
   {
@@ -1110,7 +1113,7 @@ export const steps = [
       ctx.log('platform healthy');
     },
     async rollback(ctx) {
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx);
     },
   },
   {
@@ -1196,7 +1199,7 @@ export const steps = [
     },
     async rollback(ctx) {
       await removeLocalLlmRelay(ctx);
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx);
     },
   },
   {
@@ -1215,9 +1218,14 @@ export const steps = [
       }
     },
     async rollback(ctx) {
+      // One failing mustn't leave the others' data behind, and must still be reported.
+      const failed = [];
       for (const t of allTenants(ctx)) {
-        await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch(() => {});
+        await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch((e) => {
+          failed.push(`${t.slug}: ${e.message.trim().split('\n').at(-1)}`);
+        });
       }
+      if (failed.length > 0) throw new Error(failed.join('; '));
     },
   },
   {
