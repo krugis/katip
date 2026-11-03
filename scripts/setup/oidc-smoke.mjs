@@ -251,7 +251,17 @@ try {
   await checkConsoleApi(b1);
 
   // The answer proves the path: LibreChat → gateway (knows the user) → LiteLLM → mock.
-  const chat = await chatThroughLibreChat(b1);
+  // Seen on a clean, slower machine just after start. Waits, and says so, so it stays visible.
+  let chat;
+  for (let attempt = 1; !chat; attempt += 1) {
+    try {
+      chat = await chatThroughLibreChat(b1);
+      if (attempt > 1) console.log(`LibreChat's models loaded after ${attempt} attempts`);
+    } catch (e) {
+      if (attempt >= 13 || !e.message.includes('endpoint_models_not_loaded')) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
   // The mock echoes. A real model answers as it likes, so any answer will do.
   const answered = process.env.REAL_MODEL
     ? chat.text.trim().length > 0
