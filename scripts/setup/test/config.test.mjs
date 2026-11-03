@@ -294,7 +294,11 @@ describe('tenants', () => {
   it('prefers a real key, then a local model, then the mock', () => {
     const local = renderLiteLLMModels(config, { KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080' });
     expect(local).toContain('api_base: http://host.docker.internal:18090/v1');
-    expect(local).not.toContain('mock-llm');
+    // A local chat model says nothing about embeddings, so those stay on the mock.
+    const embedding = config.models.find((m) => m.class === 'embedding').alias;
+    for (const block of local.split('  - model_name: ').slice(1)) {
+      expect(block.includes('mock-llm')).toBe(block.startsWith(embedding));
+    }
     const mock = renderLiteLLMModels(config, {});
     expect(mock).toContain('mock-llm');
     expect(mock).not.toContain('host.docker.internal');

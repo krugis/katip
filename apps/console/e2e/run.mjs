@@ -779,30 +779,36 @@ try {
   await person.waitForURL((u) => !u.pathname.startsWith('/oauth'), { timeout: 30_000 });
 
   console.log('a file in a real LibreChat, through the RAG API and the gateway');
-  const lcBase = `https://${slug}.${base}`;
-  const lcToken = await person.evaluate(async () => {
-    const r = await fetch('/api/auth/refresh', { method: 'POST' });
-    return (await r.json()).token;
-  });
   const uploadedFileId = randomUUID();
   const usageBefore = sql(
     `select count(*) from usage_events where tenant_id = '${sql(`select id from tenants where slug = '${slug}'`)}' and source = 'embedding'`,
   );
-  const upload = await person.request.post(`${lcBase}/api/files`, {
-    headers: { authorization: `Bearer ${lcToken}` },
-    multipart: {
-      file: {
-        name: 'not.txt',
-        mimeType: 'text/plain',
-        buffer: Buffer.from('Kâtip dosya deneme metni. Kira sözleşmesi Mart ayında bitiyor.'),
-      },
-      file_id: uploadedFileId,
-      endpoint: 'agents',
-      tool_resource: 'file_search',
-      message_file: 'true',
-    },
-  });
-  check(upload.status() === 200, `LibreChat accepts a file for search (${upload.status()})`);
+  // In the page: it's what LibreChat itself does, and only the browser knows *.localhost.
+  const uploaded = await person.evaluate(async (fileId) => {
+    const refreshed = await fetch('/api/auth/refresh', { method: 'POST' });
+    const { token: bearer } = await refreshed.json();
+    const form = new FormData();
+    form.append('file_id', fileId);
+    form.append('endpoint', 'agents');
+    form.append('tool_resource', 'file_search');
+    form.append('message_file', 'true');
+    form.append(
+      'file',
+      new File(['Kâtip dosya deneme metni. Kira sözleşmesi Mart ayında bitiyor.'], 'not.txt', {
+        type: 'text/plain',
+      }),
+    );
+    const r = await fetch('/api/files', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${bearer}` },
+      body: form,
+    });
+    return { status: r.status, text: (await r.text()).slice(0, 200) };
+  }, uploadedFileId);
+  check(
+    uploaded.status === 200,
+    `LibreChat accepts a file for search (${uploaded.status}: ${uploaded.text})`,
+  );
   const ragRows = sh('docker', [
     'exec',
     `${project}-${slug}-ragdb-${slug}-1`,
