@@ -16,7 +16,6 @@ services:
       - ../traefik/traefik.dev.yml:/etc/traefik/traefik.yml:ro
       - ../traefik/dynamic:/etc/traefik/dynamic:ro
       - ../traefik/dev-certs:/certs:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
 
   postgres:

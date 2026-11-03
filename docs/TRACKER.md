@@ -96,6 +96,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-68 | Include a person's chats in their data export | 04, 10 | P1 | todo | P1-32 | A person's export holds their chats and nobody else's | **Owner's decision needed:** this gives a service read access to chats in Mongo, which nothing has today |
 | P1-69 | Carry out one person's deletion: Keycloak, LibreChat data, anonymised rows | 04, 07, 10 | P1 | done | P1-32 | After it, nothing identifies them, and totals still add up | Admin approves, `pnpm tenant:forget-due` carries it out (LLD-07 §2b). `pnpm test:console` scans every LibreChat collection afterwards. Nothing runs the job on a schedule yet (P1-65) |
 | P1-70 | Enforce chat retention: a company's chats older than its period are deleted (default 12 months) | 07, 10 | P1 | review | P1-65 | Old chats go on time, from the search index too; a company can set its period | `pnpm tenant:daily` and the policy page (LLD-07 §2c). "On time" needs the schedule, which is off until the owner sets `jobs.daily_at`. Some files stay, as listed there. Not yet run against the live stack |
+| P1-71 | Close the gaps the runbooks found: safe rollback, a deploy command, a way back from a migration, secret rotation tooling, secrets backup, no silent mock in production, secrets out of container environments | 01, 10 | P1 | todo | P1-48 | Each is fixed, or decided against by the owner | Listed in `docs/runbooks/` and PR notes |
 | P1-24 | Users API: invite, CSV import, tier, department, role, disable (+ Keycloak sync, session revoke) | 02, 04 | P0 | done | P1-20 | Disabled user blocked within 5 s | Keycloak rights live in an internal identity service, owner's decision 2 Nov 2026. `pnpm test:users`. Reset MFA (LLD-04) and manager-department links aren't in this task |
 | P1-25 | Console UI shell: Refine, OIDC, i18n TR/EN, role-based navigation | 04 | P0 | done | P1-20 | Each role sees only its areas | `pnpm test:console`: each role in a real browser, and a real invite email through to LibreChat |
 | P1-26 | Tenant admin: overview, users, departments | 04 | P0 | done | P1-24, P1-25 | Invite 3 users → they log in within 2 min | CSV import now runs in the background. Overview has no cost until billing brings a customer price. Budgets are stored, not enforced yet. Department policy overrides are P1-66, reset MFA isn't built |
@@ -106,13 +107,13 @@ One script, one config file and one env file set up every building block. Each b
 | P1-31 | Department manager area | 04 | P1 | done | P1-30 | Other departments 404 | Approving records the decision and doesn't change access yet. Budget alerts come with P1-41; people raise requests from P1-32 |
 | P1-32 | User portal: my usage, requests, sessions/MFA links, privacy export | 04 | P0 | done | P1-30 | Usage visible within 1 min of a chat | Export covers the governance database, not chats (P1-68). Deletion is a request the admin carries out by hand (P1-69). Default alias isn't built |
 | P1-33 | Audit log API + screen (tenant + provider) | 04, 05 | P1 | done | P1-20 | All mutations audited | Client IPs aren't recorded yet. Our provider admins' own log entries with no company aren't shown |
-| P1-34 | M2 e2e (Playwright): invite → login → chat → usage visible → policy change effective | 04 | P0 | todo | P1-26…33 | Green in CI against dev stack | |
+| P1-34 | M2 e2e (Playwright): invite → login → chat → usage visible → policy change effective | 04 | P0 | done | P1-26…33 | Green in CI against dev stack | `.github/workflows/e2e.yml`, on request or an `e2e/` branch: the one script, then users, lifecycle, console and metrics on a clean machine. Green. It found LibreChat unable to read its config unless the install user is uid 1000 |
 
 ### M3 Billing, security, operations (S6–S7)
 
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1-35 | Docker socket proxy for provisioner (compose ops only) | 01, 10 | P0 | todo | P1-22 | Provisioner can't run arbitrary containers | |
+| P1-35 | Docker socket proxy for provisioner (compose ops only) | 01, 10 | P0 | done | P1-22 | Provisioner can't run arbitrary containers | The provisioner never had the socket: its Docker work runs on the host. The real exposure was Traefik, which now reaches Docker only through a read-only proxy, checked in the isolation step |
 | P1-36 | Lago deploy; plans, add-ons, metered charges configured | 06 | P0 | todo | P0-03 | Test customer + subscription created | |
 | P1-37 | `billing-bridge`: hourly usage → Lago events (idempotent); seat sync | 06 | P0 | todo | P1-36, P1-14 | Replay doesn't double-bill | |
 | P1-38 | `EInvoiceProvider` interface + manual mode (+ provider adapter when decided) | 06 | P1 | blocked | e-Fatura decision | Draft PDF in TRY with FX rate | Manual mode can ship first |
@@ -125,7 +126,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-45 | Pilot load test: 200 simulated users; measure RAM per tenant instance | 01, 07 | P0 | todo | P1-34 | Report updates sizing + ADR-002 cost | |
 | P1-46 | Security review: threat model, CI gates (Trivy, gitleaks), book external pentest | 10 | P0 | todo | P1-44 | Threat model doc; pentest date set | |
 | P1-47 | Provider margin dashboard | 06 | P1 | todo | P1-37 | Margin per tenant/month shown | |
-| P1-48 | Runbooks: deploy, rollback, secret rotation, restore, incident | 10 | P0 | todo | P1-42 | Tabletop exercise done | |
+| P1-48 | Runbooks: deploy, rollback, secret rotation, restore, incident | 10 | P0 | review | P1-42 | Tabletop exercise done | Runbooks in `docs/runbooks/`. Nothing in them has been run or rehearsed. The tabletop is for the owner: script and result template in `docs/runbooks/tabletop.md`. Restore is a plan until P1-42 gives backups; `tenant:rotate-secrets` does not exist, so rotation is manual |
 | P1-49 | KVKK docs: DPA template, sub-processor list, privacy texts (with counsel) | 10 | P0 | todo | – | Reviewed by counsel | Owner: product owner |
 | P1-50 | Pilot kit: Turkish admin guide, user quick start, short video | – | P1 | todo | P1-34 | Kit shared with pilot customers | |
 | P1-51 | Status page + external uptime checks | 10 | P1 | todo | P1-43 | Status page public | |
