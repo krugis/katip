@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export * from './types.js';
-export { chooseRoute, visibleAliases, RouteDeniedError } from './router.js';
+export { chooseRoute, chooseEmbeddingRoute, visibleAliases, RouteDeniedError } from './router.js';
 export {
   estimateTokens,
   costMicroUsd,

@@ -5,7 +5,7 @@
  * purged afterwards. Screenshots land in apps/console/e2e/artifacts.
  */
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import dns from 'node:dns';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -778,6 +778,50 @@ try {
   if (onAuth(person)) await signIn(person, userEmail, `${slug}.${base}`);
   await person.waitForURL((u) => !u.pathname.startsWith('/oauth'), { timeout: 30_000 });
 
+  console.log('a file in a real LibreChat, through the RAG API and the gateway');
+  const lcBase = `https://${slug}.${base}`;
+  const lcToken = await person.evaluate(async () => {
+    const r = await fetch('/api/auth/refresh', { method: 'POST' });
+    return (await r.json()).token;
+  });
+  const uploadedFileId = randomUUID();
+  const usageBefore = sql(
+    `select count(*) from usage_events where tenant_id = '${sql(`select id from tenants where slug = '${slug}'`)}' and source = 'embedding'`,
+  );
+  const upload = await person.request.post(`${lcBase}/api/files`, {
+    headers: { authorization: `Bearer ${lcToken}` },
+    multipart: {
+      file: {
+        name: 'not.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('Kâtip dosya deneme metni. Kira sözleşmesi Mart ayında bitiyor.'),
+      },
+      file_id: uploadedFileId,
+      endpoint: 'agents',
+      tool_resource: 'file_search',
+      message_file: 'true',
+    },
+  });
+  check(upload.status() === 200, `LibreChat accepts a file for search (${upload.status()})`);
+  const ragRows = sh('docker', [
+    'exec',
+    `${project}-${slug}-ragdb-${slug}-1`,
+    'psql',
+    '-U',
+    'rag',
+    '-d',
+    'rag',
+    '-Atc',
+    `select count(*) from langchain_pg_embedding where cmetadata->>'file_id' = '${uploadedFileId}'`,
+  ]).trim();
+  check(Number(ragRows) > 0, `its text is in the company's own vector database (${ragRows} rows)`);
+  const embeddingUsage = await within(10, () =>
+    Number(
+      sql(`select count(*) from usage_events where tenant_id = '${sql(`select id from tenants where slug = '${slug}'`)}' and source = 'embedding'`),
+    ) > Number(usageBefore),
+  );
+  check(embeddingUsage !== null, 'and the embedding is metered');
+
   console.log('a disabled user');
   const off = await fetch(`${consoleUrl}/api/v1/tenants/${tid}/users/${userId}`, {
     method: 'PATCH',
@@ -1009,6 +1053,78 @@ try {
   );
   cli('forget-due');
   check(true, 'running the job again changes nothing');
+
+  console.log("chat retention, on a company's real data");
+  const retentionUrl = `${consoleUrl}/api/v1/tenants/${tid}/chat-retention`;
+  const retentionCall = (method, body) =>
+    fetch(retentionUrl, {
+      method,
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  check((await (await retentionCall('GET')).json()).months === 12, 'the default is 12 months');
+  check((await retentionCall('PUT', { months: 0 })).status === 400, 'a period of 0 is refused');
+  check((await retentionCall('PUT', { months: 121 })).status === 400, 'and one over 120');
+  check((await retentionCall('PUT', { months: 6 })).status === 200, 'the admin sets it to 6');
+  const monthsAgo = (m) => `new Date(Date.now() - ${m} * 30.5 * 86400000)`;
+  mongoshEval(`
+    const who = '${colleagueId}';
+    const chat = (id, conv, msg) => {
+      db.conversations.insertOne({ conversationId: id, user: who, title: 'eski', createdAt: ${monthsAgo(14)}, updatedAt: conv });
+      db.messages.insertOne({ messageId: id + '-m', conversationId: id, user: who, text: 'emeklilik', createdAt: msg, updatedAt: msg });
+    };
+    chat('ret-old', ${monthsAgo(7)}, ${monthsAgo(7)});
+    chat('ret-new', ${monthsAgo(1)}, ${monthsAgo(1)});
+    chat('ret-revived', ${monthsAgo(7)}, ${monthsAgo(1)});
+    chat('ret-inside', ${monthsAgo(5)}, ${monthsAgo(5)});
+    db.sharedlinks.insertOne({ shareId: 'ret-old-share', user: who, conversationId: 'ret-old' });
+  `);
+  const retentionSeed = meiliCall(
+    'POST',
+    '/indexes/messages/documents',
+    JSON.stringify(
+      ['ret-old', 'ret-new', 'ret-revived', 'ret-inside'].map((id) => ({
+        messageId: `${id}-m`,
+        conversationId: id,
+        user: colleagueId,
+        text: 'emeklilik',
+      })),
+    ),
+  );
+  for (let i = 0; i < 40; i += 1) {
+    if (meiliCall('GET', `/tasks/${retentionSeed.taskUid}`).status === 'succeeded') break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const auditCount = () =>
+    sql(`select count(*) from audit_log where tenant_id = '${tid}' and action = 'chat.retention'`);
+  cli('daily');
+  const chatsLeft = () =>
+    JSON.parse(
+      mongoshEval(
+        `JSON.stringify(db.conversations.find({ conversationId: /^ret-/ }).toArray().map((c) => c.conversationId).sort())`,
+      ),
+    );
+  check(
+    JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']),
+    `only the chat past its period goes (${chatsLeft().join(', ')})`,
+  );
+  check(
+    mongoshEval(`db.messages.countDocuments({ conversationId: 'ret-old' }) + db.sharedlinks.countDocuments({ conversationId: 'ret-old' })`) === '0',
+    'with its messages and shared link',
+  );
+  const retentionHits = meiliCall('POST', '/indexes/messages/search', JSON.stringify({ q: 'emeklilik', limit: 20 })).hits.map((h) => h.messageId);
+  check(!retentionHits.includes('ret-old-m'), 'and from the search index');
+  check(retentionHits.includes('ret-new-m'), 'and a recent chat is still found');
+  check(auditCount() !== '0', 'it is in the audit log');
+  check(
+    !sql(`select coalesce(string_agg(details::text, ','), '') from audit_log where tenant_id = '${tid}' and action = 'chat.retention'`).includes('emeklilik'),
+    'as counts, with no chat text',
+  );
+  const afterFirst = auditCount();
+  cli('daily');
+  check(JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']), 'running it again deletes nothing more');
+  check(auditCount() === afterFirst, 'and records nothing new');
+  check((await retentionCall('PUT', { months: 12 })).status === 200, 'the admin sets it back');
 
   console.log("a department's stricter rules, through to the real gateway");
   await admin.goto(`${consoleUrl}/tenant/departments`);

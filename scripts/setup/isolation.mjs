@@ -22,10 +22,11 @@ const NOT_FOR_TENANTS = [
 /**
  * @param helpers.secret (t, name) => a tenant secret
  * @param helpers.gatewayStatus (t, email) => HTTP status of a gateway call with t's key
+ * @param helpers.serviceKeyChatStatus (t) => HTTP status of a chat call with t's RAG API key
  * @param helpers.waitForTenant (t) => resolves when t's LibreChat answers
  */
 export async function checkIsolation(ctx, helpers) {
-  const { secret, gatewayStatus, waitForTenant } = helpers;
+  const { secret, gatewayStatus, serviceKeyChatStatus, waitForTenant } = helpers;
   const project = ctx.config.project.name;
   const base = ctx.config.project.base_domain;
   const failures = [];
@@ -47,6 +48,7 @@ export async function checkIsolation(ctx, helpers) {
     );
   const lc = (t) => `${t.slug}-lc-${t.slug}`;
   const meili = (t) => `${t.slug}-meili-${t.slug}`;
+  const rag = (t) => `${t.slug}-rag-${t.slug}`;
   const reachable = async (from, target) => {
     const [host, port] = target.split(':');
     return (await exec(lc(from), `nc -z -w2 ${host} ${port}`)).code === 0;
@@ -80,10 +82,21 @@ export async function checkIsolation(ctx, helpers) {
     const pair = `${a.slug} → ${b.slug}`;
 
     // Network: only what a tenant needs, and nothing of another tenant.
-    for (const target of ['policy-gateway:8080', 'mongodb:27017', `meili-${a.slug}:7700`]) {
+    for (const target of [
+      'policy-gateway:8080',
+      'mongodb:27017',
+      `meili-${a.slug}:7700`,
+      `rag-${a.slug}:8000`,
+    ]) {
       expect(await reachable(a, target), `${a.slug} can't reach ${target}, which it needs`);
     }
-    for (const target of [...NOT_FOR_TENANTS, `meili-${b.slug}:7700`, `lc-${b.slug}:3080`]) {
+    for (const target of [
+      ...NOT_FOR_TENANTS,
+      `meili-${b.slug}:7700`,
+      `lc-${b.slug}:3080`,
+      `rag-${b.slug}:8000`,
+      `ragdb-${b.slug}:5432`,
+    ]) {
       expect(!(await reachable(a, target)), `${a.slug}'s LibreChat can reach ${target}`);
     }
 
@@ -117,6 +130,42 @@ export async function checkIsolation(ctx, helpers) {
       `${b.slug}: own search key fails`,
     );
 
+    // Files: a's secret signs no token b's RAG API accepts, and a's password opens no vectors of b.
+    const withToken = (t, jwtSecret) =>
+      exec(
+        rag(t),
+        `python -c "import os,jwt,urllib.request as u;u.urlopen(u.Request('http://127.0.0.1:8000/ids',headers={'Authorization':'Bearer '+jwt.encode({'id':'isolation-check'},os.environ['S'],algorithm='HS256')}))"`,
+        { S: jwtSecret },
+      );
+    expect(
+      (await withToken(b, secret(a, 'LC_JWT_SECRET'))).code !== 0,
+      `${pair}: a token from the first works on the other's RAG API`,
+    );
+    expect(
+      (await withToken(b, secret(b, 'LC_JWT_SECRET'))).code === 0,
+      `${b.slug}: own token fails on its RAG API`,
+    );
+    const vectorLogin = (t, password) =>
+      exec(
+        rag(t),
+        `python -c "import os,psycopg2;psycopg2.connect(host='ragdb-${t.slug}',user='rag',dbname='rag',password=os.environ['PW'])"`,
+        { PW: password },
+      );
+    expect(
+      (await vectorLogin(b, secret(a, 'RAG_DB_PASSWORD'))).code !== 0,
+      `${pair}: vector database password works there`,
+    );
+    expect(
+      (await vectorLogin(b, secret(b, 'RAG_DB_PASSWORD'))).code === 0,
+      `${b.slug}: own vector database password fails`,
+    );
+
+    // Gateway: a's RAG API key can do nothing but embed, and only as a.
+    expect(
+      (await serviceKeyChatStatus(a)) === '403',
+      `${a.slug}: the RAG API's key can do more than embed`,
+    );
+
     // Gateway: a's key can't act as b's user.
     const stranger = `smoke-member@${b.slug}.${base}`;
     expect(
@@ -134,7 +183,14 @@ export async function checkIsolation(ctx, helpers) {
     expect(Number(seen.at(-1)) > 0, `${a.slug}: gateway role can't read its own users: ${seen}`);
 
     // Secrets: never shared.
-    for (const name of ['GATEWAY_KEY', 'LC_CREDS_KEY', 'LC_JWT_SECRET', 'MEILI_KEY']) {
+    for (const name of [
+      'GATEWAY_KEY',
+      'LC_CREDS_KEY',
+      'LC_JWT_SECRET',
+      'MEILI_KEY',
+      'RAG_DB_PASSWORD',
+      'RAG_GATEWAY_KEY',
+    ]) {
       expect(secret(a, name) !== secret(b, name), `${pair}: ${name} is shared`);
     }
   }

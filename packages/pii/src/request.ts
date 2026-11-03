@@ -213,3 +213,42 @@ export async function maskChatRequest(
   result.detectorFailed = masker.detectorFailed();
   return result;
 }
+
+/** All an embedding request may carry to a provider, besides the text. Same rule as above. */
+const EMBEDDING_FIELDS = new Set(['model', 'encoding_format', 'dimensions']);
+
+/**
+ * Builds what may leave for the provider from an embedding request. Each string is checked on
+ * its own rather than through `maskMany`: an upload holds hundreds of chunks, cut wherever
+ * they fell, and the two sides of a cut joined into one text could hide a name from both.
+ * `input` holds text only: token arrays can't be scanned, so the gateway refuses them first.
+ */
+export async function maskEmbeddingRequest(
+  body: Record<string, unknown> & { input: string | string[] },
+  policy: PiiPolicy,
+  map: PlaceholderMap,
+  extra?: ExtraDetector,
+): Promise<MaskRequestResult> {
+  const masker = createMasker(policy, map, extra);
+  const result: MaskRequestResult = {
+    body: {},
+    blocked: [],
+    detectorFailed: false,
+    dropped: [],
+    nonTextParts: {},
+  };
+  for (const [k, v] of Object.entries(body)) {
+    if (EMBEDDING_FIELDS.has(k)) result.body[k] = v;
+    else if (!GATEWAY_FIELDS.has(k) && k !== 'input') result.dropped.push(safeName(k));
+  }
+  if (typeof body.input === 'string') {
+    result.body['input'] = await masker.maskOne(body.input);
+  } else {
+    const masked: string[] = [];
+    for (const text of body.input) masked.push(await masker.maskOne(text));
+    result.body['input'] = masked;
+  }
+  result.blocked = masker.blocked();
+  result.detectorFailed = masker.detectorFailed();
+  return result;
+}

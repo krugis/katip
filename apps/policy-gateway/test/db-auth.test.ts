@@ -158,6 +158,30 @@ describe('P1-02 gateway auth against Postgres + Valkey', () => {
     expect(unknown.json().error.code).toBe('user_not_provisioned');
   });
 
+  it('knows a service key by its type, cached or not, and limits it to embeddings', async () => {
+    const service = 'sk-sme-t-ragservice000000000000000000';
+    const tid = (await pg`select id from tenants where slug = 'acme'`)[0]!.id as string;
+    await pg`insert into gateway_keys (tenant_id, key_hash, prefix, type)
+             values (${tid}, ${hashGatewayKey(service)}, ${service.split('-')[3]!.slice(0, 8)}, 'service')`;
+    const headers = { authorization: `Bearer ${service}` };
+    for (let cached = 0; cached < 2; cached += 1) {
+      const embed = await gw.inject({
+        method: 'POST',
+        url: '/v1/embeddings',
+        headers,
+        payload: { model: 'emb-bge-m3', input: 'merhaba' },
+      });
+      expect(embed.statusCode).toBe(200);
+      const chat = await gw.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: { ...headers, 'x-user-email': 'ayse@acme.com.tr' },
+        payload: { model: 'fast', messages: [{ role: 'user', content: 'merhaba' }] },
+      });
+      expect(chat.statusCode).toBe(403);
+    }
+  });
+
   it('rejects keys whose prefix matches but hash does not', async () => {
     await redis.flushall();
     await pg`delete from gateway_keys`;

@@ -27,12 +27,19 @@ export interface PurgeJob {
 
 const PURGE_JOB = 'tenant.purge';
 
+type GatewayKeyType = 'tenant' | 'service';
+
 export interface ProvisionerStore {
   ensureTenant(input: TenantInput): Promise<{ tenantId: string; created: boolean }>;
   hasTenantAdmin(tenantId: string): Promise<boolean>;
   addTenantAdmin(tenantId: string, keycloakId: string, input: TenantInput): Promise<void>;
-  liveGatewayKeys(tenantId: string): Promise<{ keyHash: string }[]>;
-  replaceGatewayKey(tenantId: string, keyHash: string, prefix: string): Promise<void>;
+  liveGatewayKeys(tenantId: string, type?: GatewayKeyType): Promise<{ keyHash: string }[]>;
+  replaceGatewayKey(
+    tenantId: string,
+    keyHash: string,
+    prefix: string,
+    type?: GatewayKeyType,
+  ): Promise<void>;
   audit(tenantId: string, slug: string, steps: string[]): Promise<void>;
   tenantId(slug: string): Promise<string | null>;
   tenantHasUsers(slug: string): Promise<boolean>;
@@ -171,22 +178,41 @@ export class DbProvisionerStore implements ProvisionerStore {
     });
   }
 
-  async liveGatewayKeys(tenantId: string): Promise<{ keyHash: string }[]> {
+  /** Keys of one type: a tenant has one of each, and each is replaced on its own. */
+  async liveGatewayKeys(
+    tenantId: string,
+    type: GatewayKeyType = 'tenant',
+  ): Promise<{ keyHash: string }[]> {
     return this.db
       .select({ keyHash: schema.gatewayKeys.keyHash })
       .from(schema.gatewayKeys)
-      .where(and(eq(schema.gatewayKeys.tenantId, tenantId), isNull(schema.gatewayKeys.revokedAt)));
+      .where(
+        and(
+          eq(schema.gatewayKeys.tenantId, tenantId),
+          eq(schema.gatewayKeys.type, type),
+          isNull(schema.gatewayKeys.revokedAt),
+        ),
+      );
   }
 
-  async replaceGatewayKey(tenantId: string, keyHash: string, prefix: string): Promise<void> {
+  async replaceGatewayKey(
+    tenantId: string,
+    keyHash: string,
+    prefix: string,
+    type: GatewayKeyType = 'tenant',
+  ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
         .update(schema.gatewayKeys)
         .set({ revokedAt: this.now() })
         .where(
-          and(eq(schema.gatewayKeys.tenantId, tenantId), isNull(schema.gatewayKeys.revokedAt)),
+          and(
+            eq(schema.gatewayKeys.tenantId, tenantId),
+            eq(schema.gatewayKeys.type, type),
+            isNull(schema.gatewayKeys.revokedAt),
+          ),
         );
-      await tx.insert(schema.gatewayKeys).values({ tenantId, keyHash, prefix, type: 'tenant' });
+      await tx.insert(schema.gatewayKeys).values({ tenantId, keyHash, prefix, type });
     });
   }
 

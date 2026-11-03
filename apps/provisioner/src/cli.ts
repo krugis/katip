@@ -15,6 +15,7 @@ import {
 } from './lifecycle.js';
 import {
   createTenant,
+  ensureRagKey,
   finishTenant,
   ProvisionError,
   rollbackTenant,
@@ -30,6 +31,7 @@ import { deletionLookup, deletionsDue, finishDeletion, type ForgetDeps } from '.
 import {
   deleteExpiredChats,
   findExpiredChats,
+  findLibreChatFiles,
   findLibreChatUser,
   forgetLibreChatUser,
 } from './librechat-data.js';
@@ -46,6 +48,7 @@ const ConfigSchema = z.object({
   TENANT_ACTION: z.enum([
     'create',
     'finish',
+    'rag-key',
     'rollback',
     'suspend',
     'resume',
@@ -66,6 +69,7 @@ const ConfigSchema = z.object({
   TENANT_INPUT: z.string().min(1),
   /** Only for the stages that set a tenant up. */
   TENANT_GATEWAY_KEY: z.string().default(''),
+  TENANT_RAG_GATEWAY_KEY: z.string().default(''),
   TENANT_OIDC_CLIENT_SECRET: z.string().default(''),
   TENANT_MONGO_PASSWORD: z.string().default(''),
   /** finish: what the create stage changed, for the audit entry. */
@@ -128,6 +132,8 @@ const forgetDeps: ForgetDeps = {
     withMongo(config.MONGO_ROOT_URI, (client) =>
       findLibreChatUser(client.db(database), email, keycloakId),
     ),
+  findLibreChatFiles: (database, lcUserId) =>
+    withMongo(config.MONGO_ROOT_URI, (client) => findLibreChatFiles(client.db(database), lcUserId)),
   forgetLibreChatUser: (database, lcUserId, email) =>
     withMongo(config.MONGO_ROOT_URI, (client) =>
       forgetLibreChatUser(client.db(database), lcUserId, email),
@@ -149,6 +155,7 @@ try {
   const { slug } = z.object({ slug: z.string() }).parse(input);
   const requestOf = () => z.object({ requestId: z.string().uuid() }).parse(input).requestId;
   const lifecycle: Record<string, () => Promise<unknown>> = {
+    'rag-key': () => ensureRagKey(deps, slug, config.TENANT_RAG_GATEWAY_KEY),
     suspend: () => suspendTenant(deps, slug),
     resume: () => resumeTenant(deps, slug),
     delete: () => deleteTenant(deps, slug),

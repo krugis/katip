@@ -96,6 +96,39 @@ async function asJob<T>(
   }
 }
 
+/**
+ * The tenant has one live key of each type, and its secrets file holds it: replaces any other.
+ * True if it changed anything.
+ */
+async function ensureKey(
+  store: ProvisionerStore,
+  tenantId: string,
+  key: string,
+  type: 'tenant' | 'service',
+): Promise<boolean> {
+  const prefix = keyPrefix(key);
+  if (!prefix) throw new Error('the gateway key has the wrong format');
+  for (const k of await store.liveGatewayKeys(tenantId, type)) {
+    if (await verifyKey(key, k.keyHash)) return false;
+  }
+  await store.replaceGatewayKey(tenantId, hashGatewayKey(key), prefix, type);
+  return true;
+}
+
+/**
+ * The key a tenant's RAG API embeds with. It works for embeddings only (LLD-03 §1.3). Runs at
+ * every start, so a tenant from before file search gets one, wherever it was made.
+ */
+export async function ensureRagKey(
+  deps: Pick<ProvisionDeps, 'store'>,
+  slug: string,
+  key: string,
+): Promise<{ changed: boolean }> {
+  const id = await deps.store.tenantId(slug);
+  if (!id) throw new Error('the tenant does not exist');
+  return { changed: await ensureKey(deps.store, id, key, 'service') };
+}
+
 /** Everything a tenant's LibreChat needs before it can start. */
 export async function createTenant(
   deps: ProvisionDeps,
@@ -126,15 +159,9 @@ export async function createTenant(
       if (mongoCreated) changedSteps.push('mongodb');
 
       await step('gateway-key', async () => {
-        const prefix = keyPrefix(secrets.gatewayKey);
-        if (!prefix) throw new Error('the gateway key has the wrong format');
-        const live = await store.liveGatewayKeys(id);
-        for (const k of live) {
-          if (await verifyKey(secrets.gatewayKey, k.keyHash)) return;
+        if (await ensureKey(store, id, secrets.gatewayKey, 'tenant')) {
+          changedSteps.push('gateway-key');
         }
-        // The tenant has one live key, and its secrets file holds it: replace any other.
-        await store.replaceGatewayKey(id, hashGatewayKey(secrets.gatewayKey), prefix);
-        changedSteps.push('gateway-key');
       });
 
       return { tenantId: id, alreadyExists: changedSteps.length === 0, changedSteps };

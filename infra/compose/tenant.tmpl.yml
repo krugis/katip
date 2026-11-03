@@ -31,6 +31,72 @@ services:
       start_period: 10s
     logging: *default-logging
 
+  # One per tenant, like search: the RAG API holds one JWT secret, and in this version a
+  # valid token can list and read every file it holds (LLD-08 §1).
+  ragdb-${KATIP_SLUG}:
+    image: ${KATIP_IMAGE_POSTGRES}
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - effective_cache_size=128MB
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+    env_file:
+      - ../../env/tenants/${KATIP_SLUG}.ragdb.env
+    volumes:
+      - ragdb-${KATIP_SLUG}:/var/lib/postgresql/data
+    networks:
+      - tenant
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rag -d rag']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
+
+  rag-${KATIP_SLUG}:
+    image: ${KATIP_IMAGE_RAG_API}
+    restart: unless-stopped
+    depends_on:
+      ragdb-${KATIP_SLUG}:
+        condition: service_healthy
+    env_file:
+      - ../../env/tenants/${KATIP_SLUG}.rag.env
+    networks:
+      - tenant
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: '1.0'
+    healthcheck:
+      # Reads the reply: when its database is down, this version still answers 200.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request as u;assert json.load(u.urlopen('http://127.0.0.1:8000/health'))['status']=='UP'"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+
   lc-${KATIP_SLUG}:
     image: ${KATIP_IMAGE_LIBRECHAT}
     restart: unless-stopped
@@ -44,6 +110,8 @@ services:
         exec npm run backend
     depends_on:
       meili-${KATIP_SLUG}:
+        condition: service_healthy
+      rag-${KATIP_SLUG}:
         condition: service_healthy
     env_file:
       - ../../env/tenants/${KATIP_SLUG}.env
@@ -71,6 +139,7 @@ services:
 volumes:
   lc-uploads-${KATIP_SLUG}: {}
   meili-${KATIP_SLUG}: {}
+  ragdb-${KATIP_SLUG}: {}
 
 networks:
   # Only this tenant's services, plus Traefik, the gateway and Mongo (LLD-01 §2.3).

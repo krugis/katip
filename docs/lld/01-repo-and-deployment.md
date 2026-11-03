@@ -46,7 +46,7 @@ librechat-sme/
 | --- | --- | --- | --- | --- |
 | traefik | traefik:v3.x | 80, 443 (only public ports) | certs, dynamic config | Cloudflare origin certs or Let's Encrypt DNS challenge |
 | keycloak | quay.io/keycloak/keycloak:26.x | 8080 | – (DB in Postgres) | `KC_HOSTNAME=auth.<domain>`, admin console only via Tailscale |
-| postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`, `lago`, `rag` |
+| postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`, `lago` |
 | mongodb | mongo:7 | 27017 | mongodata | One database per tenant (`lc_<slug>`), with a login limited to it. On each tenant's network |
 | valkey | valkey/valkey:8 | 6379 | valkey | AOF on; BullMQ + counters + LiteLLM cache. Password required; `backend` network only |
 | litellm | ghcr.io/<org>/litellm:<pinned> (self-built) | 4000 | – | Internal only; master key used only by the gateway and provisioner |
@@ -57,7 +57,6 @@ librechat-sme/
 | provisioner | ghcr.io/<org>/provisioner | 8082 | docker.sock (read/write, see security note) | Runs `docker compose` for tenant files |
 | billing-bridge | ghcr.io/<org>/billing-bridge | – | – | BullMQ worker |
 | lago (api, worker, clock, front) | getlago/* pinned | 3000 | – | Phase 1 milestone M3 |
-| rag-api | LibreChat RAG API pinned | 8000 | – | Shared; embeddings via gateway `/v1/embeddings` |
 | searxng | searxng/searxng pinned | 8080 | – | Unmodified (AGPL) |
 | code-interpreter | pinned (Apache-2.0 sandbox used by LibreChat) | – | – | Phase 1b; resource limits per run |
 | seaweedfs | chrislusf/seaweedfs pinned | 8333 (S3) | seaweed | Files, backups staging |
@@ -91,14 +90,34 @@ services:
       - traefik.http.routers.${SLUG}.tls=true
       - traefik.http.routers.${SLUG}.middlewares=${SLUG}-ipallow@http,ratelimit-user@file,secure-headers@file
       - traefik.http.services.${SLUG}.loadbalancer.server.port=3080
+  ragdb-${SLUG}:                                                 # vectors, one per tenant, see below
+    image: pgvector/pgvector:${PG_VERSION}                       # the same pin as the platform's Postgres
+    env_file: [ "../../env/tenants/${SLUG}.ragdb.env" ]
+    volumes: [ "ragdb-${SLUG}:/var/lib/postgresql/data" ]
+    networks: [ tenant ]
+    deploy: { resources: { limits: { memory: 256m } } }
+  rag-${SLUG}:                                                   # file search, one per tenant, see below
+    image: ghcr.io/danny-avila/librechat-rag-api-dev-lite:${RAG_API_VERSION}
+    env_file: [ "../../env/tenants/${SLUG}.rag.env" ]
+    networks: [ tenant ]
+    deploy: { resources: { limits: { memory: 768m, cpus: "1.0" } } }
 volumes:
   lc-uploads-${SLUG}: {}
   meili-${SLUG}: {}
+  ragdb-${SLUG}: {}
 networks:
   tenant: { name: "${PROJECT}_t_${SLUG}", external: true }
 ```
 
 - **Why a Meilisearch per tenant:** LibreChat's index names are fixed (`convos`, `messages`) with no prefix setting, and its sync deletes documents missing from its own Mongo database, so a shared instance would lose other tenants' search data. It costs about 45 MB idle.
+- **Why a RAG API and vector database per tenant:** the service checks one JWT secret, and in the version LibreChat v0.8.7 can use, any valid token can list and read every file it holds (LLD-08 §1.1). Neither has a route from outside.
+- **What they cost**, measured on their own on 3 Nov 2026, with the memory limits above and no LibreChat:
+  | | RAG API | Its Postgres | Together |
+  | --- | --- | --- | --- |
+  | Idle, empty | 188 MiB | 45 MiB | **233 MiB** |
+  | After a 2.3 MB text file (1,501 chunks, 11 MB on disk) | 219 MiB | 59 MiB | **278 MiB** |
+
+  Large or scanned PDFs weren't measured. The image is 540 MB, once per host.
 - The `${SLUG}-ipallow` middleware comes from `console-api`, through Traefik's HTTP provider.
 - When the tenant has no allowlist, the middleware is a pass-through (`0.0.0.0/0`) (LLD-02 §6).
 
@@ -108,7 +127,7 @@ networks:
 | --- | --- | --- |
 | `edge` | traefik, console, keycloak, mailpit | Public entry through Traefik |
 | `backend` | platform services, not traefik or LibreChat | DBs, gateway, LiteLLM, Presidio, Valkey; no published ports |
-| `<project>_t_<slug>` | one tenant's LibreChat and Meilisearch, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, Postgres, Valkey, LiteLLM and Presidio aren't on it |
+| `<project>_t_<slug>` | one tenant's LibreChat, Meilisearch, RAG API and vector database, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, the platform's Postgres, Valkey, LiteLLM and Presidio aren't on it |
 | `egress-llm` | litellm only | Outbound to LLM providers; firewall egress allowlist (optional, phase 2) |
 
 Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, starting from a hash of the slug and stepping to the next free one, and Docker keeps what was chosen. They're set explicitly because Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.
