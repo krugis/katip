@@ -33,10 +33,13 @@ const leaks = (v: unknown) => {
 const user = { role: 'user', content: 'merhaba' };
 
 describe('embeddingPiiPolicy', () => {
-  it('masks everything for an outside model, whatever is set, but a block', () => {
-    const p = embeddingPiiPolicy({ mode: 'off', entities: { TR_IBAN: 'block' } }, false);
-    expect(p.mode).toBe('mask');
-    expect(p.entities).toMatchObject({ TR_TCKN: 'mask', PERSON: 'mask', TR_IBAN: 'block' });
+  it("gives an outside model the company's policy as set, off included", () => {
+    for (const policy of [
+      { mode: 'off' as const, entities: { TR_IBAN: 'block' as const } },
+      { mode: 'mask' as const, entities: { PERSON: 'off' as const } },
+    ]) {
+      expect(embeddingPiiPolicy(policy, false)).toEqual(policy);
+    }
   });
 
   it('turns off everything for a self-hosted model, but a block', () => {
@@ -46,10 +49,11 @@ describe('embeddingPiiPolicy', () => {
   });
 
   it('keeps block mode on every kind, either way, unless a kind says otherwise', () => {
-    for (const selfHosted of [true, false]) {
-      const p = embeddingPiiPolicy({ mode: 'block' }, selfHosted);
-      expect(p.entities).toMatchObject({ TR_TCKN: 'block', PERSON: 'block' });
-    }
+    expect(embeddingPiiPolicy({ mode: 'block' }, false)).toEqual({ mode: 'block' });
+    expect(embeddingPiiPolicy({ mode: 'block' }, true).entities).toMatchObject({
+      TR_TCKN: 'block',
+      PERSON: 'block',
+    });
     expect(
       embeddingPiiPolicy({ mode: 'block', entities: { PERSON: 'off' } }, true).entities,
     ).toMatchObject({ PERSON: 'off', TR_TCKN: 'block' });

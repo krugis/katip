@@ -189,17 +189,17 @@ The gateway is the one control point for LLM calls, including those made for use
 
 ### Text sent for embedding
 
-A field other than `model`, `input`, `encoding_format` and `dimensions` is dropped (`maskEmbeddingRequest`). What happens to `input` depends on whether anything leaves the operator's servers. This is for embeddings only: chat follows the policy as set, whichever model it uses.
+A field other than `model`, `input`, `encoding_format` and `dimensions` is dropped (`maskEmbeddingRequest`). An outside model gets `input` under the company's policy as set, as chat does. A self-hosted model, from which nothing leaves the operator's servers, gets the real text.
 
 | Policy for a kind | Outside model | Self-hosted model |
 | --- | --- | --- |
-| `off` | **Masked** | Real text |
+| `off` | Real text, as the company chose | Real text |
 | `mask` | Masked | Real text, and no detector runs for it |
 | `block` | Refused if found (400 `pii_blocked`) | Refused if found (400 `pii_blocked`) |
 
 `mode` gives each kind its setting, and a per-kind choice overrides that (`embeddingPiiPolicy`).
 
-- **An outside model never gets a kind unmasked, even one set to `off`.** That includes `PERSON: off` for an HR company. Such a company's search gets what masking does to it, below. This is on purpose, and a reversal is one line in `embeddingPiiPolicy`.
+- **A kind set to `off` goes unmasked, even to an outside model,** as it does in chat. So an HR company with `PERSON: off` can search by name. The owner decided this on 4 Nov 2026: the company made the choice, and the DPA should cover it.
 - **`block` is the company's rule, wherever the text goes.** So a detector runs for blocked kinds even on a self-hosted model, and nothing else does.
 - **`onDetectorFailure` counts only where names are checked.** An outside model always checks them. A self-hosted one does only if `PERSON` is `block`, so an analyzer outage doesn't stop its uploads otherwise. As in chat, under `allow` an outage lets a name through unchecked: to an outside model unmasked, and past a `PERSON: block`.
 
