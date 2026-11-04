@@ -19,11 +19,12 @@ import {
   tightenPolicy,
   type DepartmentOverride,
 } from '@katip/policy-engine';
-import type { PiiPolicy } from '@katip/pii';
+import { ALL_TYPES, type PiiMode, type PiiPolicy } from '@katip/pii';
 import * as schema from '@katip/db';
 import {
   MemoryQuotaStore,
   MemoryUsageSink,
+  NO_PERSON,
   type QuotaClass,
   type QuotaStore,
   type Reservation,
@@ -244,6 +245,34 @@ export function effectivePii(tenantPolicy: unknown, overridePii?: StoredPii): Pi
     : pii;
 }
 
+const STRICTNESS: Record<PiiMode, number> = { off: 0, mask: 1, block: 2 };
+const stricter = (a: PiiMode, b: unknown): PiiMode =>
+  typeof b === 'string' && Object.hasOwn(STRICTNESS, b) && STRICTNESS[b as PiiMode] > STRICTNESS[a]
+    ? (b as PiiMode)
+    : a;
+
+/**
+ * For a service key, which has no person and so no department: the strictest rule of any
+ * department, on top of the company's, per kind. Stricter than some people need, but it can't
+ * let through what someone's department forbids (LLD-03 §1.3).
+ */
+export function strictestPii(tenantPolicy: unknown, departments: (StoredPii | undefined)[]) {
+  const base = piiOf(tenantPolicy);
+  let mode = base.mode;
+  let failureBlocks = base.onDetectorFailure === 'block';
+  const entities: NonNullable<PiiPolicy['entities']> = {};
+  for (const type of ALL_TYPES) entities[type] = base.entities?.[type] ?? base.mode;
+  for (const d of departments) {
+    mode = stricter(mode, d?.mode);
+    if (d?.onDetectorFailure === 'block') failureBlocks = true;
+    for (const type of ALL_TYPES) {
+      entities[type] = stricter(entities[type]!, d?.entities?.[type] ?? d?.mode);
+    }
+  }
+  const pii: PiiPolicy = { mode, entities };
+  return failureBlocks ? { ...pii, onDetectorFailure: 'block' as const } : pii;
+}
+
 export { MemoryQuotaStore, MemoryUsageSink };
 
 /**
@@ -279,6 +308,7 @@ export class DbCatalogStore {
       priceInMicroPerM: Number(m.priceInUsdMicroPerM),
       priceOutMicroPerM: Number(m.priceOutUsdMicroPerM),
       enabled: m.enabled,
+      selfHosted: m.selfHosted === true,
     }));
     const rules = await this.db
       .select()
@@ -689,6 +719,16 @@ export class DbPolicySource {
     const { pii: overridePii, ...override } = rawOverride;
     // Only ever stricter, whatever is stored and whenever the company last changed.
     const policy = tightenPolicy(base, override);
+    if (user.id === NO_PERSON) {
+      const departments = await withTenant(this.db, tenant.id, (tx) =>
+        tx
+          .select({ override: schema.departments.policyOverride })
+          .from(schema.departments)
+          .where(eq(schema.departments.tenantId, tenant.id)),
+      );
+      const stored = departments.map((d) => (d.override as { pii?: StoredPii } | null)?.pii);
+      return { policy, pii: strictestPii(row?.policy, stored) };
+    }
     return { policy, pii: effectivePii(row?.policy, overridePii) };
   }
 }

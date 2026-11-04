@@ -19,7 +19,7 @@ import {
 import { DbPolicySource } from '../src/db-stores.js';
 import { buildGateway } from '../src/app.js';
 import { buildMockApp } from '@katip/mock-llm';
-import { MemoryQuotaStore, MemoryUsageSink } from '../src/stores.js';
+import { MemoryQuotaStore, MemoryUsageSink, NO_PERSON } from '../src/stores.js';
 import type { Tenant, User } from '../src/stores.js';
 
 let pg: postgres.Sql;
@@ -148,6 +148,87 @@ describe('P1-10 effective policy cache + policy.changed invalidation', () => {
     expect(after.policy.atQuotaLimit).toBe('downgrade'); // fresh from DB
     await src.close();
   });
+
+  it("applies any department's block to a service key, and no other company's", async () => {
+    await redis.flushdb();
+    await pg`update departments set policy_override = '{"pii":{"mode":"block"}}'::jsonb where id = ${deptId}`;
+    await pg`insert into tenants (slug, name, status, kvkk_addon) values ('beta', 'Beta', 'active', false)`;
+    const betaId = (await pg`select id from tenants where slug = 'beta'`)[0]!.id as string;
+    await pg`insert into tenant_policies (tenant_id, policy) values (${betaId}, '{}'::jsonb)`;
+    const src = new DbPolicySource(pgUri, redis);
+    await src.start();
+    const nobody = (id: string): User => ({
+      id: NO_PERSON,
+      tenantId: id,
+      email: '',
+      status: 'active',
+    });
+    expect((await src.effectivePolicy(tenant(), nobody(tenantId))).pii.mode).toBe('block');
+    const beta = { ...tenant(), id: betaId, slug: 'beta' };
+    expect((await src.effectivePolicy(beta, nobody(betaId))).pii.mode).toBe('mask');
+
+    // Someone in no department still gets the company's rule, in chat: only the key widens.
+    const plain = await src.effectivePolicy(tenant(), {
+      ...user(),
+      id: '00000000-0000-0000-0000-000000000008',
+      departmentId: undefined,
+    });
+    expect(plain.pii.mode).toBe('mask');
+
+    // The rule goes when the department drops it, as any policy change does.
+    await pg`update departments set policy_override = '{}'::jsonb where id = ${deptId}`;
+    await publishPolicyChanged(redis, tenantId);
+    await new Promise((r) => setTimeout(r, 250));
+    expect((await src.effectivePolicy(tenant(), nobody(tenantId))).pii.mode).toBe('mask');
+    await src.close();
+  });
+
+  it("stops a service-key upload on a department's block, end to end", async () => {
+    await redis.flushdb();
+    await pg`update departments set policy_override = '{"pii":{"mode":"block"}}'::jsonb where id = ${deptId}`;
+    const KEY = 'sk-sme-t-serviceblock000000000000';
+    await pg`insert into gateway_keys (tenant_id, key_hash, prefix, type)
+             values (${tenantId}, ${hashGatewayKey(KEY)}, ${KEY.split('-')[3]!.slice(0, 8)}, 'service')`;
+    await pg`insert into tenant_limits (tenant_id, month, std_tokens, prem_tokens, research_runs)
+             values (${tenantId}, ${month()}, 1000000, 200000, 40) on conflict do nothing`;
+
+    const { DbTenantStore } = await import('../src/db-stores.js');
+    const tenants = new DbTenantStore(pgUri, null);
+    const src = new DbPolicySource(pgUri, redis);
+    await src.start();
+    const mock = buildMockApp({});
+    await mock.listen({ host: '127.0.0.1', port: 0 });
+    const addr = mock.server.address();
+    const gw = buildGateway({
+      litellmBaseUrl: `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}/v1`,
+      litellmApiKey: 'test',
+      tenants,
+      quota: new MemoryQuotaStore(),
+      usage: new MemoryUsageSink(),
+      policySource: src,
+      logger: createLogger('test', { level: 'silent' }),
+    });
+    const post = (input: string) =>
+      gw.inject({
+        method: 'POST',
+        url: '/v1/embeddings',
+        headers: { authorization: `Bearer ${KEY}` },
+        payload: { model: 'emb-bge-m3', input },
+      });
+
+    const refused = await post('TCKN 10000000146');
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.code).toBe('pii_blocked');
+    expect(mock.embeddingRequests).toHaveLength(0);
+    expect((await post('kira sözleşmesi')).statusCode).toBe(200);
+
+    await gw.close();
+    await tenants.close();
+    await src.close();
+    await mock.close();
+    await pg`update departments set policy_override = '{}'::jsonb where id = ${deptId}`;
+    await pg`delete from tenant_limits where tenant_id = ${tenantId}`;
+  }, 120_000);
 
   it('publishes on the documented channel name', async () => {
     expect(POLICY_CHANGED_CHANNEL).toBe('policy.changed');

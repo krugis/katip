@@ -244,23 +244,50 @@ describe('which model', () => {
     expect(mock.embeddingRequests).toHaveLength(0);
   });
 
-  it('respects allowedModels', async () => {
+  it("isn't stopped by allowedModels, a list of chat choices that can't name it", async () => {
     build(acme({ policy: { ...DEFAULT_POLICY, allowedModels: ['std-deepseek-v4-flash'] } }));
-    expect((await embed({ model: 'auto', input: 'x' })).statusCode).toBe(403);
-    build(acme({ policy: { ...DEFAULT_POLICY, allowedModels: ['emb-bge-m3'] } }));
     expect((await embed({ model: 'auto', input: 'x' })).statusCode).toBe(200);
+    expect((await asService({ model: 'emb-bge-m3', input: 'x' })).statusCode).toBe(200);
+  });
+
+  it("doesn't let allowedModels open a model the company's region forbids", async () => {
+    build(
+      acme({
+        policy: { ...DEFAULT_POLICY, residency: 'TR_ONLY', allowedModels: ['emb-bge-m3'] },
+      }),
+    );
+    expect((await asService({ model: 'emb-bge-m3', input: 'x' })).statusCode).toBe(403);
+    expect(mock.embeddingRequests).toHaveLength(0);
   });
 
   it("doesn't send a Turkey-only company's text to a global model", async () => {
     build(acme({ policy: { ...DEFAULT_POLICY, residency: 'TR_ONLY' } }));
     expect((await embed({ model: 'auto', input: 'x' })).statusCode).toBe(403);
     expect((await embed({ model: 'emb-bge-m3', input: 'x' })).statusCode).toBe(403);
+    expect((await asService({ model: 'emb-bge-m3', input: 'x' })).statusCode).toBe(403);
     expect(mock.embeddingRequests).toHaveLength(0);
+    expect(quota.usedOf('t-acme', 'standard')).toBe(0);
     build(acme({ policy: { ...DEFAULT_POLICY, residency: 'TR_ONLY' } }), {
       catalog: [...DEFAULT_CATALOG, tr],
     });
     const res = await embed({ model: 'auto', input: 'x' });
     expect(res.headers['x-katip-model']).toBe('emb-tr');
+  });
+
+  it("doesn't send an EU-only company's text to a global model", async () => {
+    build(acme({ policy: { ...DEFAULT_POLICY, residency: 'EU_ONLY' } }));
+    expect((await asService({ model: 'emb-bge-m3', input: 'x' })).statusCode).toBe(403);
+    expect(mock.embeddingRequests).toHaveLength(0);
+  });
+
+  it('says what a person can do when no model fits the company, in both languages', async () => {
+    build(acme({ policy: { ...DEFAULT_POLICY, residency: 'TR_ONLY' } }));
+    const error = (await asService({ model: 'emb-bge-m3', input: `TCKN ${TCKN}` })).json().error;
+    expect(error.code).toBe('embedding_unavailable');
+    expect(error.message).toContain('Dosya arama');
+    expect(error.message).toContain('TR_ONLY');
+    expect(error.message).toContain('Models and policies');
+    expect(JSON.stringify(error)).not.toContain(TCKN);
   });
 
   it('keeps tr-local to a model in Türkiye, and to companies with it on', async () => {
@@ -337,17 +364,51 @@ describe('what leaves for the provider', () => {
     expect(sentInput()).toBe('izin ⟦PERSON_3fa9c1d2⟧');
   });
 
-  it('sends everything as it is with masking off', async () => {
+  it('masks for an outside model with masking off too', async () => {
     build(acme({ pii: { mode: 'off' } }), { piiDetector: NAME_DETECTOR });
     await embed({ model: 'auto', input: `Ahmet Yılmaz ${TCKN}` });
-    expect(sentInput()).toBe(`Ahmet Yılmaz ${TCKN}`);
-    expect(usage.events[0]!.piiEntities).toEqual({});
+    expect(sentInput()).toBe('⟦PERSON_1⟧ ⟦TR_TCKN_1⟧');
+    expect(usage.events[0]!.piiEntities).toEqual({ PERSON: 1, TR_TCKN: 1 });
   });
 
-  it('follows a choice per kind', async () => {
+  it('masks a kind set to off, for an outside model', async () => {
     build(acme({ pii: { mode: 'mask', entities: { TR_TCKN: 'off' } } }));
     await embed({ model: 'auto', input: `${TCKN} ${IBAN}` });
-    expect(sentInput()).toBe(`${TCKN} ⟦TR_IBAN_1⟧`);
+    expect(sentInput()).toBe('⟦TR_TCKN_1⟧ ⟦TR_IBAN_1⟧');
+  });
+
+  it('never shows an outside model a real TCKN, whatever the policy', async () => {
+    const down = async (): Promise<Span[]> => {
+      throw new Error('analyzer down');
+    };
+    const policies: Tenant['pii'][] = [
+      { mode: 'off' },
+      { mode: 'mask' },
+      { mode: 'block' },
+      { mode: 'off', entities: { TR_TCKN: 'off' } },
+      { mode: 'mask', entities: { TR_TCKN: 'off', PERSON: 'off' } },
+      { mode: 'block', entities: { TR_TCKN: 'off' } },
+      { mode: 'mask', entities: { TR_TCKN: 'block' } },
+    ];
+    for (const pii of policies) {
+      for (const piiDetector of [undefined, NAME_DETECTOR, down]) {
+        build(acme({ pii }), piiDetector ? { piiDetector } : {});
+        mock.embeddingRequests.length = 0;
+        await embed({ model: 'auto', input: [`TCKN ${TCKN}`, `yine ${TCKN}`] });
+        await asService({ model: 'emb-bge-m3', input: `TCKN ${TCKN}` });
+        expect(JSON.stringify(mock.embeddingRequests), JSON.stringify(pii)).not.toContain(TCKN);
+      }
+    }
+  });
+
+  it('never shows a model with no marker, or an unclear one, a real TCKN', async () => {
+    const base = DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!;
+    for (const selfHosted of [undefined, false, 'true', 1, null]) {
+      build(acme(), { catalog: [{ ...base, selfHosted } as unknown as ModelEntry] });
+      mock.embeddingRequests.length = 0;
+      await embed({ model: 'auto', input: `TCKN ${TCKN}` });
+      expect(sentInput(), String(selfHosted)).toBe('TCKN ⟦TR_TCKN_1⟧');
+    }
   });
 
   it('refuses in block mode, and the provider hears nothing', async () => {
@@ -410,6 +471,136 @@ describe('what leaves for the provider', () => {
     expect(floats.json().data[0].embedding).toEqual(again.json().data[0].embedding);
     const b64 = await embed({ model: 'auto', input: 'aynı metin', encoding_format: 'base64' });
     expect(typeof b64.json().data[0].embedding).toBe('string');
+  });
+});
+
+describe('a self-hosted model', () => {
+  const local: ModelEntry = {
+    ...DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!,
+    id: 'emb-local',
+    litellmName: 'emb-local',
+    selfHosted: true,
+  };
+  const on = { catalog: [local] };
+  const counting = () => {
+    const calls = { n: 0 };
+    return {
+      calls,
+      piiDetector: async (text: string) => {
+        calls.n += 1;
+        return NAME_DETECTOR(text);
+      },
+    };
+  };
+
+  it('gets the real text under mask, with nothing to count and no name check', async () => {
+    const { calls, piiDetector } = counting();
+    build(acme({ pii: { mode: 'mask' } }), { ...on, piiDetector });
+    const text = `Ahmet Yılmaz ${TCKN} ${IBAN}`;
+    const res = await asService({ model: 'emb-local', input: [text] });
+    expect(res.statusCode).toBe(200);
+    expect(sentInput()).toEqual([text]);
+    expect(calls.n).toBe(0);
+    expect(usage.events[0]).toMatchObject({ modelId: 'emb-local', piiEntities: {} });
+  });
+
+  it('gets the real text with masking off, and for a kind set to off', async () => {
+    build(acme({ pii: { mode: 'off' } }), on);
+    await embed({ model: 'auto', input: `TCKN ${TCKN}` });
+    expect(sentInput()).toBe(`TCKN ${TCKN}`);
+    mock.embeddingRequests.length = 0;
+    build(acme({ pii: { mode: 'mask', entities: { TR_TCKN: 'off' } } }), on);
+    await embed({ model: 'auto', input: `${TCKN} ${IBAN}` });
+    expect(sentInput()).toBe(`${TCKN} ${IBAN}`);
+  });
+
+  it('is refused under block, as an outside one is: that is the rule of the company', async () => {
+    for (const catalog of [[local], DEFAULT_CATALOG]) {
+      build(acme({ pii: { mode: 'block' } }), { catalog });
+      const res = await asService({ model: 'auto', input: ['temiz metin', `TCKN ${TCKN}`] });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe('pii_blocked');
+      expect(res.body).not.toContain(TCKN);
+      expect(mock.embeddingRequests).toHaveLength(0);
+      expect(quota.usedOf('t-acme', 'standard')).toBe(0);
+    }
+  });
+
+  it('passes clean text under block', async () => {
+    build(acme({ pii: { mode: 'block' } }), on);
+    expect((await embed({ model: 'auto', input: 'temiz metin' })).statusCode).toBe(200);
+    expect(sentInput()).toBe('temiz metin');
+  });
+
+  it('is refused on a kind set to block, and gets the rest as it is', async () => {
+    build(acme({ pii: { mode: 'mask', entities: { TR_IBAN: 'block' } } }), on);
+    expect((await embed({ model: 'auto', input: `IBAN ${IBAN}` })).statusCode).toBe(400);
+    expect(mock.embeddingRequests).toHaveLength(0);
+    const res = await embed({ model: 'auto', input: `TCKN ${TCKN}` });
+    expect(res.statusCode).toBe(200);
+    expect(sentInput()).toBe(`TCKN ${TCKN}`);
+    expect(JSON.stringify(mock.embeddingRequests)).not.toContain('⟦');
+  });
+
+  it('still checks names when names are blocked', async () => {
+    const { calls, piiDetector } = counting();
+    build(acme({ pii: { mode: 'mask', entities: { PERSON: 'block' } } }), { ...on, piiDetector });
+    expect((await embed({ model: 'auto', input: 'Ahmet Yılmaz' })).statusCode).toBe(400);
+    expect(calls.n).toBe(1);
+    expect(mock.embeddingRequests).toHaveLength(0);
+  });
+
+  it('needs no analyzer unless names are blocked', async () => {
+    const down = async (): Promise<Span[]> => {
+      throw new Error('analyzer down');
+    };
+    build(acme({ pii: { mode: 'mask', onDetectorFailure: 'block' } }), {
+      ...on,
+      piiDetector: down,
+    });
+    const fine = await embed({ model: 'auto', input: 'Ahmet Yılmaz' });
+    expect(fine.statusCode).toBe(200);
+    expect(fine.headers['x-katip-pii-degraded']).toBeUndefined();
+    build(acme({ pii: { mode: 'block', onDetectorFailure: 'block' } }), {
+      ...on,
+      piiDetector: down,
+    });
+    expect((await embed({ model: 'auto', input: 'Ahmet Yılmaz' })).statusCode).toBe(503);
+  });
+
+  it("doesn't change an outside model beside it", async () => {
+    const outside = DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!;
+    build(acme(), { catalog: [outside, local] });
+    await embed({ model: 'emb-bge-m3', input: `TCKN ${TCKN}` });
+    expect(sentInput()).toBe('TCKN ⟦TR_TCKN_1⟧');
+  });
+
+  it("doesn't change chat, even for a chat model marked self-hosted", async () => {
+    const catalog = DEFAULT_CATALOG.map((m) => ({ ...m, selfHosted: true }));
+    build(acme(), { catalog });
+    const res = await gw.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      headers: { authorization: `Bearer ${KEY}`, 'x-user-email': EMAIL },
+      payload: { model: 'fast', messages: [{ role: 'user', content: `TCKN ${TCKN}` }] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.stringify(mock.requests)).not.toContain(TCKN);
+  });
+
+  it('keeps real text out of traces and metrics', async () => {
+    build(acme(), on);
+    await embed({ model: 'auto', input: `${SECRET_WORD} ${TCKN}` });
+    const traces = JSON.stringify(
+      exporter.getFinishedSpans().map((s) => [s.name, s.attributes, s.status, s.events]),
+    );
+    const out = await metrics.registry.metrics();
+    for (const secret of [SECRET_WORD, TCKN]) {
+      expect(traces).not.toContain(secret);
+      expect(out).not.toContain(secret);
+    }
+    const pii = exporter.getFinishedSpans().find((s) => s.name === 'pii')!;
+    expect(pii.attributes).toMatchObject({ 'pii.self_hosted': true, 'pii.entities_count': 0 });
   });
 });
 

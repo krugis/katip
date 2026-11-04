@@ -49,15 +49,33 @@ The header placeholders are documented for custom endpoints. Verify `{{LIBRECHAT
 
 `POST /v1/embeddings` runs the same stages as chat: authenticate, route, reserve quota, mask, call LiteLLM, settle, record. Differences:
 
-- **Model.** `model` is `auto`, `tr-local` or the id of an `embedding` class model, which needs no `allowUserModelChoice`, since nobody picks it in a chat. `allowedModels`, residency and the data policy apply as in chat, so a `TR_ONLY` company gets 403 until a model hosted in Türkiye is in the catalog. A chat model or alias gets 403.
+- **Model.** `model` is `auto`, `tr-local` or the id of an `embedding` class model, which needs no `allowUserModelChoice`, since nobody picks it in a chat. `allowedModels` doesn't apply: it's the list of chat choices, and the console can't name an embedding model in it. Residency and the data policy apply as in chat, so a chat model or alias gets 403 `policy_denied`.
+- **When no model fits.** A `TR_ONLY` or `EU_ONLY` company gets 403 `embedding_unavailable`, because the only embedding model in the catalog, `emb-bge-m3`, is `global`. Its text goes nowhere. See [Where a refusal shows](#where-a-refusal-shows).
 - **Exactly one model, with no fallback.** A vector only compares with vectors from the same model, so a fallback would quietly leave a file unsearchable. If the model is down, the call fails with 502.
 - **Text only.** `input` is a string or up to 2,048 strings. Token ids are refused with 400, because they can't be checked for personal data. A client built on `tiktoken` has to turn that off (`RAG_CHECK_EMBEDDING_CTX_LENGTH=False` on the RAG API).
 - **Metering.** `usage_events.source = 'embedding'`, class `embedding`, `output_tokens = 0`, priced from the catalog, charged to the `standard` quota. With nothing cheaper to go to, `downgrade` refuses like `block`. If a provider reports no usage, the estimate counts. A reply with the wrong number of vectors is a 502, and charges nothing.
 - **Service keys.** A `gateway_keys` row with `type = 'service'` belongs to a company but no person. It works on this route only: chat and `/v1/models` answer 403. The RAG API needs one because it can't add a header to its embedding calls, so it can't send `X-User-Email` (checked in its code, v0.9.0). This has three costs:
-  - Its usage row has the user `00000000-0000-0000-0000-000000000000`, so the company total is right, but embedding tokens aren't on any person or department.
-  - A department's stricter policy isn't applied, as the department isn't known. The company's policy is.
+  - Its usage row has the user `00000000-0000-0000-0000-000000000000`, so the company total is right, but embedding tokens aren't on any person or department. The console's reports show that row as "File search" / "Dosya arama", by person and by department, and in the CSV. A department's own report doesn't include it. Nothing joins it to `users`, as it has no row there.
+  - The department isn't known, so a service key gets **the strictest rule of any department, on top of the company's**, kind by kind (`strictestPii`), including `onDetectorFailure`. One department in `block` mode therefore stops every upload in the company that holds personal data, and every department's people can't index such a file. That's stricter than some of them need, but it can't let through what someone's department forbids. Only the personal data rule works this way: a department's `atQuotaLimit` and `allowedModels` don't apply to a service key.
   - A person's token cap can't count them.
   A company's normal key still needs `X-User-Email` here, and is charged to that person, as in chat. The knowledge service can use that later.
+
+  **Why not the uploader's own department.** No route exists without changing LibreChat core (read in the code of LibreChat v0.8.7 and RAG API v0.9.0):
+  - LibreChat's token for the RAG API holds only its own user id, and its `/embed` form holds the file and ids. The email isn't there, and the gateway's `users` doesn't know LibreChat's ids.
+  - The RAG API builds one `OpenAIEmbeddings` at start, with one key and base URL and no per-call headers. `user_id` goes on the stored chunks and the `/query` check, and never on a call to the gateway.
+  - A proxy before the RAG API could read the token, but couldn't tie any chunk it later embeds to that token.
+
+### Where a refusal shows
+
+An upload that's refused (`embedding_unavailable`, `pii_blocked`, `pii_unavailable`, `quota_exceeded`) shows every person the same toast: **"Error processing file"**. From the code, not yet seen in a browser:
+
+- The RAG API catches the error and answers 200 with `status: false` and the gateway's message.
+- LibreChat's `uploadVectors` replaces that with `File embedding failed.`, without reading the message.
+- `resolveUploadErrorMessage` then lets through only `Invalid file format`, `exceeds token limit` and `Unable to extract text from`, and anything else becomes the default. The RAG API's or a proxy's reply can't reach any of these, so saying more needs a change to LibreChat core.
+
+So the words a person can act on are in two other places. The gateway's error holds them, in Turkish and English, for the RAG API's log and any other client, and it logs `embedding_no_allowed_model` with the company's id. And the console's "Models and policies" screen warns the company admin as soon as a data location rule with no embedding model is chosen, and while one is saved (`fileSearch` in `GET /tenants/:tid/policy`).
+
+**What a `TR_ONLY` or `EU_ONLY` company can do today.** Chat works, on the models its rule allows. Search over uploaded files doesn't, and files uploaded earlier can't be searched either, as a question needs embedding too. A file can still be attached "as text", which uses the RAG API's `/text` and no embeddings, so it goes to the chat model through chat masking (from the code, not run). A catalog entry isn't enough to change this: the RAG API asks for one fixed model (`KATIP_EMBEDDING_MODEL`, the first of its class, the same for all tenants), so a regional model also needs a per-tenant setting there.
 
 ## 2. Request pipeline
 
@@ -117,7 +135,8 @@ general_settings:
 Notes:
 
 - Provider choice follows the privacy rule: only zero-retention, no-training providers for customer data. OpenRouter is allowed **only** with the account setting "no training providers" plus provider allowlisting per model; prefer direct DeepInfra, Anthropic or Vertex.
-- `model_catalog` in Postgres maps `litellm model_name` → class, price per 1M tokens in/out, region, data policy, enabled. The gateway reads the catalog; LiteLLM never decides policy.
+- `model_catalog` in Postgres maps `litellm model_name` → class, price per 1M tokens in/out, region, data policy, enabled, self-hosted. The gateway reads the catalog; LiteLLM never decides policy.
+- `self_hosted: true` in `katip.config.yaml` says a model runs on the operator's own servers. See §5, "Text sent for embedding". No model is marked today.
 
 ## 4. Routing rules (v1, data-driven, `router_rules` table)
 
@@ -170,19 +189,40 @@ The gateway is the one control point for LLM calls, including those made for use
 
 ### Text sent for embedding
 
-Text sent to embed reaches a provider like any prompt, so `input` gets the same checks: `off`, `mask` and `block`, the per-kind choices, and `onDetectorFailure`. A field other than `model`, `input`, `encoding_format` and `dimensions` is dropped (`maskEmbeddingRequest`). The policy applies whichever model is used, including one hosted in Türkiye or on the company's own machine, as chat's does.
+A field other than `model`, `input`, `encoding_format` and `dimensions` is dropped (`maskEmbeddingRequest`). What happens to `input` depends on whether anything leaves the operator's servers. This is for embeddings only: chat follows the policy as set, whichever model it uses.
+
+| Policy for a kind | Outside model | Self-hosted model |
+| --- | --- | --- |
+| `off` | **Masked** | Real text |
+| `mask` | Masked | Real text, and no detector runs for it |
+| `block` | Refused if found (400 `pii_blocked`) | Refused if found (400 `pii_blocked`) |
+
+`mode` gives each kind its setting, and a per-kind choice overrides that (`embeddingPiiPolicy`).
+
+- **An outside model never gets a kind unmasked, even one set to `off`.** That includes `PERSON: off` for an HR company. Such a company's search gets what masking does to it, below. This is on purpose, and a reversal is one line in `embeddingPiiPolicy`.
+- **`block` is the company's rule, wherever the text goes.** So a detector runs for blocked kinds even on a self-hosted model, and nothing else does.
+- **`onDetectorFailure` counts only where names are checked.** An outside model always checks them. A self-hosted one does only if `PERSON` is `block`, so an analyzer outage doesn't stop its uploads otherwise. As in chat, under `allow` an outage lets a name through unchecked: to an outside model unmasked, and past a `PERSON: block`.
+
+**What counts as self-hosted.** Only `self_hosted: true` on the model in `katip.config.yaml`, carried to `model_catalog.self_hosted`, which defaults to false. Absent or anything else means outside. Nothing works it out from a name, a provider or an address.
+
+- It needs `litellm_params.api_base`, or LiteLLM would go to the provider's cloud. The config check refuses it otherwise.
+- With no key in `api_key_env`, LiteLLM routes the model to the mock, and the marker doesn't reach the catalog (`seedInput`), so its text stays masked. The same goes for a chat model on the local relay.
+- Every candidate on the route has to be marked (`reachesOnlySelfHosted`). Embeddings have one candidate and no fallback, and LiteLLM here has no `fallbacks`, so this only guards the future.
+- Marking a model is the operator's statement that it's true. Text sent there isn't masked, and its logs and disks are then in KVKK scope. The gateway can't check it. `tr-gpt-oss-120b` isn't marked: nothing here says who runs `vllm-tr`. It's a chat model anyway.
 
 - **`block` is all or nothing per request.** One chunk holding a blocked kind refuses that call, so the RAG API rolls the file back and the upload fails. A company in `block` mode can't index a document with personal data in it.
 - **Each string is checked alone.** An upload's chunks are cut wherever they fell, so joining them into one text could hide a name that crosses a join. Checks run one at a time per request, so an upload uses one analyzer worker per call. The RAG API runs one call at a time per file (`PARALLEL_EXECUTION=1`). A busy analyzer still slows chat, and under `allow` a chat check that times out sends without name masking (see the load baseline), so many large uploads at once are a real risk. This hasn't been measured.
 - **Placeholders are numbered per request**, not by conversation: nothing comes back to unmask, and a stable token would let a provider link one person across a company's documents. So `⟦PERSON_1⟧` means a different person in each call.
+- **Logs hold counts only.** `embeddings completed` has the number of strings, tokens, the counts by kind, and `selfHosted`, never text. Nothing is counted for real text sent to a self-hosted model, because nothing was looked for.
 
 **What masking does to search.** The vector comes from the masked text, but the RAG API stores and returns the original text, in the company's own database. What the model reads afterwards goes through chat masking as usual. So:
 
 - A search by topic ("kira sözleşmesi") should work about as before, as most of the words are unchanged.
 - A search by a name or number loses what it asked for. "Ayşe Yılmaz'ın izni" is embedded as a generic "⟦PERSON_1⟧'in izni" and finds leave records of anyone, ranked by the other words. A TCKN or IBAN can't be searched for at all.
 - It gets worse for the file search tool in a chat: the model's query is a masked tool argument (§5), so the name is already a placeholder before it gets here.
+- **A self-hosted model only fixes half of this.** A document's vector then comes from its real text, but a question through that tool still arrives holding a placeholder such as `⟦PERSON_3fa9c1d2⟧`, because chat masking hasn't changed. So a search by name through a chat still can't find the name. Files embedded before a model was marked keep their masked vectors until embedded again.
 
-None of this has been measured, and the mock can't show it. Measure it on the LLD-08 test set with a real model before relying on it. Masking can't be turned off for search alone, short of `PERSON: off` for the whole company.
+None of this has been measured, and the mock can't show it. Measure it on the LLD-08 test set with a real model before relying on it. Masking can't be turned off for search on an outside model.
 
 ### When the detector fails
 

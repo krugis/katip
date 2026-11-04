@@ -573,6 +573,69 @@ describe('console-api', () => {
   });
 });
 
+describe('self-hosted models', () => {
+  const marked = () => {
+    const c = clone();
+    const m = c.models.find((x) => x.class === 'embedding');
+    m.self_hosted = true;
+    m.litellm_params = { ...m.litellm_params, api_base: 'http://embed.internal:8000/v1' };
+    return { c, m };
+  };
+  const inSeed = (c, env, alias) => seedInput(c, env).models.find((x) => x.id === alias).selfHosted;
+
+  it('has nothing marked in the checked-in config', () => {
+    expect(config.models.filter((m) => m.self_hosted !== undefined)).toEqual([]);
+    const env = Object.fromEntries(config.models.map((m) => [m.api_key_env, 'x']));
+    expect(seedInput(config, env).models.every((m) => m.selfHosted === false)).toBe(true);
+  });
+
+  it('is off without the marker, whatever the name or the address says', () => {
+    const c = clone();
+    const m = c.models.find((x) => x.class === 'embedding');
+    m.alias = 'emb-self-hosted-local';
+    m.provider = 'self-hosted';
+    m.litellm_params = { ...m.litellm_params, api_base: 'http://localhost:8000/v1' };
+    expect(inSeed(c, { [m.api_key_env]: 'x' }, m.alias)).toBe(false);
+  });
+
+  it('accepts true or false only', () => {
+    const { c, m } = marked();
+    expect(validateConfig(c)).toEqual([]);
+    m.self_hosted = 'yes';
+    expect(validateConfig(c)).toContain(`models[${m.alias}].self_hosted: must be true or false`);
+  });
+
+  it('needs the address of its own server', () => {
+    const { c, m } = marked();
+    delete m.litellm_params.api_base;
+    expect(validateConfig(c).join()).toContain(`models[${m.alias}].self_hosted: needs`);
+  });
+
+  it('counts only when LiteLLM really sends it to that server', () => {
+    const { c, m } = marked();
+    const key = { [m.api_key_env]: 'x' };
+    expect(inSeed(c, key, m.alias)).toBe(true);
+    expect(renderLiteLLMModels(c, key)).toContain('api_base: http://embed.internal:8000/v1');
+  });
+
+  it('stays masked on the mock, with no key', () => {
+    const { c, m } = marked();
+    expect(renderLiteLLMModels(c, {})).toContain('api_base: http://mock-llm:8080/v1');
+    expect(renderLiteLLMModels(c, {})).not.toContain('embed.internal');
+    expect(inSeed(c, {}, m.alias)).toBe(false);
+    expect(seedInput(c).models.find((x) => x.id === m.alias).selfHosted).toBe(false);
+  });
+
+  it('stays masked for a chat model on the local relay, which is another destination', () => {
+    const c = clone();
+    const m = c.models.find((x) => x.class === 'tr');
+    m.self_hosted = true;
+    const env = { KATIP_LOCAL_LLM_UPSTREAM: '127.0.0.1:8080' };
+    expect(renderLiteLLMModels(c, env)).toContain('host.docker.internal');
+    expect(inSeed(c, env, m.alias)).toBe(false);
+  });
+});
+
 describe('seedInput', () => {
   it('covers every model and tenant setting', () => {
     const s = seedInput(config);

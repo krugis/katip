@@ -44,6 +44,7 @@ const ResponseSchema = z.object({
       dataPolicy: z.string(),
     }),
   ),
+  fileSearch: z.object({ ANY_APPROVED: z.boolean(), EU_ONLY: z.boolean(), TR_ONLY: z.boolean() }),
 });
 
 const ProblemSchema = z.object({

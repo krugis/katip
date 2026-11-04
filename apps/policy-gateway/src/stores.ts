@@ -27,8 +27,7 @@ export interface Tenant {
   serviceKey?: boolean | undefined;
 }
 
-/** Who a service key's usage is recorded under. No such person exists, and it has no row. */
-export const NO_PERSON = '00000000-0000-0000-0000-000000000000';
+export { NO_PERSON } from '@katip/shared';
 
 export interface User {
   id: string;

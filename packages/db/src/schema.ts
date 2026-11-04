@@ -295,6 +295,8 @@ export const modelCatalog = pgTable('model_catalog', {
   priceInUsdMicroPerM: bigint('price_in_usd_micro_per_m', { mode: 'number' }).notNull(),
   priceOutUsdMicroPerM: bigint('price_out_usd_micro_per_m', { mode: 'number' }).notNull(),
   enabled: boolean('enabled').notNull().default(true),
+  /** Text sent to it stays on the operator's own servers. False unless the config says so. */
+  selfHosted: boolean('self_hosted').notNull().default(false),
 });
 
 export const tenantModelAllow = pgTable(

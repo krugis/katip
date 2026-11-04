@@ -67,7 +67,13 @@ const accessView = {
   sessionIdleMin: 30,
   sessionMaxH: 10,
 };
-const policyView = { policy: policyDocument, version: 1, kvkkAddon: false, catalog: [] };
+const policyView = {
+  policy: policyDocument,
+  version: 1,
+  kvkkAddon: false,
+  catalog: [],
+  fileSearch: { ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false },
+};
 const department = {
   id: USER_ID,
   name: 'Sales',

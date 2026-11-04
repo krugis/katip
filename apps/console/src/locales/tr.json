@@ -228,6 +228,7 @@
       "TR_ONLY": "Yalnızca Türkiye"
     },
     "residencyAddon": "Veri konumu seçimi KVKK eklentisiyle gelir.",
+    "residencyNoFileSearch": "Bu kuralla dosya arama çalışmaz: kurala uyan onaylı bir embedding modeli yok, bu yüzden arama için yüklenen dosyalar başarısız olur ve kullanıcılar yalnızca genel bir hata görür. Sohbet etkilenmez, dosyalar sohbete metin olarak eklenmeye devam edebilir.",
     "save": "Kaydet",
     "saved": "Kaydedildi. 30 saniye içinde geçerli olur.",
     "entities": "Veri türüne göre",
@@ -275,6 +276,7 @@
     "export": "CSV indir",
     "total": "Toplam",
     "none": "Departman yok",
+    "fileSearch": "Dosya arama",
     "empty": "Bu aralıkta kullanım yok.",
     "badRange": "Bu tarih aralığı kullanılamıyor. En fazla 400 gün seçin; başlangıç bitişten sonra olamaz."
   },
