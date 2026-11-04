@@ -124,6 +124,11 @@ describe('P1-02 gateway auth against Postgres + Valkey', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().data.map((m: { id: string }) => m.id)).toEqual(['auto', 'fast', 'best']);
 
+    // The cache entry is named by a hash: Valkey's files never hold the key itself (P1-46).
+    const names = await redis.keys('gw:auth:*');
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.some((n) => n.includes(KEY))).toBe(false);
+
     // cached: the DB row can disappear and the key still resolves within TTL
     await pg`delete from gateway_keys`;
     const cached = await gw.inject({
