@@ -58,7 +58,8 @@ images:
   traefik: traefik:v3.7.17
   postgres: pgvector/pgvector:0.8.7-pg16-trixie
   keycloak: quay.io/keycloak/keycloak:26.8.1
-  mongodb: mongo:7.0.16
+  # 7.0.28 fixes CVE-2025-14847 (MongoBleed), per the threat model's F3.
+  mongodb: mongo:7.0.28
   meilisearch: getmeili/meilisearch:v1.56.0
   valkey: valkey/valkey:8.0.12
   mailpit: axllent/mailpit:v1.33.0

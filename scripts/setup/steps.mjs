@@ -105,6 +105,34 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
+/**
+ * Routes only for a machine nobody else can reach: Keycloak's admin console with the master
+ * realm, and Mailpit, which holds every invite with its set-password link. Anywhere else they'd
+ * be on the internet, so they're written for localhost only, and removed otherwise.
+ */
+export function devOnlyRoutes(baseDomain) {
+  if (baseDomain !== 'localhost') return null;
+  return `# Generated for localhost only: see devOnlyRoutes in scripts/setup/steps.mjs.
+http:
+  routers:
+    keycloak-admin:
+      rule: 'Host(\`auth.localhost\`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: keycloak
+    mailpit:
+      rule: 'Host(\`mailpit.localhost\`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: mailpit
+  services:
+    mailpit:
+      loadBalancer:
+        servers:
+          - url: http://mailpit:8025
+`;
+}
+
 export const PLATFORM_SERVICES = [
   'traefik',
   'postgres',
@@ -947,6 +975,11 @@ export const steps = [
       ctx.log(`katip.env ${changed ? 'generated' : 'present'}`);
       loadAllTenantSecrets(ctx);
       checkCredentialFormats(ctx);
+
+      const devRoutes = join(ctx.infra, 'traefik', 'dynamic', 'dev-only.yml');
+      const devOnly = devOnlyRoutes(ctx.config.project.base_domain);
+      if (devOnly) writeFileSync(devRoutes, devOnly);
+      else rmSync(devRoutes, { force: true });
 
       // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
       // on a two-label name (*.localhost), so the names containers use are listed too.

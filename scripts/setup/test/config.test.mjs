@@ -32,6 +32,7 @@ import {
   renderTenantFiles,
   SERVICE_STEPS,
   steps,
+  devOnlyRoutes,
 } from '../steps.mjs';
 import { platformSecretNames } from '../secret-rotation.mjs';
 import { DEPLOY_UP_FLAGS, selfBuiltImages } from '../deploy-lib.mjs';
@@ -350,6 +351,21 @@ describe('tenants', () => {
 
     it('are no problem once every model has a key', () => {
       expect(mockModelsProblem(site(), allKeys)).toBeNull();
+    });
+  });
+
+  describe('what reaches the internet', () => {
+    it('routes only the company realm and its files publicly, not the admin console', () => {
+      const routes = read('traefik', 'dynamic', 'routes.yml');
+      expect(routes).toContain('PathPrefix(`/realms/{{ env "KATIP_REALM" }}/`)');
+      expect(routes).not.toContain('mailpit');
+      expect(routes).not.toMatch(/rule: 'Host\(`auth\.\{\{ env "KATIP_BASE_DOMAIN" \}\}`\)'/);
+    });
+
+    it('adds the admin console and Mailpit on localhost only', () => {
+      expect(devOnlyRoutes('localhost')).toContain('mailpit.localhost');
+      expect(devOnlyRoutes('localhost')).toContain('keycloak-admin');
+      expect(devOnlyRoutes('yzkatip.com.tr')).toBeNull();
     });
   });
 

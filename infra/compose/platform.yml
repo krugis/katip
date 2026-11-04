@@ -20,6 +20,7 @@ services:
     environment:
       # Read by dynamic/routes.yml.
       KATIP_BASE_DOMAIN: ${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+      KATIP_REALM: ${KATIP_REALM:?from katip.config.yaml}
     ports:
       - '80:80'
       - '443:443'
