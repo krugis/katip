@@ -211,8 +211,13 @@ export async function checkIsolation(ctx, helpers) {
   // Monitoring (P1-43): no route, no company network, ports on the host's loopback only, and no
   // Docker socket or host root in any of them.
   const monitoring = monitoringEnabled(ctx.config);
+  // Traefik's own routers, such as its metrics, are on its internal entrypoint, which listens
+  // on loopback only. Everything else is a route someone could reach.
+  const ourRouters = JSON.stringify(
+    JSON.parse(routers || '[]').filter((r) => !String(r.name).endsWith('@internal')),
+  );
   expect(
-    !/grafana|prometheus|loki|alertmanager|cadvisor|exporter|fluent/i.test(routers),
+    !/grafana|prometheus|loki|alertmanager|cadvisor|exporter|fluent/i.test(ourRouters),
     'Traefik has a route to a monitoring service',
   );
   if (monitoring) {
