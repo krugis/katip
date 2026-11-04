@@ -69,7 +69,7 @@ Pick the smallest action that stops the harm. Write down each action and its tim
 
 | Situation | Action |
 | --------- | ------ |
-| One company is affected, or may leak | `pnpm tenant:suspend --slug <slug>`. Containers stop. The gateway refuses the company within a minute. **Data is kept.** Undo: `pnpm tenant:resume --slug <slug>` |
+| One company is affected, or may leak | `pnpm tenant:suspend --slug <slug>`. Containers stop. Its route goes within about 5 s. The gateway refuses the company within a minute. **Data is kept.** Undo: `pnpm tenant:resume --slug <slug>` |
 | A provider key leaked | Revoke it at the provider first. Then rotate it: [secret-rotation.md](secret-rotation.md) |
 | A company's gateway key leaked | Rotate `GATEWAY_KEY`: [secret-rotation.md](secret-rotation.md). Or suspend the company |
 | Some other secret leaked | [secret-rotation.md](secret-rotation.md). Some cannot be rotated safely today. It says which |

@@ -47,6 +47,8 @@ export interface ConsoleDeps {
   events?: PolicyPublisher;
   verifyToken: TokenVerifier;
   logger?: Logger;
+  /** A company's address is <slug>.<this>. */
+  baseDomain: string;
   /** Routes added after the access check is in place; for testing that check. */
   extraRoutes?: (app: FastifyInstance) => void;
 }
@@ -219,6 +221,7 @@ export async function buildApi(deps: ConsoleDeps): Promise<FastifyInstance> {
     deps.identity,
     API_PREFIX,
     callerOf,
+    deps.baseDomain,
   );
   registerPolicyRoutes(
     app as unknown as FastifyInstance,

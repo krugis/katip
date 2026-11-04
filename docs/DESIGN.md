@@ -109,7 +109,7 @@ Details: [lld/03](lld/03-policy-gateway-and-router.md).
 | ADR-005 | **Docker Compose on VMs** (Hetzner EU; Turkish data centre for the KVKK region) | Accepted | Simple operations for a small team; Kubernetes after about 20 customers |
 | ADR-006 | **AGPL-3.0 + commercial licence** (dual licensing) for our modules; contributors sign a CLA | Accepted (31 Oct 2026) | Open source and free for everyone, including commercial use. Anyone who modifies the code and hosts it for others must publish their changes, which protects our hosting and services revenue. Companies that won't publish changes (OEMs, integrators) can buy a commercial licence. The CLA gives us the right to relicense contributions. Lawyer to review the licence notice and CLA text |
 | ADR-007 | Secrets in **SOPS + age** encrypted env files; OpenBao later for per-tenant keys | Accepted | Simplest secure option on plain VMs |
-| ADR-008 | **Traefik** behind **Cloudflare** as gateway and ingress | Accepted | Docker labels, automatic TLS, IP allowlist and rate-limit middlewares |
+| ADR-008 | **Traefik** behind **Cloudflare** as gateway and ingress | Accepted | Routes from a file and `console-api` with no access to Docker, automatic TLS, IP allowlist and rate-limit middlewares |
 | ADR-012 | The **policy gateway is the one control point** for LLM calls; users stay free to add MCP tools | Accepted | User-added tools and generated flows can't be controlled in advance, but every model call still passes through the gateway |
 | ADR-009 | Expose company knowledge, deep research and Studio flows to LibreChat as **MCP servers** | Accepted (phase 2) | No LibreChat changes; per-user identity via `{{LIBRECHAT_USER_*}}` headers |
 | ADR-010 | Usage metering in **our own Postgres ledger** (+ Valkey counters); **Lago** only for invoicing | Accepted | OpenMeter needs Kafka and ClickHouse, which is too heavy for phase 1 |
@@ -260,7 +260,7 @@ Changes from the unified setup and tenant isolation work (November 2026). PR num
 | **File search** | **One RAG API and vector database per tenant instead of one shared.** It checks one secret, and in the version LibreChat v0.8.7 can use, any valid token reads every file it holds. Embeddings go through the gateway on a key that can do nothing else | P1-08 | – | 01, 03, 08 |
 | **Valkey** | Password required. The health check now reads the reply | P1-60 | #12 | 01 |
 | **Docker networks** | One per tenant. LibreChat left the shared `edge` and `backend` networks | P1-60 | #12 | 01 |
-| **Traefik** | Reaches each tenant over that tenant's network. Dev aliases let containers use public hostnames | P1-19, P1-60 | #7, #12 | 01 |
+| **Traefik** | Reaches each tenant over that tenant's network. Dev aliases let containers use public hostnames. Routes come from a file and `console-api`, not from Docker | P1-19, P1-60 | #7, #12 | 01 |
 | **LiteLLM** | Built by the script. Models and provider keys come from config and env; the static config is gone. No longer reachable from LibreChat | P0-05, P0-19, P1-60 | #2, #6, #12 | 03 |
 | **Isolation checks** | `dev:up` fails if any boundary between tenants can be crossed | P1-62 | #14 | 10 |
 

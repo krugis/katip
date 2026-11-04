@@ -135,6 +135,7 @@ beforeAll(async () => {
       keys: createLocalJWKSet({ keys: [jwk] }),
     }),
     logger: createLogger('test', { level: 'silent' }),
+    baseDomain: 'katip.test',
   });
 }, 240_000);
 
@@ -982,17 +983,45 @@ describe('access rules', () => {
     expect(calls).toEqual([]);
   });
 
+  const traefik = async () =>
+    (await api.inject({ method: 'GET', url: '/internal/traefik' })).json().http;
+
   it("gives Traefik each company's list, open when it's empty", async () => {
     await put({ ipAllowlist: ['198.51.100.0/24'] });
-    const res = await api.inject({ method: 'GET', url: '/internal/traefik' });
-    expect(res.json()).toEqual({
-      http: {
-        middlewares: {
-          'tenant-a-ipallow': { ipAllowList: { sourceRange: ['198.51.100.0/24'] } },
-          'tenant-b-ipallow': { ipAllowList: { sourceRange: ['0.0.0.0/0', '::/0'] } },
-        },
-      },
+    expect((await traefik()).middlewares).toEqual({
+      'never-empty': { ipAllowList: { sourceRange: ['127.0.0.1/32'] } },
+      'tenant-a-ipallow': { ipAllowList: { sourceRange: ['198.51.100.0/24'] } },
+      'tenant-b-ipallow': { ipAllowList: { sourceRange: ['0.0.0.0/0', '::/0'] } },
     });
+  });
+
+  it.each(['suspended', 'deleted'])('gives Traefik no route to a %s company', async (status) => {
+    expect(Object.keys((await traefik()).routers).sort()).toEqual(['tenant-a', 'tenant-b']);
+    await admin`update tenants set status = ${status} where id = ${b}`;
+    try {
+      const http = await traefik();
+      expect(Object.keys(http.routers)).toEqual(['tenant-a']);
+      expect(Object.keys(http.services)).toEqual(['tenant-a']);
+      expect(Object.keys(http.middlewares).sort()).toEqual(['never-empty', 'tenant-a-ipallow']);
+      expect(JSON.stringify(http)).not.toContain('tenant-b');
+    } finally {
+      await admin`update tenants set status = 'active' where id = ${b}`;
+    }
+    expect(Object.keys((await traefik()).routers).sort()).toEqual(['tenant-a', 'tenant-b']);
+  });
+
+  it("answers Traefik with an error if a company's rules can't be read, so it keeps its last", async () => {
+    const real = store.routedTenants;
+    store.routedTenants = async () => {
+      throw new Error('database down');
+    };
+    try {
+      const res = await api.inject({ method: 'GET', url: '/internal/traefik' });
+      expect(res.statusCode).toBe(500);
+      expect(res.body).not.toContain('routers');
+    } finally {
+      store.routedTenants = real;
+    }
   });
 });
 

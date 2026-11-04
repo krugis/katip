@@ -12,6 +12,8 @@ import {
   identityInput,
   platformIdentityInput,
   provisionInput,
+  mockModelsProblem,
+  modelsOnMock,
   renderLiteLLMModels,
   seedInput,
   tenantNetworkName,
@@ -91,8 +93,7 @@ export const tenantComposeArgs = (config, t) => [
 ];
 
 /** The `platform` step's services; the AI plane starts after the DB is migrated. */
-const PLATFORM_SERVICES = [
-  'docker-socket-proxy',
+export const PLATFORM_SERVICES = [
   'traefik',
   'postgres',
   'keycloak',
@@ -101,7 +102,17 @@ const PLATFORM_SERVICES = [
   'mailpit',
 ];
 
-const platformCompose = (args, ctx) =>
+/**
+ * What an install from before Traefik lost Docker still has: compose leaves a container it no
+ * longer knows, with the socket mounted, and its network. Only once Traefik has left them.
+ */
+async function removeOldSocketProxy(ctx) {
+  const { name } = ctx.config.project;
+  await run('docker', ['rm', '-f', `${name}-docker-socket-proxy-1`]);
+  await run('docker', ['network', 'rm', `${name}_docker-socket`]);
+}
+
+export const platformCompose = (args, ctx) =>
   tryRun('docker', [...platformComposeArgs(), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
@@ -116,11 +127,16 @@ export const tenantCompose = (args, ctx, t) =>
  * `docker run` waits forever for a process that already ended, so every run has a
  * time limit, and the container is removed if it hits it.
  */
-export async function dockerRun(args, env = {}, { timeoutMs = 300_000, attempts = 1 } = {}) {
+export async function dockerRun(args, env = {}, { timeoutMs = 300_000, attempts = 1, input } = {}) {
   for (let attempt = 1; ; attempt++) {
     const name = `katip-tool-${randomBytes(6).toString('hex')}`;
     try {
-      return await tryRun('docker', ['run', '--rm', '--name', name, ...args], { env, timeoutMs });
+      const stdin = input === undefined ? [] : ['-i'];
+      return await tryRun('docker', ['run', '--rm', ...stdin, '--name', name, ...args], {
+        env,
+        timeoutMs,
+        input,
+      });
     } catch (e) {
       if (e.name !== 'TimedOut') throw e;
       await run('docker', ['rm', '-f', name]).catch(() => {});
@@ -167,7 +183,7 @@ async function traefikEdgeIp(ctx) {
 const CURL_LIMITS = { timeoutMs: 30_000, attempts: 3 };
 
 /** curl from a throwaway container inside the backend network. */
-const curlBackend = (ctx, path, extra = []) =>
+const curlBackend = (ctx, path, extra = [], input = undefined) =>
   dockerRun(
     [
       '--network',
@@ -180,8 +196,11 @@ const curlBackend = (ctx, path, extra = []) =>
       ...extra,
     ],
     ctx.env,
-    CURL_LIMITS,
+    { ...CURL_LIMITS, input },
   ).then((r) => r.out);
+
+/** Sends a key in a header, from curl's config on stdin, so it's not on a command line. */
+export const curlKeyConfig = (key) => `header = "authorization: Bearer ${key}"\n`;
 
 /** curl via traefik from the edge network. curl resolves *.localhost to
  * 127.0.0.1 (RFC 6761), so we hit the traefik IP directly with a Host header. */
@@ -365,6 +384,10 @@ const fill = (tmpl, vars) =>
 
 function renderLiteLLMConfig(ctx) {
   const tmpl = readFileSync(join(ctx.infra, 'litellm', 'config.dev.tmpl.yaml'), 'utf8');
+  const mockProblem = mockModelsProblem(ctx.config, ctx.env);
+  if (mockProblem) throw new Error(mockProblem);
+  const onMock = modelsOnMock(ctx.config, ctx.env);
+  if (onMock.length > 0) ctx.log(`models answering from the mock: ${onMock.join(', ')}`);
   const out = tmpl.replace('%%MODELS%%', () => renderLiteLLMModels(ctx.config, ctx.env));
   mkdirSync(join(ctx.infra, 'litellm', 'rendered'), { recursive: true });
   writeFileSync(join(ctx.infra, 'litellm', 'rendered', 'config.dev.yaml'), out);
@@ -477,7 +500,7 @@ export function renderTenantFiles(ctx, t) {
   writeFileSync(join(tDir, `${slug}.yml`), comp);
 }
 
-function renderAll(ctx) {
+export function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
   renderPlatformOverlay(ctx);
   for (const t of allTenants(ctx)) renderTenantFiles(ctx, t);
@@ -696,15 +719,12 @@ export async function startTenant(ctx, t, { recreate = false } = {}) {
 
 export const gatewayStatus = async (ctx, t, headers = []) =>
   (
-    await curlBackend(ctx, '/v1/models', [
-      '-o',
-      '/dev/null',
-      '-w',
-      '%{http_code}',
-      '-H',
-      `authorization: Bearer ${tenantSecret(ctx, t, 'GATEWAY_KEY')}`,
-      ...headers,
-    ])
+    await curlBackend(
+      ctx,
+      '/v1/models',
+      ['-o', '/dev/null', '-w', '%{http_code}', '-K', '-', ...headers],
+      curlKeyConfig(tenantSecret(ctx, t, 'GATEWAY_KEY')),
+    )
   ).trim();
 
 /** What the tenant depends on: login can be discovered, and the gateway knows its key. */
@@ -979,9 +999,12 @@ export const steps = [
         backendNetwork(ctx.config),
         ...allTenants(ctx).map((t) => tenantNetworkName(ctx.config, t)),
       ];
+      const failed = [];
       for (const name of names) {
-        await tryRun('docker', ['network', 'rm', name], {}).catch(() => {});
+        if ((await run('docker', ['network', 'inspect', name])).code !== 0) continue;
+        if ((await run('docker', ['network', 'rm', name])).code !== 0) failed.push(name);
       }
+      if (failed.length > 0) throw new Error(`could not remove network ${failed.join(', ')}`);
     },
   },
   {
@@ -1107,10 +1130,11 @@ export const steps = [
           ctx,
         );
       }
+      await removeOldSocketProxy(ctx);
       ctx.log('platform healthy');
     },
     async rollback(ctx) {
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx);
     },
   },
   {
@@ -1196,7 +1220,7 @@ export const steps = [
     },
     async rollback(ctx) {
       await removeLocalLlmRelay(ctx);
-      await platformCompose(['down', '-v', '--remove-orphans'], ctx).catch(() => {});
+      await platformCompose(['down', '-v', '--remove-orphans'], ctx);
     },
   },
   {
@@ -1215,9 +1239,14 @@ export const steps = [
       }
     },
     async rollback(ctx) {
+      // One failing mustn't leave the others' data behind, and must still be reported.
+      const failed = [];
       for (const t of allTenants(ctx)) {
-        await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch(() => {});
+        await tenantCompose(['down', '-v', '--remove-orphans'], ctx, t).catch((e) => {
+          failed.push(`${t.slug}: ${e.message.trim().split('\n').at(-1)}`);
+        });
       }
+      if (failed.length > 0) throw new Error(failed.join('; '));
     },
   },
   {

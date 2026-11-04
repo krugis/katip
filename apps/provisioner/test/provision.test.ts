@@ -10,6 +10,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTenant,
+  ensureGatewayKey,
   ensureRagKey,
   finishTenant,
   rollbackTenant,
@@ -307,6 +308,19 @@ describe('tenant:create', () => {
         join tenants t on t.id = k.tenant_id where t.slug = 'acme-rag' and k.type = 'service'`;
       expect(row!['key_hash']).not.toContain(key);
       expect(await verifyKey(key, row!['key_hash'] as string)).toBe(true);
+    });
+
+    it('a rotated tenant key replaces the old one and leaves this one alone', async () => {
+      const d = deps();
+      await provision(d, input('acme-rotate'), secrets);
+      await ensureRagKey({ store }, 'acme-rotate', (await generateGatewayKey('tenant')).key);
+      const next = (await generateGatewayKey('tenant')).key;
+      expect(await ensureGatewayKey({ store }, 'acme-rotate', next)).toEqual({ changed: true });
+      expect(await ensureGatewayKey({ store }, 'acme-rotate', next)).toEqual({ changed: false });
+      const rows = await keys('acme-rotate');
+      const live = rows.filter((r) => !r['revoked_at']);
+      expect(live.map((r) => r['type']).sort()).toEqual(['service', 'tenant']);
+      await expect(ensureGatewayKey({ store }, 'no-such-co', next)).rejects.toThrow(/not exist/);
     });
 
     it('is replaced on its own, and a new tenant key leaves it alone', async () => {

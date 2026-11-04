@@ -44,7 +44,7 @@ librechat-sme/
 
 | Service | Image (pin exact version) | Ports (internal) | Volumes | Notes |
 | --- | --- | --- | --- | --- |
-| traefik | traefik:v3.x | 80, 443 (only public ports) | certs, dynamic config | Cloudflare origin certs or Let's Encrypt DNS challenge |
+| traefik | traefik:v3.x | 80, 443 (only public ports) | certs, dynamic config | Cloudflare origin certs or Let's Encrypt DNS challenge. No Docker socket and no way to Docker: routes come from a file and `console-api` (§2.2) |
 | keycloak | quay.io/keycloak/keycloak:26.x | 8080 | – (DB in Postgres) | `KC_HOSTNAME=auth.<domain>`, admin console only via Tailscale |
 | postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`, `lago` |
 | mongodb | mongo:7 | 27017 | mongodata | One database per tenant (`lc_<slug>`), with a login limited to it. On each tenant's network |
@@ -60,7 +60,6 @@ librechat-sme/
 | searxng | searxng/searxng pinned | 8080 | – | Unmodified (AGPL) |
 | code-interpreter | pinned (Apache-2.0 sandbox used by LibreChat) | – | – | Phase 1b; resource limits per run |
 | seaweedfs | chrislusf/seaweedfs pinned | 8333 (S3) | seaweed | Files, backups staging |
-| docker-socket-proxy | pinned | – | – | Only Traefik reaches it, on a network of their own. Traefik has no socket. It answers reads of containers and refuses the rest. Inspecting a container shows its environment, so a broken-into Traefik could still read those secrets. |
 | prometheus, grafana, loki, promtail, node-exporter, cadvisor | pinned | – | – | Admin UIs only via Tailscale |
 
 **Security note on the provisioner and docker.sock.** The provisioner is the only container with `docker.sock`. It runs on an internal network and requires a provider-admin token. Plan: replace it with a Docker socket proxy that allows only compose operations (tracker P1-35).
@@ -84,13 +83,6 @@ services:
       - lc-uploads-${SLUG}:/app/uploads
     networks: [ tenant ]
     deploy: { resources: { limits: { memory: 1g, cpus: "1.0" } } }
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=${PROJECT}_t_${SLUG}
-      - traefik.http.routers.${SLUG}.rule=Host(`${SLUG}.${BASE_DOMAIN}`)${CUSTOM_DOMAIN_RULE}
-      - traefik.http.routers.${SLUG}.tls=true
-      - traefik.http.routers.${SLUG}.middlewares=${SLUG}-ipallow@http,ratelimit-user@file,secure-headers@file
-      - traefik.http.services.${SLUG}.loadbalancer.server.port=3080
   ragdb-${SLUG}:                                                 # vectors, one per tenant, see below
     image: pgvector/pgvector:${PG_VERSION}                       # the same pin as the platform's Postgres
     env_file: [ "../../env/tenants/${SLUG}.ragdb.env" ]
@@ -119,14 +111,34 @@ networks:
   | After a 2.3 MB text file (1,501 chunks, 11 MB on disk) | 219 MiB | 59 MiB | **278 MiB** |
 
   Large or scanned PDFs weren't measured. The image is 540 MB, once per host.
-- The `${SLUG}-ipallow` middleware comes from `console-api`, through Traefik's HTTP provider.
+- The `${SLUG}-ipallow` middleware comes from `console-api`, through Traefik's HTTP provider, in the same answer as the company's route.
 - When the tenant has no allowlist, the middleware is a pass-through (`0.0.0.0/0`) (LLD-02 §6).
+
+### 2.2a Routes
+
+Traefik faces the internet and has no access to Docker. Inspecting a container shows its environment, so even read-only access would give a broken-into Traefik every company's secrets. There are no Traefik labels.
+
+- **The platform's routes** are in `infra/traefik/dynamic/routes.yml`: `auth.`, `mailpit.`, `console.`, and `/api` on `console.` to `console-api`. Traefik fills in the domain from its `KATIP_BASE_DOMAIN`. They don't depend on `console-api`.
+- **A company's route** comes from `console-api` at `/internal/traefik`, polled every 5 s: router `<slug>` for `Host(<slug>.<domain>)` on `websecure` with TLS, its middlewares `<slug>-ipallow@http`, `ratelimit-user@file` and `secure-headers@file`, and a service at `http://lc-<slug>:3080`. Traefik resolves that name over the company's own network, which it's attached to when the company is created (`connectPlatformToTenant`, kept by the generated compose file).
+- **Only active companies get one.** Status is what counts, not whether containers run, and the route and its allowlist arrive in one answer, so neither exists without the other. A slug that isn't `^[a-z0-9-]{3,32}$`, or is a platform host, gets none.
+- **The answer is never empty.** Traefik ignores an empty answer, and refuses an empty `routers` or `services`, keeping the last one either way. That would leave the last company's route open after it's suspended. So those are left out, and a middleware that nothing uses stays in.
+- **Who can read it.** It lists every company's host and allowlist. `console-api` isn't on a company's network, its public route only covers `/api`, and Traefik's own port (API, metrics) listens on `127.0.0.1` inside its container, because Traefik is on every company's network. `isolation.mjs` checks all three from a company's LibreChat. The dashboard's API is `docker exec katip-traefik-1 wget -qO- http://127.0.0.1:8080/api/http/routers`.
+
+What happens when (run on the real pinned image, with stubs behind it, on 3 Nov 2026):
+
+| Situation | A company's host | Platform hosts |
+| --- | --- | --- |
+| Company created or resumed | 200 once LibreChat answers. Its route appears within about 5 s, and 502 until the container is up. `startTenant` waits up to 180 s for 200 | – |
+| Company suspended or deleted | Containers stop at once, so 502, then 404 within about 5 s | – |
+| `console-api` restarting, down, or answering 500 or garbage | The last good answer stays, including allowlists. A company suspended meanwhile keeps its route, answering 502 as its containers are stopped, and loses it on the next good answer | `auth.` and `console.` work. `/api` answers 502 |
+| Traefik restarts while `console-api` is down | 404: no route without its allowlist, the same as before | Work, so login's own pages stay up. A company's login stays out until `console-api` is back |
+| `console-api` comes back | Routes return within about 5 s, also after 150 s away | – |
 
 ### 2.3 Networks
 
 | Network | Members | Purpose |
 | --- | --- | --- |
-| `edge` | traefik, console, keycloak, mailpit | Public entry through Traefik |
+| `edge` | traefik, console, console-api, keycloak, mailpit | Public entry through Traefik |
 | `backend` | platform services, not traefik or LibreChat | DBs, gateway, LiteLLM, Presidio, Valkey; no published ports |
 | `<project>_t_<slug>` | one tenant's LibreChat, Meilisearch, RAG API and vector database, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, the platform's Postgres, Valkey, LiteLLM and Presidio aren't on it |
 | `egress-llm` | litellm only | Outbound to LLM providers; firewall egress allowlist (optional, phase 2) |
@@ -166,6 +178,17 @@ Such a server usually listens on localhost only, which containers can't reach. S
    - `docker compose pull && up -d` for the platform;
    - `provisioner upgrade --all` rolls tenants with a health check.
 4. **Renovate** keeps images and packages updated. It groups minor and patch updates weekly. LibreChat and LiteLLM upgrades are manual-review only.
+
+### 4.1 Deploying on the dev stack, and going back (P1-71)
+
+`deploy.yml` above doesn't exist yet. What exists, on one host: `pnpm dev:deploy` and `pnpm dev:deploy-back` (`scripts/setup/deploy.mjs`, `deploy-lib.mjs`, `backups.mjs`). `pnpm deploy` without `run` is pnpm's own command. Runbooks: [deploy](../runbooks/deploy.md), [rollback](../runbooks/rollback.md). Neither has run on a real stack.
+
+- **Deploy:** refuses a dirty tree; dumps the governance database and every `lc_*` Mongo database to `.katip/backups/<timestamp>-<sha>/`; tags the running images `:deploy-<sha>`; runs `dev:up --redo=config,build,governance-db,aiplane,tenant,smoke,isolation`, the same machinery as by hand; records it in `.katip/deploys.json`. A failed dump stops it before anything changes. `deploy.keep_backups` (default 5) sets how many are kept.
+- **Back:** restores the kept tags, checks out their commit, runs `dev:up` without build or pull. With `--restore-data`, and a typed confirmation, it also restores the dump. Going back across a migration or a LibreChat version is refused without it. Which migrations differ comes from the newest `created_at` in `drizzle.__drizzle_migrations`, before the deploy and now, against the journal.
+- **Not P1-42.** The dump is on the same disk, is not encrypted, and leaves out Keycloak, uploads, vectors and secrets.
+- `pnpm test:backup` runs the dump and restore commands for real against throwaway containers of the pinned images, with the real migrations and row-level security.
+
+`pnpm dev:rollback` is the uninstall, not this. Its rule for what counts as test data is in [the runbook](../runbooks/rollback.md) and `scripts/setup/rollback-guard.mjs`.
 
 ## 5. Configuration and secrets
 

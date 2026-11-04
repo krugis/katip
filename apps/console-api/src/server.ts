@@ -26,6 +26,7 @@ const app = await buildApi({
     keys: remoteKeys(config.OIDC_JWKS_URL),
   }),
   logger: log,
+  baseDomain: config.BASE_DOMAIN,
 });
 
 const shutdown = async (signal: string) => {

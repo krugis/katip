@@ -123,7 +123,7 @@ const store: ConsoleStore = {
   saveDepartmentPolicy: async () => ({ override: {}, company: policyDocument }),
   accessRules: async () => accessView,
   saveAccessRules: async () => accessView,
-  allIpAllowlists: async () => [],
+  routedTenants: async () => [],
   savePolicy: async () => policyView,
   chatRetention: async () => 12,
   saveChatRetention: async () => 6,
@@ -217,6 +217,7 @@ beforeAll(async () => {
       keys: createLocalJWKSet({ keys: [jwk] }),
     }),
     logger: createLogger('test', { level: 'silent' }),
+    baseDomain: 'katip.test',
   });
 });
 afterAll(async () => api?.close());
@@ -649,6 +650,7 @@ describe('deny by default', () => {
         identity,
         verifyToken: async () => ({}),
         logger: createLogger('test', { level: 'silent' }),
+        baseDomain: 'katip.test',
         extraRoutes: (app) => {
           app.get('/api/v1/oops', async () => ({}));
         },

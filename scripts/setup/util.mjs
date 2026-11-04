@@ -3,7 +3,15 @@
 // state file, child-process runner with SIGINT propagation.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -261,10 +269,14 @@ export function run(cmd, args, opts = {}) {
   return new Promise((resolveP, rejectP) => {
     const p = spawn(cmd, args, {
       cwd: opts.cwd ?? ROOT,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...(opts.env ?? {}) },
       shell: false,
     });
+    if (opts.input !== undefined) {
+      p.stdin.on('error', () => {}); // it may exit without reading: its exit code says why
+      p.stdin.end(opts.input);
+    }
     let out = '';
     let forwarded = false;
     let timedOut = false;
@@ -338,6 +350,51 @@ export async function tryRun(cmd, args, opts = {}) {
 }
 
 export const tail = (s, n) => s.trim().split('\n').slice(-n).join('\n');
+
+/** Runs a command with a file as its stdin or stdout, for dumps too big to hold in memory. */
+function runWithFile(cmd, args, { stdin, stdout, timeoutMs = 3_600_000 }) {
+  return new Promise((resolveP, rejectP) => {
+    const p = spawn(cmd, args, {
+      cwd: ROOT,
+      stdio: [stdin ?? 'ignore', stdout ?? 'pipe', 'pipe'],
+      shell: false,
+    });
+    let out = '';
+    const collect = (d) => {
+      out += d.toString();
+    };
+    p.stdout?.on('data', collect);
+    p.stderr.on('data', collect);
+    const timer = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    p.on('error', (e) => {
+      clearTimeout(timer);
+      rejectP(e);
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      resolveP({ code: code ?? 1, out });
+    });
+  });
+}
+
+/** Stdout goes to a new file only this user can read. */
+export async function runToFile(cmd, args, file, opts = {}) {
+  const fd = openSync(file, 'wx', 0o600);
+  try {
+    return await runWithFile(cmd, args, { ...opts, stdout: fd });
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export async function runFromFile(cmd, args, file, opts = {}) {
+  const fd = openSync(file, 'r');
+  try {
+    return await runWithFile(cmd, args, { ...opts, stdin: fd });
+  } finally {
+    closeSync(fd);
+  }
+}
 
 export function logFileFor(name) {
   mkdirSync(LOG_DIR, { recursive: true });

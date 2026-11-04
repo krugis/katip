@@ -86,7 +86,9 @@ pnpm lint && pnpm typecheck
 pnpm dev:up        # install or resume the bootstrap (Ctrl+C: keep or rollback)
 pnpm dev:status    # step state + service health
 pnpm dev:down      # stop everything (data kept)
-pnpm dev:rollback  # remove everything the bootstrap created
+pnpm dev:rollback  # remove everything the bootstrap created (asks for more if real data may exist)
+pnpm dev:deploy    # a new version: back up, keep the old images, rebuild, migrate, check
+pnpm dev:deploy-back   # go back to the previous deploy
 ```
 
 - All settings live in **[katip.config.yaml](katip.config.yaml)** (non-secret: image pins, names, domain, models, tenant). `pnpm dev:up` rejects unknown settings, and re-running it applies your edits. To change `project.name` or `tenant.slug`, run `pnpm dev:rollback` first.
@@ -94,7 +96,7 @@ pnpm dev:rollback  # remove everything the bootstrap created
 - An interrupted run keeps finished layers working; re-running resumes from where it stopped.
 - Login goes through Keycloak, with MFA enrolment at first login. Demo users are `admin@`, `manager@` and `user@demo.localhost`, with the password `KATIP_T_DEMO_DEMO_USER_PASSWORD` from `infra/env/tenants/demo.secrets.env`. The dev certificate is self-signed, so your browser will warn about it.
 - It installs two tenants, `demo` and `acme`, and checks that neither can cross into the other. The same names work for acme.
-- After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`, Traefik dashboard at `http://127.0.0.1:9090`.
+- After it's up: chat at `https://demo.localhost`, admin at `https://auth.localhost`, mail at `https://mailpit.localhost`.
 
 The gateway alone against the mock provider (no Docker):
 
