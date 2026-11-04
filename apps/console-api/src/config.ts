@@ -27,6 +27,9 @@ export const ConfigSchema = z.object({
   SMTP_PORT: z.coerce.number().default(25),
   MAIL_FROM: z.string().default('noreply@localhost'),
   ALERT_CHECK_SECONDS: z.coerce.number().int().min(5).default(60),
+  /** Prometheus's token for /metrics on METRICS_PORT (P1-43). Without it, no metrics port. */
+  METRICS_TOKEN: z.string().min(32).optional(),
+  METRICS_PORT: envPort.default(9464),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

@@ -12,6 +12,7 @@ import {
   CONSOLE_ROLE_SQL,
   USAGE_ROLLUP_SQL,
   GATEWAY_ROLE_SQL,
+  MONITOR_ROLE_SQL,
   PROVIDER_ROLE_SQL,
   TENANT_OWNED_TABLES,
   tenantRlsSql,
@@ -37,6 +38,7 @@ export async function migrateWithClient(client: postgres.Sql): Promise<string[]>
   await client.unsafe(USAGE_ROLLUP_SQL);
   await client.unsafe(CONSOLE_ROLE_SQL);
   await client.unsafe(BILLING_ROLE_SQL);
+  await client.unsafe(MONITOR_ROLE_SQL);
   return [...TENANT_OWNED_TABLES];
 }
 

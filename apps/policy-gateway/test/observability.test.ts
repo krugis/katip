@@ -96,6 +96,7 @@ describe('metrics', () => {
       /gw_requests_total\{tenant="acme",alias="fast",model="[^"]+",status="200"\} 1/,
     );
     expect(out).toMatch(/gw_tokens_total\{tenant="acme",class="[a-z]+",dir="input"\} [1-9]/);
+    expect(out).toMatch(/gw_cost_usd_micro_total\{tenant="acme",class="[a-z]+"\} [1-9]/);
     expect(out).toMatch(/gw_tokens_total\{tenant="acme",class="[a-z]+",dir="output"\} [1-9]/);
     expect(out).toContain('gw_pii_entities_total{type="TR_TCKN"} 1');
     expect(out).toMatch(/gw_upstream_latency_seconds_count\{tenant="acme",model="[^"]+"\} 1/);

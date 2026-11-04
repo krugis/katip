@@ -6,7 +6,7 @@
 // without a tenant, as that's how the tenant is found (LLD-05 §1).
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { desc, eq, sql } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import postgres from 'postgres';
 import { keyPrefix, verifyKey, POLICY_CHANGED_CHANNEL, type Logger } from '@katip/shared';
@@ -72,10 +72,14 @@ const json = (v: unknown, fallback: unknown): unknown => {
 
 /**
  * Caches key → tenant resolution in Valkey for 60 s. A revoked or rotated key
- * stops working at most 60 s later; suspending a tenant is checked live.
+ * stops working at most 60 s later, and so does suspending a tenant.
+ * The Valkey key is a hash of the gateway key, never the key itself: Valkey's
+ * append-only file and its backups would otherwise hold every key in use (P1-46).
  */
 export class ValkeyKeyCache {
-  private readonly prefix = 'gw:auth:';
+  static entryName(key: string): string {
+    return `gw:auth:${createHash('sha256').update(key).digest('hex')}`;
+  }
 
   constructor(
     private readonly redis: Redis | null,
@@ -84,7 +88,7 @@ export class ValkeyKeyCache {
 
   async get(key: string): Promise<Tenant | null | undefined> {
     if (!this.redis) return undefined;
-    const raw = await this.redis.get(this.prefix + key);
+    const raw = await this.redis.get(ValkeyKeyCache.entryName(key));
     if (raw === null) return undefined;
     return raw === '' ? null : (JSON.parse(raw) as Tenant);
   }
@@ -92,7 +96,7 @@ export class ValkeyKeyCache {
   async set(key: string, tenant: Tenant | null): Promise<void> {
     if (!this.redis) return;
     await this.redis.set(
-      this.prefix + key,
+      ValkeyKeyCache.entryName(key),
       tenant ? JSON.stringify(tenant) : '',
       'EX',
       this.ttlSeconds,

@@ -58,7 +58,8 @@ images:
   traefik: traefik:v3.7.17
   postgres: pgvector/pgvector:0.8.7-pg16-trixie
   keycloak: quay.io/keycloak/keycloak:26.8.1
-  mongodb: mongo:7.0.16
+  # 7.0.28 fixes CVE-2025-14847 (MongoBleed), per the threat model's F3.
+  mongodb: mongo:7.0.28
   meilisearch: getmeili/meilisearch:v1.56.0
   valkey: valkey/valkey:8.0.12
   mailpit: axllent/mailpit:v1.33.0
@@ -214,6 +215,39 @@ billing:
   # still goes, as a further event for that hour, as long as it's within lookback_days.
   grace_minutes: 10
   lookback_days: 35
+
+# ------------------------------------------------------------------------------
+# Monitoring (P1-43, LLD-10 §5): Prometheus, Alertmanager, Grafana, Loki, Fluent Bit and
+# exporters, for the provider only. About 354 MiB of memory idle (docs/lld/10 §5). Grafana is on
+# http://127.0.0.1:3000 (user katip-admin, password GRAFANA_ADMIN_PASSWORD in katip.env) and
+# Prometheus on http://127.0.0.1:9090: this machine only, never through Traefik.
+# Set enabled: false to leave it out; its data volumes are kept until pnpm dev:rollback.
+# ------------------------------------------------------------------------------
+monitoring:
+  enabled: true
+  # Prometheus keeps numbers this long. At least 8: the budget anomaly alert compares a day
+  # with the 7 before it.
+  metrics_retention_days: 15
+  # Loki keeps our services' logs this long. They hold people's ids (never names or text), and
+  # nothing deletes one person's lines sooner, so keep it short (LLD-10 §8).
+  logs_retention_days: 7
+  # Every alert is emailed here through Mailpit, and goes nowhere else: Alertmanager's mail server
+  # is fixed to Mailpit. A real channel (Telegram, phone, real email) is the owner's choice, in
+  # infra/monitoring/alertmanager/alertmanager.tmpl.yml, and empty until then.
+  alert_email: alerts@localhost
+  # Grafana and Loki are AGPL-3.0 and run unmodified; the rest are Apache-2.0, redis_exporter MIT.
+  images:
+    prometheus: prom/prometheus:v3.5.0
+    alertmanager: prom/alertmanager:v0.28.1
+    grafana: grafana/grafana:12.1.1
+    loki: grafana/loki:3.5.3
+    fluent_bit: fluent/fluent-bit:4.0.3
+    node_exporter: prom/node-exporter:v1.9.1
+    cadvisor: gcr.io/cadvisor/cadvisor:v0.52.1
+    blackbox_exporter: prom/blackbox-exporter:v0.27.0
+    postgres_exporter: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    mongodb_exporter: percona/mongodb_exporter:0.44.0
+    valkey_exporter: oliver006/redis_exporter:v1.74.0
 
 # ------------------------------------------------------------------------------
 # Tenants (rendered by the bootstrap; the provisioner CLI lands in P1-21). Each one

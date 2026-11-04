@@ -49,8 +49,9 @@ const PLATFORM = {
     warning:
       'Placeholders change in ongoing conversations. Where an old tool call or tool result holds an old placeholder, the gateway cannot restore it, and a user may see it in an answer. New conversations are fine, nothing is exposed, and nothing is lost. Do this out of hours, and tell companies.',
   }),
-  KATIP_METRICS_TOKEN: generated(['policy-gateway'], {
-    after: 'Update any metrics scraper that uses this token.',
+  KATIP_METRICS_TOKEN: generated(['policy-gateway', 'console-api'], {
+    after:
+      'If monitoring is on, run pnpm dev:up --redo=monitoring, which gives Prometheus the new token. It shows the gateway as down until then.',
   }),
   VALKEY_PASSWORD: generated(['valkey', 'policy-gateway', 'console-api']),
   KATIP_GATEWAY_DB_PASSWORD: pgRole('katip_gateway', 'governance', ['policy-gateway']),
@@ -107,6 +108,19 @@ const PLATFORM = {
   LAGO_ENCRYPTION_PRIMARY_KEY: { refuse: LAGO_ENCRYPTED },
   LAGO_ENCRYPTION_DETERMINISTIC_KEY: { refuse: LAGO_ENCRYPTED },
   LAGO_ENCRYPTION_KEY_DERIVATION_SALT: { refuse: LAGO_ENCRYPTED },
+  // Monitoring (P1-43).
+  GRAFANA_ADMIN_PASSWORD: {
+    refuse:
+      'Grafana sets it only at its first start and then keeps its own. Change it in Grafana (docker exec katip-grafana-1 grafana cli admin reset-admin-password), then here. See docs/runbooks/incident.md.',
+  },
+  KATIP_MONITOR_DB_PASSWORD: pgRole('katip_monitor', 'governance', ['postgres-exporter']),
+  KATIP_MONITOR_MONGO_PASSWORD: {
+    refuse:
+      "pnpm dev:up sets it on Mongo's katip_monitor user every time, so change it in katip.env and run pnpm dev:up --redo=monitoring.",
+  },
+  KATIP_MONITOR_VALKEY_PASSWORD: generated(['valkey', 'valkey-exporter'], {
+    warning: 'Valkey restarts: chats wait a few seconds. Its data is kept (AOF).',
+  }),
 };
 
 const LOGOUT =

@@ -1,0 +1,322 @@
+# Monitoring (P1-43, LLD-10 §5): Prometheus, Alertmanager, Grafana, Loki, Fluent Bit and the
+# exporters. Included by the bootstrap only when `monitoring.enabled` is true in katip.config.yaml.
+#
+# Provider-only. These hold every company's usage and logs, so:
+#   - nothing here joins a company's network, and nothing has a Traefik route;
+#   - Grafana, Prometheus and Fluent Bit's log input publish on 127.0.0.1 only. On a server, reach
+#     them over Tailscale or an SSH tunnel (LLD-01), never through Traefik;
+#   - no container gets the Docker socket, /var/lib/docker or the host's root filesystem: those
+#     would hand over every container's environment, which holds every company's secrets.
+#
+# Logs: only our own services ship to Loki, through Docker's fluentd driver (see the overrides at
+# the end). LibreChat, the RAG API, Keycloak, Lago, LiteLLM, Presidio and Traefik don't: their logs
+# can hold names, file names, usernames or IP addresses (docs/lld/10-security-and-operations.md §5).
+name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  prometheus:
+    image: ${KATIP_IMAGE_PROMETHEUS:?from katip.config.yaml}
+    restart: unless-stopped
+    # The gateway's metrics token goes to a file in memory that only Prometheus's user can read,
+    # because Prometheus reads credentials from a file, not from its environment.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - umask 077 && printf %s "$$KATIP_METRICS_TOKEN" > /run/katip/metrics-token && exec /bin/prometheus "$$@"
+      - prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${KATIP_MONITORING_METRICS_RETENTION:?from katip.config.yaml}
+      - --web.listen-address=:9090
+    environment:
+      KATIP_METRICS_TOKEN: ${KATIP_METRICS_TOKEN:?from katip.env}
+    tmpfs:
+      - /run/katip:uid=65534,gid=65534,mode=0700
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:9090:9090'
+    networks:
+      - monitoring
+      - backend
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9090/-/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    deploy: { resources: { limits: { memory: 512m } } }
+    logging: *logging
+
+  # Sends alerts. In dev, only to Mailpit: see infra/monitoring/alertmanager/alertmanager.tmpl.yml.
+  alertmanager:
+    image: ${KATIP_IMAGE_ALERTMANAGER:?from katip.config.yaml}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      # One instance: no cluster port.
+      - --cluster.listen-address=
+    volumes:
+      - ../monitoring/rendered/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - monitoring
+      - backend
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9093/-/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    deploy: { resources: { limits: { memory: 128m } } }
+    logging: *logging
+
+  # AGPL-3.0, unmodified. Provider staff only: the admin password is generated into katip.env.
+  grafana:
+    image: ${KATIP_IMAGE_GRAFANA:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: katip-admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?from katip.env}
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_SERVER_ROOT_URL: http://127.0.0.1:3000/
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      # Nothing leaves: no usage reports, update checks, news, plugin downloads or public snapshots.
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: 'false'
+      GF_LOG_MODE: console
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '127.0.0.1:3000:3000'
+    networks:
+      - monitoring
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    deploy: { resources: { limits: { memory: 384m } } }
+    logging: *logging
+
+  # AGPL-3.0, unmodified. Keeps logs for monitoring.logs_retention_days (loki.yml).
+  loki:
+    image: ${KATIP_IMAGE_LOKI:?from katip.config.yaml}
+    restart: unless-stopped
+    command:
+      - -config.file=/etc/loki/loki.yml
+      - -config.expand-env=true
+    environment:
+      KATIP_LOGS_RETENTION: ${KATIP_MONITORING_LOGS_RETENTION:?from katip.config.yaml}
+    volumes:
+      - ../monitoring/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    networks:
+      - monitoring
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3100/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    deploy: { resources: { limits: { memory: 384m } } }
+    logging: *logging
+
+  # Receives our services' logs from Docker's fluentd driver, masks what looks like an email or
+  # IP address, and sends them to Loki. The port is on the host's loopback, where Docker's daemon
+  # connects from; containers can't reach it.
+  fluent-bit:
+    image: ${KATIP_IMAGE_FLUENT_BIT:?from katip.config.yaml}
+    restart: unless-stopped
+    command: ['/fluent-bit/bin/fluent-bit', '-c', '/fluent-bit/etc/katip/fluent-bit.conf']
+    volumes:
+      - ../monitoring/fluent-bit:/fluent-bit/etc/katip:ro
+    ports:
+      - '127.0.0.1:24224:24224'
+    networks:
+      - monitoring
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # Host CPU, memory, load, and the filesystem Docker keeps its data on (statfs of its own overlay
+  # root). No host mounts except the inventory file the bootstrap writes.
+  node-exporter:
+    image: ${KATIP_IMAGE_NODE_EXPORTER:?from katip.config.yaml}
+    restart: unless-stopped
+    command:
+      - --collector.filesystem.mount-points-exclude=^/.+
+      - --collector.filesystem.fs-types-exclude=^(autofs|proc|sysfs|tmpfs|devpts|mqueue|cgroup2?|nsfs)$$
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - ../monitoring/rendered/textfile:/textfile:ro
+    networks:
+      - monitoring
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9100/metrics']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # Memory and CPU per container, read from cgroups in /sys only. Without the Docker socket it
+  # knows containers by id; the bootstrap writes their names (katip_container_info).
+  cadvisor:
+    image: ${KATIP_IMAGE_CADVISOR:?from katip.config.yaml}
+    restart: unless-stopped
+    command:
+      - --docker_only=false
+      - --housekeeping_interval=15s
+      - --store_container_labels=false
+      - --raw_cgroup_prefix_whitelist=/system.slice/docker-,/docker/
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp,disk,diskIO
+    volumes:
+      - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    networks:
+      - monitoring
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { memory: 128m } } }
+    logging: *logging
+
+  # TLS certificate expiry, by connecting to Traefik as a browser would.
+  blackbox-exporter:
+    image: ${KATIP_IMAGE_BLACKBOX_EXPORTER:?from katip.config.yaml}
+    restart: unless-stopped
+    command: ['--config.file=/etc/blackbox/blackbox.yml']
+    volumes:
+      - ../monitoring/rendered/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks:
+      - monitoring
+      - edge
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9115/-/healthy']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # As katip_monitor: pg_monitor's statistics, no table's rows (packages/db/src/rls.ts).
+  postgres-exporter:
+    image: ${KATIP_IMAGE_POSTGRES_EXPORTER:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: postgres:5432/governance?sslmode=disable
+      DATA_SOURCE_USER: katip_monitor
+      DATA_SOURCE_PASS: ${KATIP_MONITOR_DB_PASSWORD:?from katip.env}
+    networks:
+      - monitoring
+      - backend
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:9187/metrics']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # As katip_monitor with clusterMonitor only: server status, no documents. The monitoring step
+  # creates that user.
+  mongodb-exporter:
+    image: ${KATIP_IMAGE_MONGODB_EXPORTER:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://katip_monitor:${KATIP_MONITOR_MONGO_PASSWORD:?from katip.env}@mongodb:27017/admin
+    networks:
+      - monitoring
+      - backend
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # As Valkey's katip-monitor user, which may run INFO and little else: it can't read a key, and
+  # can't run CONFIG GET, which would show the main password (platform.yml).
+  valkey-exporter:
+    image: ${KATIP_IMAGE_VALKEY_EXPORTER:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://valkey:6379
+      REDIS_USER: katip-monitor
+      REDIS_PASSWORD: ${KATIP_MONITOR_VALKEY_PASSWORD:?from katip.env}
+      REDIS_EXPORTER_CONFIG_COMMAND: '-'
+    networks:
+      - monitoring
+      - backend
+    deploy: { resources: { limits: { memory: 64m } } }
+    logging: *logging
+
+  # ---- our services' logs to Loki ----
+  # Docker keeps its own copy too, so `docker logs` still works. Async: a service starts, and goes
+  # on, while Fluent Bit is down; lines are then buffered and, past the buffer, dropped.
+  policy-gateway:
+    logging: !override
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        fluentd-async: 'true'
+        tag: policy-gateway
+
+  console-api:
+    logging: !override
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        fluentd-async: 'true'
+        tag: console-api
+
+  identity:
+    logging: !override
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        fluentd-async: 'true'
+        tag: identity
+
+  billing-bridge:
+    logging: !override
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+        fluentd-async: 'true'
+        tag: billing-bridge
+
+networks:
+  # Not internal: Docker publishes no port from an internal network. Grafana's outbound calls are
+  # switched off above.
+  monitoring:
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_monitoring
+  edge:
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_edge
+    external: true
+  backend:
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_backend
+    external: true
+
+volumes:
+  prometheus-data: {}
+  alertmanager-data: {}
+  grafana-data: {}
+  loki-data: {}

@@ -376,7 +376,7 @@ async function cmdStatus() {
   try {
     const r = await tryRun(
       'docker',
-      [...platformComposeArgs(), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
+      [...platformComposeArgs(ctx.config), 'ps', '--format', 'table {{.Service}}\t{{.Status}}'],
       {
         env: { ...process.env, ...ce },
       },
@@ -413,7 +413,7 @@ async function cmdDown() {
   }
   await removeLocalLlmRelay(ctx);
   console.log(dim('stopping platform…'));
-  await tryRun('docker', [...platformComposeArgs(), 'down', '--remove-orphans'], {
+  await tryRun('docker', [...platformComposeArgs(ctx.config), 'down', '--remove-orphans'], {
     env: { ...process.env, ...ce },
   }).catch(() => {});
   const state = loadState();

@@ -62,7 +62,7 @@ librechat-sme/
 | searxng | searxng/searxng pinned | 8080 | – | Unmodified (AGPL) |
 | code-interpreter | pinned (Apache-2.0 sandbox used by LibreChat) | – | – | Phase 1b; resource limits per run |
 | seaweedfs | chrislusf/seaweedfs pinned | 8333 (S3) | seaweed | Files, backups staging |
-| prometheus, grafana, loki, promtail, node-exporter, cadvisor | pinned | – | – | Admin UIs only via Tailscale |
+| prometheus, alertmanager, grafana, loki, fluent-bit, node-exporter, cadvisor, blackbox-exporter, postgres-exporter, mongodb-exporter, valkey-exporter | pinned in `monitoring.images` (Grafana and Loki AGPL-3.0, unmodified) | 9090, 9093, 3000, 3100, 24224, 9100, 8080, 9115, 9187, 9216, 9121 | prometheus-data, alertmanager-data, grafana-data, loki-data | `infra/compose/monitoring.yml`, when `monitoring.enabled` (P1-43, LLD-10 §5). Grafana, Prometheus and Fluent Bit's input on `127.0.0.1` only; on a server, via Tailscale. No route, no company network, no Docker socket. About 354 MiB idle together. Our four services' logs go to Fluent Bit through Docker's fluentd driver |
 
 **Security note on the provisioner and docker.sock.** The provisioner is the only container with `docker.sock`. It runs on an internal network and requires a provider-admin token. Plan: replace it with a Docker socket proxy that allows only compose operations (tracker P1-35).
 
@@ -205,4 +205,4 @@ Such a server usually listens on localhost only, which containers can't reach. S
 
 - `pnpm dev:up` on a clean laptop brings up the platform + `demo` tenant in under 10 minutes.
 - Logging in at `https://demo.localhost` via Keycloak and sending a chat message routes through the gateway; the usage row is visible in Postgres.
-- No container except Traefik publishes a host port (`docker ps` check in CI e2e).
+- No container except Traefik publishes a host port (`docker ps` check in CI e2e). In dev, Postgres, Mongo, Valkey, Mailpit, Grafana, Prometheus and Fluent Bit's log input publish on `127.0.0.1` only.

@@ -122,6 +122,19 @@ GRANT SELECT (tenant_id, ts, class, input_tokens, output_tokens, overage) ON usa
 GRANT SELECT, INSERT ON billing_usage_sent, billing_seat_sent TO katip_billing;
 GRANT UPDATE (status, sent_at) ON billing_usage_sent, billing_seat_sent TO katip_billing;`;
 
+/**
+ * The Postgres exporter's role (P1-43): pg_monitor's statistics and settings, and no table's
+ * rows. It can see other sessions' current query text in pg_stat_activity, which the exporter
+ * doesn't export. Its password is set by whoever deploys it.
+ */
+export const MONITOR_ROLE_SQL = `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'katip_monitor') THEN
+    CREATE ROLE katip_monitor LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+GRANT pg_monitor TO katip_monitor;`;
+
 /** Tables the console API may read so far. Each new endpoint adds only what it needs. */
 const CONSOLE_READS = [
   'tenants',
@@ -176,6 +189,17 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   ORDER BY a.ts DESC LIMIT 1;
 $fn$;
 REVOKE ALL ON FUNCTION latest_daily_run() FROM PUBLIC;
+
+-- Monitoring (P1-43): every company's failed jobs since a time, counted by type. Row-level
+-- security hides other companies' jobs from the console, and this gives it counts only.
+CREATE OR REPLACE FUNCTION failed_jobs_since(p_since timestamptz)
+RETURNS TABLE (type text, failed bigint)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+  SELECT j.type, count(*)::bigint FROM jobs j
+  WHERE j.status = 'failed' AND j.updated_at >= p_since
+  GROUP BY j.type;
+$fn$;
+REVOKE ALL ON FUNCTION failed_jobs_since(timestamptz) FROM PUBLIC;
 
 -- The provider's margin (LLD-06 §6, tracker P1-47): one UTC month's money per company, as sums.
 -- The console can't read cost or price itself, and still can't: this hands it totals only, and
@@ -304,6 +328,7 @@ GRANT UPDATE (status, decided_by, decided_at) ON requests TO katip_console;
 GRANT SELECT (tenant_id, day, user_id, department_id, class, model_id, input_tokens, output_tokens) ON usage_daily TO katip_console;
 GRANT EXECUTE ON FUNCTION refresh_usage_daily(uuid, date, date) TO katip_console;
 GRANT EXECUTE ON FUNCTION latest_daily_run() TO katip_console;
+GRANT EXECUTE ON FUNCTION failed_jobs_since(timestamptz) TO katip_console;
 -- Sums for the provider's margin screen only; console-api calls them from provider routes.
 GRANT EXECUTE ON FUNCTION provider_margin(date) TO katip_console;
 GRANT EXECUTE ON FUNCTION provider_model_cost(date) TO katip_console;

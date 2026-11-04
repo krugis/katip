@@ -1,0 +1,68 @@
+name: security
+
+# Secret scan, lockfile scan and Dockerfile checks on every PR and push to main (P1-46, LLD-10 §6).
+# Fast, and apart from `ci`, so it runs alongside it. Images are scanned in images.yml.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned by digest (CLAUDE.md §7). Read the release notes before changing either. The tools run
+  # as images, not through third-party actions, so no action's tag can change what runs.
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+
+jobs:
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Every commit: a secret added and removed again is still in history.
+          fetch-depth: 0
+      - name: gitleaks, whole history
+        run: >-
+          docker run --rm --network none --user "$(id -u):$(id -g)" -v "$PWD:/repo:ro"
+          "$GITLEAKS_IMAGE" git /repo --config /repo/.gitleaks.toml --log-opts=--all
+          --redact --no-banner --exit-code 1
+
+  lockfile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Blocks on a critical with a fix, in what our images ship
+        run: >-
+          docker run --rm -v trivy-cache:/root/.cache -v "$PWD:/src:ro" "$TRIVY_IMAGE"
+          fs --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1
+          --ignorefile /src/.trivyignore.yaml /src/pnpm-lock.yaml
+      - name: Report only, HIGH and CRITICAL, dev dependencies too
+        if: always()
+        run: |
+          {
+            echo '### pnpm-lock.yaml: HIGH and CRITICAL, dev dependencies included (not blocking)'
+            echo '```'
+            docker run --rm -v trivy-cache:/root/.cache -v "$PWD:/src:ro" "$TRIVY_IMAGE" \
+              fs -q --scanners vuln --include-dev-deps --severity HIGH,CRITICAL \
+              --ignorefile /src/.trivyignore.yaml --format table /src/pnpm-lock.yaml
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dockerfiles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Trivy reads Dockerfiles, not compose files: those are checked by
+      # scripts/setup/test/security.test.mjs in `ci`.
+      - name: Blocks on HIGH or CRITICAL misconfiguration
+        run: >-
+          docker run --rm -v trivy-cache:/root/.cache -v "$PWD:/src:ro" "$TRIVY_IMAGE"
+          config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs '**/node_modules'
+          --ignorefile /src/.trivyignore.yaml /src

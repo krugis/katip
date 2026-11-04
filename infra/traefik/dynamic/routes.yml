@@ -4,16 +4,13 @@
 
 http:
   routers:
+    # Only what people need to log in: the company realm and its pages' files. Keycloak's
+    # admin console and the master realm, where its admin logs in, aren't routed here.
     keycloak:
-      rule: 'Host(`auth.{{ env "KATIP_BASE_DOMAIN" }}`)'
+      rule: 'Host(`auth.{{ env "KATIP_BASE_DOMAIN" }}`) && (PathPrefix(`/realms/{{ env "KATIP_REALM" }}/`) || PathPrefix(`/resources/`))'
       entryPoints: [websecure]
       tls: {}
       service: keycloak
-    mailpit:
-      rule: 'Host(`mailpit.{{ env "KATIP_BASE_DOMAIN" }}`)'
-      entryPoints: [websecure]
-      tls: {}
-      service: mailpit
     console:
       rule: 'Host(`console.{{ env "KATIP_BASE_DOMAIN" }}`)'
       entryPoints: [websecure]
@@ -33,10 +30,6 @@ http:
       loadBalancer:
         servers:
           - url: http://keycloak:8080
-    mailpit:
-      loadBalancer:
-        servers:
-          - url: http://mailpit:8025
     console:
       loadBalancer:
         servers:

@@ -1,0 +1,239 @@
+# Kâtip alert rules (P1-43, LLD-10 §5). Each one has a promtool unit test in
+# infra/monitoring/prometheus/tests/katip.test.yml: `pnpm test:alert-rules`.
+# Labels: severity (critical | warning | none), area. Never a person.
+groups:
+  - name: katip-recording
+    rules:
+      # cAdvisor knows containers by cgroup id; katip_container_info (written by the bootstrap)
+      # gives each its name. A container recreated since the last `pnpm dev:up`,
+      # `tenant:*` command or rotation is left out until then.
+      - record: katip:container_memory_working_set_bytes
+        expr: |
+          label_replace(container_memory_working_set_bytes{id=~".*docker[-/][0-9a-f]{64}.*"},
+            "container_id", "$1", "id", ".*docker[-/]([0-9a-f]{64}).*")
+          * on (container_id) group_left (name, service, project) katip_container_info
+      - record: katip:container_cpu_seconds:rate5m
+        expr: |
+          label_replace(rate(container_cpu_usage_seconds_total{id=~".*docker[-/][0-9a-f]{64}.*"}[5m]),
+            "container_id", "$1", "id", ".*docker[-/]([0-9a-f]{64}).*")
+          * on (container_id) group_left (name, service, project) katip_container_info
+
+  - name: katip-availability
+    rules:
+      # Always firing. Alertmanager sends it to the dead man's switch, which isn't chosen yet.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+          area: monitoring
+        annotations:
+          summary: The alert path works. An outside check should raise the alarm when this stops.
+
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          area: availability
+        annotations:
+          summary: '{{ $labels.job }} ({{ $labels.instance }}) has not answered for 2 minutes'
+
+      # Was running at the last inventory, and its cgroup is gone. Needs cAdvisor up, or every
+      # container would look down.
+      - alert: ContainerDown
+        expr: |
+          (katip_container_info
+            unless on (container_id)
+              label_replace(container_last_seen, "container_id", "$1", "id", ".*docker[-/]([0-9a-f]{64}).*"))
+          and on () (up{job="cadvisor"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          area: availability
+        annotations:
+          summary: 'Container {{ $labels.name }} is not running'
+
+      - alert: DatabaseDown
+        expr: pg_up == 0 or mongodb_up == 0 or redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          area: availability
+        annotations:
+          summary: '{{ $labels.job }} reports its database unreachable'
+
+      - alert: DiskAlmostFull
+        expr: |
+          1 - node_filesystem_avail_bytes / node_filesystem_size_bytes > 0.80
+        for: 10m
+        labels:
+          severity: warning
+          area: host
+        annotations:
+          summary: 'Filesystem {{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full'
+
+      - alert: TlsCertificateExpiresSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 86400
+        for: 10m
+        labels:
+          severity: warning
+          area: edge
+        annotations:
+          summary: 'The certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}'
+
+      - alert: TlsProbeFailed
+        expr: probe_success{job="tls"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          area: edge
+        annotations:
+          summary: 'No TLS handshake with {{ $labels.instance }}'
+
+  - name: katip-gateway
+    rules:
+      - alert: GatewayErrorRateHigh
+        expr: |
+          sum(rate(gw_requests_total{status=~"5.."}[5m])) / sum(rate(gw_requests_total[5m])) > 0.02
+        for: 5m
+        labels:
+          severity: critical
+          area: gateway
+        annotations:
+          summary: 'Gateway 5xx at {{ $value | humanizePercentage }} for 5 minutes'
+
+      # Calls that failed over successful ones, per model. A model with no success at all counts
+      # as 100%.
+      - alert: UpstreamErrorRateHigh
+        expr: |
+          sum by (model) (rate(gw_upstream_errors_total[5m]))
+          / (
+            sum by (model) (rate(gw_upstream_errors_total[5m]))
+            + (sum by (model) (rate(gw_upstream_latency_seconds_count[5m]))
+               or sum by (model) (rate(gw_upstream_errors_total[5m])) * 0)
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          area: gateway
+        annotations:
+          summary: 'Provider errors for {{ $labels.model }} at {{ $value | humanizePercentage }}'
+
+      # LLD-03 §2: p95 under 120 ms, before the model is called.
+      - alert: GatewayOverheadP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(gw_overhead_seconds_bucket[5m]))) > 0.12
+        for: 15m
+        labels:
+          severity: warning
+          area: gateway
+        annotations:
+          summary: 'Gateway overhead p95 is {{ $value | humanizeDuration }} (budget 120 ms)'
+
+      - alert: UpstreamLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le, model) (rate(gw_upstream_latency_seconds_bucket[5m]))) > 10
+        for: 15m
+        labels:
+          severity: warning
+          area: gateway
+        annotations:
+          summary: '{{ $labels.model }} takes {{ $value | humanizeDuration }} to answer (p95)'
+
+      # `pii_detector_failed` (LLD-03 §5). The second half catches a company's first failure:
+      # its series starts at 1, and increase() needs an earlier sample.
+      - alert: PiiDetectorFailed
+        expr: |
+          sum by (tenant, action) (increase(gw_pii_detector_failures_total[5m])) > 0
+          or sum by (tenant, action) (gw_pii_detector_failures_total unless gw_pii_detector_failures_total offset 5m)
+        labels:
+          severity: warning
+          area: pii
+        annotations:
+          summary: 'Names could not be checked for {{ $labels.tenant }} ({{ $labels.action }})'
+
+      # Under onDetectorFailure: allow, the request went on, so a name may have reached a
+      # provider unmasked.
+      - alert: PiiNamesSentUnchecked
+        expr: |
+          sum by (tenant) (increase(gw_pii_detector_failures_total{action="allowed"}[5m])) > 0
+          or sum by (tenant) (gw_pii_detector_failures_total{action="allowed"} unless gw_pii_detector_failures_total{action="allowed"} offset 5m)
+        labels:
+          severity: critical
+          area: pii
+        annotations:
+          summary: '{{ $labels.tenant }}: requests went to a provider without name masking'
+
+  - name: katip-valkey
+    rules:
+      # No maxmemory is set today, so above 1 GiB counts as high; with one, above 80% of it.
+      - alert: ValkeyMemoryHigh
+        expr: |
+          (redis_memory_used_bytes / redis_memory_max_bytes > 0.80 and redis_memory_max_bytes > 0)
+          or (redis_memory_used_bytes > 1073741824 unless redis_memory_max_bytes > 0)
+        for: 10m
+        labels:
+          severity: warning
+          area: valkey
+        annotations:
+          summary: 'Valkey uses {{ $value | humanize1024 }}B (or that share of its limit)'
+
+  - name: katip-identity
+    rules:
+      # Keycloak's user events, counted by realm, client (lc-<slug> is a company) and error.
+      - alert: FailedLoginSpike
+        expr: |
+          sum by (realm, client_id) (increase(keycloak_user_events_total{event="login", error!=""}[10m])) > 20
+        labels:
+          severity: warning
+          area: identity
+        annotations:
+          summary: '{{ $value }} failed logins in 10 minutes on {{ $labels.client_id }}'
+
+  - name: katip-spend
+    rules:
+      # A company's spend (list-price cost, provider-only) in the last day over 3x its daily
+      # average of the 7 days before, and over $1. Needs 8 days of data to fire.
+      - alert: BudgetAnomaly
+        expr: |
+          sum by (tenant) (increase(gw_cost_usd_micro_total[1d]))
+            > 3 * sum by (tenant) (increase(gw_cost_usd_micro_total[7d] offset 1d)) / 7
+          and sum by (tenant) (increase(gw_cost_usd_micro_total[1d])) > 1e6
+          and sum by (tenant) (increase(gw_cost_usd_micro_total[7d] offset 1d)) > 0
+        for: 30m
+        labels:
+          severity: warning
+          area: spend
+        annotations:
+          summary: '{{ $labels.tenant }} spent over 3x its daily average today'
+
+  - name: katip-jobs
+    rules:
+      - alert: ProvisionerJobFailed
+        expr: max by (type) (katip_jobs_failed_24h) > 0
+        labels:
+          severity: warning
+          area: jobs
+        annotations:
+          summary: '{{ $value }} {{ $labels.type }} job(s) failed in the last 24 hours'
+
+      - alert: DailyJobFailed
+        expr: katip_daily_job_last_run_failed > 0
+        labels:
+          severity: critical
+          area: jobs
+        annotations:
+          summary: 'The last daily job had {{ $value }} failure(s): see pnpm tenant:daily'
+
+      # Late or never run, but only once it's scheduled (jobs.daily_at): dev has none by default.
+      - alert: DailyJobLate
+        expr: |
+          (time() - katip_daily_job_last_run_timestamp_seconds > 26 * 3600
+            or katip_daily_job_never_run == 1)
+          and on () katip_daily_job_scheduled == 1
+        for: 10m
+        labels:
+          severity: critical
+          area: jobs
+        annotations:
+          summary: The daily job has not run for over 26 hours

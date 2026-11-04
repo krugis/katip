@@ -1,0 +1,17 @@
+# gitleaks configuration (P1-46, LLD-10 §6). The default rules, plus allowlist entries for real
+# false positives only. Each entry says why. Add one only after reading the finding: a real
+# secret is rotated and removed from history, never allowlisted.
+# The workflow is .github/workflows/security.yml; how to run it locally is in LLD-10 §6.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Traefik's HTTP provider URL: an internal address, not a key. The word 'endpoint' next to a long path matches generic-api-key."
+regexTarget = "line"
+regexes = ['''http://console-api:8081/internal/traefik''']
+
+[[allowlists]]
+description = "The demo key from the first README (commit 69fbd03, since removed): a made-up value for a local mock with no provider behind it."
+regexTarget = "line"
+regexes = ['''Bearer sk-katip-demo-local''']

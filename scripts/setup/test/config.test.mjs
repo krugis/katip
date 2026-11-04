@@ -32,6 +32,7 @@ import {
   renderTenantFiles,
   SERVICE_STEPS,
   steps,
+  devOnlyRoutes,
 } from '../steps.mjs';
 import { platformSecretNames } from '../secret-rotation.mjs';
 import { DEPLOY_UP_FLAGS, selfBuiltImages } from '../deploy-lib.mjs';
@@ -353,6 +354,21 @@ describe('tenants', () => {
     });
   });
 
+  describe('what reaches the internet', () => {
+    it('routes only the company realm and its files publicly, not the admin console', () => {
+      const routes = read('traefik', 'dynamic', 'routes.yml');
+      expect(routes).toContain('PathPrefix(`/realms/{{ env "KATIP_REALM" }}/`)');
+      expect(routes).not.toContain('mailpit');
+      expect(routes).not.toMatch(/rule: 'Host\(`auth\.\{\{ env "KATIP_BASE_DOMAIN" \}\}`\)'/);
+    });
+
+    it('adds the admin console and Mailpit on localhost only', () => {
+      expect(devOnlyRoutes('localhost')).toContain('mailpit.localhost');
+      expect(devOnlyRoutes('localhost')).toContain('keycloak-admin');
+      expect(devOnlyRoutes('yzkatip.com.tr')).toBeNull();
+    });
+  });
+
   it("keeps the gateway key out of the file LibreChat's user has to read", () => {
     const yaml = read('librechat', 'librechat.tmpl.yaml');
     expect(yaml).toContain("apiKey: '${GATEWAY_API_KEY}'");
@@ -410,16 +426,10 @@ describe('tenants', () => {
       const host = (name) => `Host(\`${name}.{{ env "KATIP_BASE_DOMAIN" }}\`)`;
       expect(routers).toEqual({
         keycloak: {
-          rule: host('auth'),
+          rule: `${host('auth')} && (PathPrefix(\`/realms/{{ env "KATIP_REALM" }}/\`) || PathPrefix(\`/resources/\`))`,
           entryPoints: ['websecure'],
           tls: expect.anything(),
           service: 'keycloak',
-        },
-        mailpit: {
-          rule: host('mailpit'),
-          entryPoints: ['websecure'],
-          tls: expect.anything(),
-          service: 'mailpit',
         },
         console: {
           rule: host('console'),
@@ -441,7 +451,6 @@ describe('tenants', () => {
         'http://console-api:8081',
         'http://console:8080',
         'http://keycloak:8080',
-        'http://mailpit:8025',
       ]);
     });
 
