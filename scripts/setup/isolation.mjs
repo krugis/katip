@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Cross-tenant checks, run on every install (LLD-10): each tries to cross a boundary
 // for real, with one tenant's own credentials, and fails the install if it works.
+import { monitoringEnabled } from './config.mjs';
 import { run } from './util.mjs';
 
 /** Each tenant checked against the next one, so a boundary is tested in both directions. */
@@ -21,7 +22,39 @@ const NOT_FOR_TENANTS = [
   'lago-db:5432',
   'lago-redis:6379',
   'billing-bridge:8095',
+  // Monitoring (P1-43): every company's usage and our services' logs. Keycloak's metrics port.
+  'prometheus:9090',
+  'alertmanager:9093',
+  'grafana:3000',
+  'loki:3100',
+  'fluent-bit:24224',
+  'fluent-bit:2020',
+  'node-exporter:9100',
+  'cadvisor:8080',
+  'blackbox-exporter:9115',
+  'postgres-exporter:9187',
+  'mongodb-exporter:9216',
+  'valkey-exporter:9121',
+  'keycloak:9000',
 ];
+
+/** Monitoring's containers, and the only networks each may be on (P1-43). */
+export const MONITORING_NETWORKS = {
+  prometheus: ['backend', 'monitoring'],
+  alertmanager: ['backend', 'monitoring'],
+  grafana: ['monitoring'],
+  loki: ['monitoring'],
+  'fluent-bit': ['monitoring'],
+  'node-exporter': ['monitoring'],
+  cadvisor: ['monitoring'],
+  'blackbox-exporter': ['edge', 'monitoring'],
+  'postgres-exporter': ['backend', 'monitoring'],
+  'mongodb-exporter': ['backend', 'monitoring'],
+  'valkey-exporter': ['backend', 'monitoring'],
+};
+
+/** The host ports monitoring publishes, all on 127.0.0.1. */
+export const MONITORING_HOST_PORTS = { grafana: 3000, prometheus: 9090, 'fluent-bit': 24224 };
 
 /** On Lago's network, and nothing else: it is the provider's alone (LLD-06, P1-36). */
 const BILLING_SERVICES = ['lago-db', 'lago-redis', 'lago-api', 'lago-worker', 'lago-clock'];
@@ -175,6 +208,50 @@ export async function checkIsolation(ctx, helpers) {
     "Lago's API answers without its key",
   );
 
+  // Monitoring (P1-43): no route, no company network, ports on the host's loopback only, and no
+  // Docker socket or host root in any of them.
+  const monitoring = monitoringEnabled(ctx.config);
+  expect(
+    !/grafana|prometheus|loki|alertmanager|cadvisor|exporter|fluent/i.test(routers),
+    'Traefik has a route to a monitoring service',
+  );
+  if (monitoring) {
+    for (const [service, allowedNets] of Object.entries(MONITORING_NETWORKS)) {
+      const nets = (
+        await inspect(service, '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}')
+      )
+        .split(/\s+/)
+        .filter(Boolean)
+        .sort();
+      const expected = allowedNets.map((n) => `${project}_${n}`).sort();
+      expect(
+        JSON.stringify(nets) === JSON.stringify(expected),
+        `${service} is on ${nets.join(', ') || 'no network'}, not just ${expected.join(', ')}`,
+      );
+      const ports =
+        JSON.parse((await inspect(service, '{{json .HostConfig.PortBindings}}')) || '{}') ?? {};
+      for (const [port, bindings] of Object.entries(ports)) {
+        for (const b of bindings ?? []) {
+          expect(b.HostIp === '127.0.0.1', `${service} publishes ${port} beyond 127.0.0.1`);
+        }
+      }
+      const mounts = await inspect(service, '{{json .Mounts}}');
+      expect(!mounts.includes('docker.sock'), `${service} has the Docker socket`);
+      expect(
+        !/"Source":"\/(var\/lib\/docker)?"/.test(mounts),
+        `${service} has the host's root or Docker's data mounted`,
+      );
+    }
+    expect(
+      (await exec('traefik', 'nc -z -w2 grafana 3000')).code !== 0,
+      'Traefik can reach Grafana',
+    );
+    expect(
+      (await exec('prometheus', 'wget -q -O /dev/null http://grafana:3000/api/health')).code === 0,
+      "Prometheus can't reach Grafana, so the checks of it from a company prove nothing",
+    );
+  }
+
   // Every company's host and allowlist, from console-api: not by its public address.
   const internal = await exec(
     'traefik',
@@ -224,6 +301,23 @@ export async function checkIsolation(ctx, helpers) {
       !(await reachable(a, `${traefikIp}:8080`)),
       `${a.slug}'s LibreChat can read Traefik's API and metrics, with every company's host`,
     );
+    // Monitoring's host ports, through the host's address on this network.
+    // Traefik's 443 is published on every address, so it answers there: that shows the
+    // address is right, and a closed port means something.
+    if (monitoring) {
+      const viaHost = (port) =>
+        exec(
+          lc(a),
+          `gw=$(ip route | awk '/^default/{print $3}'); [ -n "$gw" ] && nc -z -w2 "$gw" ${port}`,
+        );
+      expect((await viaHost(443)).code === 0, `${a.slug} can't reach the host's 443`);
+      for (const [service, port] of Object.entries(MONITORING_HOST_PORTS)) {
+        expect(
+          (await viaHost(port)).code !== 0,
+          `${a.slug}'s LibreChat can reach ${service} on the host`,
+        );
+      }
+    }
 
     // Mongo: a's login works on its own database and not on b's.
     const mongo = (db) =>

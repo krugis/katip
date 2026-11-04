@@ -1,0 +1,59 @@
+# Loki (P1-43), one process, files on its volume. AGPL-3.0, unmodified.
+#
+# Logs are kept for monitoring.logs_retention_days (KATIP_LOGS_RETENTION, in hours) and then
+# deleted by the compactor. Nothing deletes one person's lines sooner: a short period is what
+# keeps a deleted person's ids from staying here (LLD-10 §5 and §8).
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: warn
+
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: '2026-01-01'
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: ${KATIP_LOGS_RETENTION}
+  reject_old_samples: true
+  reject_old_samples_max_age: 24h
+  allow_structured_metadata: false
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  retention_delete_delay: 1h
+  delete_request_store: filesystem
+  compaction_interval: 10m
+
+ruler:
+  enable_api: false
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 32
+
+# No usage reports to Grafana Labs.
+analytics:
+  reporting_enabled: false

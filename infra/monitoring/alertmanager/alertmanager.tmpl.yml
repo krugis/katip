@@ -1,0 +1,45 @@
+# Alertmanager (P1-43). Rendered into infra/monitoring/rendered/alertmanager.yml by `pnpm dev:up`.
+#
+# Every alert goes by email to %%ALERT_EMAIL%% (monitoring.alert_email), through Mailpit only:
+# the smarthost is fixed to mailpit:1025, so whatever the address, nothing leaves this machine.
+# See them at https://mailpit.<base_domain>.
+global:
+  smtp_smarthost: 'mailpit:1025'
+  smtp_from: 'alerts@%%BASE_DOMAIN%%'
+  smtp_require_tls: false
+  resolve_timeout: 5m
+
+route:
+  receiver: mailpit
+  group_by: ['alertname', 'tenant', 'model', 'job']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Always firing, to show the alert path works. Send it to an outside dead man's switch,
+    # which raises the alarm when it stops (host down, Prometheus down). None is chosen.
+    - matchers: ['alertname = "Watchdog"']
+      receiver: dead-mans-switch
+    - matchers: ['severity =~ "warning|critical"']
+      receiver: mailpit
+      continue: true
+    - matchers: ['severity = "critical"']
+      receiver: owner-channel
+
+receivers:
+  - name: mailpit
+    email_configs:
+      - to: '%%ALERT_EMAIL%%'
+        send_resolved: true
+
+  # ===========================================================================================
+  # THE OWNER'S CHOICE, EMPTY ON PURPOSE. LLD-10 §5 says alerts go to Telegram/phone and email.
+  # Which service, which chat or number, and who gets woken up are the owner's decisions, and
+  # nothing here reaches a real person or service until they are made. To add one, put e.g.
+  # `telegram_configs`, `webhook_configs` or `email_configs` (with its own smarthost) under it.
+  # ===========================================================================================
+  - name: owner-channel
+
+  # The outside service a Watchdog alert keeps alive (e.g. a heartbeat URL). Also the owner's
+  # choice, and empty: until it exists, a dead host or Prometheus raises no alarm.
+  - name: dead-mans-switch

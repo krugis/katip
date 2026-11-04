@@ -23,6 +23,7 @@ infra/compose/tenants/*.yml
 infra/compose/rendered/
 infra/traefik/dynamic/*-ipallow.yml
 infra/librechat/rendered/
+infra/monitoring/rendered/
 
 # private brand material (never public)
 brand-private/

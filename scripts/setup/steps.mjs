@@ -4,7 +4,15 @@
 // completed layers always work standalone after an interrupt.
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   composeEnv,
@@ -13,6 +21,8 @@ import {
   platformIdentityInput,
   provisionInput,
   mockModelsProblem,
+  monitoringEnabled,
+  MONITORING_IMAGES,
   modelsOnMock,
   renderLiteLLMModels,
   seedInput,
@@ -53,6 +63,10 @@ export const AUTO_KEYS = new Set([
   'LAGO_ENCRYPTION_PRIMARY_KEY',
   'LAGO_ENCRYPTION_DETERMINISTIC_KEY',
   'LAGO_ENCRYPTION_KEY_DERIVATION_SALT',
+  'GRAFANA_ADMIN_PASSWORD',
+  'KATIP_MONITOR_DB_PASSWORD',
+  'KATIP_MONITOR_MONGO_PASSWORD',
+  'KATIP_MONITOR_VALKEY_PASSWORD',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -78,8 +92,11 @@ const tenantSecret = (ctx, t, name) => ctx.env[tenantSecretName(t.slug, name)];
 export const tenantSecretOf = tenantSecret;
 const RENDERED_COMPOSE = 'infra/compose/rendered/tenants.yml';
 
-/** `docker compose` arguments for the platform stack (project name comes from the env). */
-export const platformComposeArgs = () => [
+/**
+ * `docker compose` arguments for the platform stack (project name comes from the env).
+ * Monitoring's file only when it's on in the config (P1-43).
+ */
+export const platformComposeArgs = (config) => [
   'compose',
   '--env-file',
   'infra/env/katip.env',
@@ -89,9 +106,30 @@ export const platformComposeArgs = () => [
   'infra/compose/dev.yml',
   '-f',
   'infra/compose/billing.yml',
+  ...(config && monitoringEnabled(config) ? ['-f', MONITORING_COMPOSE] : []),
   '-f',
   RENDERED_COMPOSE,
 ];
+
+const MONITORING_COMPOSE = 'infra/compose/monitoring.yml';
+
+/** infra/compose/monitoring.yml's own services, without the logging overrides. */
+export const MONITORING_SERVICES = [
+  'prometheus',
+  'alertmanager',
+  'grafana',
+  'loki',
+  'fluent-bit',
+  'node-exporter',
+  'cadvisor',
+  'blackbox-exporter',
+  'postgres-exporter',
+  'mongodb-exporter',
+  'valkey-exporter',
+];
+
+/** Our own services, whose logs go to Loki. Must match redact.lua's list. */
+export const LOGGED_SERVICES = ['policy-gateway', 'console-api', 'identity', 'billing-bridge'];
 
 /** `docker compose` arguments for the rendered tenant stack. */
 export const tenantComposeArgs = (config, t) => [
@@ -125,7 +163,7 @@ async function removeOldSocketProxy(ctx) {
 }
 
 export const platformCompose = (args, ctx) =>
-  tryRun('docker', [...platformComposeArgs(), ...args], {
+  tryRun('docker', [...platformComposeArgs(ctx.config), ...args], {
     env: { ...ctx.env, ...composeEnv(ctx.config) },
   });
 
@@ -512,8 +550,128 @@ export function renderTenantFiles(ctx, t) {
   writeFileSync(join(tDir, `${slug}.yml`), comp);
 }
 
+const MONITORING_RENDERED = (ctx) => join(ctx.infra, 'monitoring', 'rendered');
+
+/** Writes a file whole, so a reader such as node-exporter never sees half of it. */
+function writeAtomically(path, text, mode = 0o644) {
+  writeFileSync(`${path}.tmp`, text, { mode });
+  chmodSync(`${path}.tmp`, mode);
+  renameSync(`${path}.tmp`, path);
+}
+
+/**
+ * Alertmanager's and the blackbox exporter's files, and the textfile directory node-exporter
+ * reads (P1-43). Rendered even with monitoring off, so turning it on needs no other step.
+ */
+export function renderMonitoring(ctx) {
+  const m = ctx.config.monitoring;
+  if (!m) return;
+  const dir = MONITORING_RENDERED(ctx);
+  mkdirSync(join(dir, 'textfile'), { recursive: true });
+  const base = ctx.config.project.base_domain;
+  const am = readFileSync(
+    join(ctx.infra, 'monitoring', 'alertmanager', 'alertmanager.tmpl.yml'),
+    'utf8',
+  )
+    .replaceAll('%%ALERT_EMAIL%%', m.alert_email)
+    .replaceAll('%%BASE_DOMAIN%%', base);
+  writeAtomically(join(dir, 'alertmanager.yml'), am);
+  const bb = readFileSync(join(ctx.infra, 'monitoring', 'blackbox', 'blackbox.tmpl.yml'), 'utf8')
+    .replaceAll('%%SERVER_NAME%%', `auth.${base}`)
+    .replaceAll("'%%TLS_INSECURE%%'", String(base === 'localhost'));
+  writeAtomically(join(dir, 'blackbox.yml'), bb);
+  // The daily job's alert counts only once one is scheduled (jobs.daily_at).
+  writeAtomically(
+    join(dir, 'textfile', 'schedule.prom'),
+    '# HELP katip_daily_job_scheduled 1 if the daily job is scheduled on this host\n' +
+      '# TYPE katip_daily_job_scheduled gauge\n' +
+      `katip_daily_job_scheduled ${ctx.config.jobs?.daily_at ? 1 : 0}\n`,
+  );
+}
+
+/** One line per running container of this install, from `docker ps`. */
+export function containerInventoryText(psOutput, project) {
+  const lines = [
+    '# HELP katip_container_info Containers of this install, by cgroup id (P1-43)',
+    '# TYPE katip_container_info gauge',
+  ];
+  const safe = (v) => (/^[\w.-]{0,128}$/.test(v) ? v : 'other');
+  for (const row of psOutput.split('\n')) {
+    const [id, name, proj = '', service = ''] = row.trim().split('\t');
+    if (!/^[0-9a-f]{64}$/.test(id ?? '') || !name) continue;
+    if (proj !== project && !proj.startsWith(`${project}-`)) continue;
+    lines.push(
+      `katip_container_info{container_id="${id}",name="${safe(name)}",project="${safe(proj)}",service="${safe(service)}"} 1`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Names for cAdvisor's container ids, which it can't learn without the Docker socket. Rewritten
+ * after anything here starts or stops containers; until then a recreated one has no name.
+ */
+export async function writeContainerInventory(ctx) {
+  if (!monitoringEnabled(ctx.config)) return;
+  const { out } = await tryRun('docker', [
+    'ps',
+    '--no-trunc',
+    '--format',
+    '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}',
+  ]);
+  const dir = join(MONITORING_RENDERED(ctx), 'textfile');
+  mkdirSync(dir, { recursive: true });
+  writeAtomically(
+    join(dir, 'containers.prom'),
+    containerInventoryText(out, ctx.config.project.name),
+  );
+}
+
+/** Mongo's monitoring user: clusterMonitor, which reads server status and no document. */
+async function ensureMongoMonitorUser(ctx) {
+  const script =
+    "const a = db.getSiblingDB('admin'); const u = 'katip_monitor';" +
+    " const roles = [{ role: 'clusterMonitor', db: 'admin' }];" +
+    ' if (a.getUser(u)) a.updateUser(u, { pwd: process.env.P, roles });' +
+    ' else a.createUser({ user: u, pwd: process.env.P, roles });' +
+    " print('monitor-user-ok');";
+  const env = {
+    U: ctx.env.MONGO_USER ?? 'katip',
+    R: ctx.env.MONGO_PASSWORD,
+    P: ctx.env.KATIP_MONITOR_MONGO_PASSWORD,
+    S: script,
+  };
+  const { out } = await tryRun(
+    'docker',
+    [
+      'exec',
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      `${ctx.config.project.name}-mongodb-1`,
+      'sh',
+      '-c',
+      'mongosh --quiet "mongodb://$U:$R@127.0.0.1:27017/admin?authSource=admin" --eval "$S"',
+    ],
+    { env, timeoutMs: 60_000 },
+  );
+  if (!out.includes('monitor-user-ok')) throw new Error("could not set Mongo's monitoring user");
+}
+
+/** Prometheus's targets that are not up, through its loopback port. */
+export async function prometheusTargetsDown(base = 'http://127.0.0.1:9090') {
+  const r = await fetch(`${base}/api/v1/targets?state=active`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = await r.json();
+  const targets = body.data?.activeTargets ?? [];
+  if (targets.length === 0) return ['(no targets yet)'];
+  return targets
+    .filter((t) => t.health !== 'up')
+    .map((t) => `${t.labels?.job} (${t.lastError || t.health})`);
+}
+
 export function renderAll(ctx) {
   renderLiteLLMConfig(ctx);
+  renderMonitoring(ctx);
   renderPlatformOverlay(ctx);
   for (const t of allTenants(ctx)) renderTenantFiles(ctx, t);
 }
@@ -727,6 +885,7 @@ export async function startTenant(ctx, t, { recreate = false } = {}) {
     },
   );
   ctx.log(`tenant healthy at https://${t.slug}.${base}`);
+  await writeContainerInventory(ctx).catch(() => {});
 }
 
 export const gatewayStatus = async (ctx, t, headers = []) =>
@@ -865,6 +1024,7 @@ function runDbSeed(ctx, stage, ...args) {
     KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
     KATIP_PROVIDER_DB_PASSWORD: ctx.env.KATIP_PROVIDER_DB_PASSWORD,
     KATIP_BILLING_DB_PASSWORD: ctx.env.KATIP_BILLING_DB_PASSWORD,
+    KATIP_MONITOR_DB_PASSWORD: ctx.env.KATIP_MONITOR_DB_PASSWORD,
     KATIP_SEED: JSON.stringify(seedInput(ctx.config, ctx.env)),
   };
   return dockerRun(
@@ -1042,7 +1202,10 @@ export const steps = [
     id: 'images',
     title: 'Platform images (pinned)',
     async run(ctx) {
-      for (const [, ref] of Object.entries(ctx.config.images)) {
+      const monitoring = monitoringEnabled(ctx.config)
+        ? MONITORING_IMAGES.map((k) => ctx.config.monitoring.images[k])
+        : [];
+      for (const ref of [...Object.values(ctx.config.images), ...monitoring]) {
         if (isInterrupted()) throw new Interrupted();
         if (typeof ref === 'object') continue; // self-built: see the build step
         ctx.tui?.setDetail?.(`pulling ${ref}`);
@@ -1399,6 +1562,40 @@ export const steps = [
     },
   },
   {
+    id: 'monitoring',
+    title: 'Monitoring (Prometheus, Alertmanager, Grafana, Loki, exporters), if on',
+    async run(ctx) {
+      const project = ctx.config.project.name;
+      if (!monitoringEnabled(ctx.config)) {
+        // Turned off: its containers go, its volumes stay until dev:rollback.
+        for (const s of MONITORING_SERVICES) await run('docker', ['rm', '-f', `${project}-${s}-1`]);
+        rmSync(join(MONITORING_RENDERED(ctx), 'textfile', 'containers.prom'), { force: true });
+        ctx.log('monitoring is off (monitoring.enabled in katip.config.yaml)');
+        return;
+      }
+      ctx.tui?.setDetail?.("Mongo's monitoring user");
+      await ensureMongoMonitorUser(ctx);
+      ctx.tui?.setDetail?.('docker compose up --wait');
+      await platformCompose(['up', '-d', '--wait', ...MONITORING_SERVICES], ctx);
+      await writeContainerInventory(ctx);
+      let down = [];
+      await waitUntil(
+        async () => {
+          down = await prometheusTargetsDown();
+          return down.length === 0;
+        },
+        {
+          timeoutMs: 180_000,
+          intervalMs: 5000,
+          onTick: () => ctx.tui?.setDetail?.(`waiting for: ${down.join(', ')}`),
+        },
+      ).catch(() => {
+        throw new Error(`Prometheus targets not up: ${down.join('; ')}`);
+      });
+      ctx.log('monitoring up: Grafana http://127.0.0.1:3000, Prometheus http://127.0.0.1:9090');
+    },
+  },
+  {
     id: 'isolation',
     title:
       'Tenant isolation checks (network, Mongo, search, files, gateway, Postgres, Valkey, Lago)',
@@ -1445,7 +1642,15 @@ export const steps = [
 ];
 
 /** Steps that only hold while the containers run; `dev:down` makes them pending again. */
-export const SERVICE_STEPS = ['platform', 'aiplane', 'billing', 'tenant', 'smoke', 'isolation'];
+export const SERVICE_STEPS = [
+  'platform',
+  'aiplane',
+  'billing',
+  'tenant',
+  'smoke',
+  'monitoring',
+  'isolation',
+];
 
 /** Steps a config change doesn't affect, so they stay done when re-applying. */
 export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight']);

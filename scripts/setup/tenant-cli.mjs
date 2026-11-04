@@ -13,7 +13,13 @@
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
-import { AUTO_KEYS, createAndStartTenant, deriveEnv, loadAllTenantSecrets } from './steps.mjs';
+import {
+  AUTO_KEYS,
+  createAndStartTenant,
+  deriveEnv,
+  loadAllTenantSecrets,
+  writeContainerInventory,
+} from './steps.mjs';
 import {
   daily,
   forgetDue,
@@ -156,7 +162,12 @@ try {
     log: () => {},
   };
   loadAllTenantSecrets(ctx);
-  await run(ctx, values);
+  try {
+    await run(ctx, values);
+  } finally {
+    // Containers may have started or stopped: monitoring's names for them (P1-43).
+    await writeContainerInventory(ctx).catch(() => {});
+  }
 } catch (e) {
   console.error(e.message);
   process.exitCode = 1;

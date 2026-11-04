@@ -1,0 +1,516 @@
+# promtool unit tests for every alert rule (P1-43). Run with `pnpm test:alert-rules`, which uses the
+# pinned Prometheus image. Each alert is shown firing, and where it matters, not firing.
+rule_files:
+  - ../rules/katip.yml
+  - ../inactive/backups.yml
+
+evaluation_interval: 30s
+
+tests:
+  # ---- availability -------------------------------------------------------------------------
+  - name: watchdog always fires
+    interval: 30s
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels: { severity: none, area: monitoring }
+            exp_annotations:
+              summary: The alert path works. An outside check should raise the alarm when this stops.
+
+  - name: a target down for 2 minutes
+    interval: 30s
+    input_series:
+      - series: 'up{job="gateway", instance="policy-gateway:9464"}'
+        values: '1 1 0x20'
+      - series: 'up{job="node", instance="node-exporter:9100"}'
+        values: '1x22'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ScrapeTargetDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels:
+              {
+                severity: critical,
+                area: availability,
+                job: gateway,
+                instance: 'policy-gateway:9464',
+              }
+            exp_annotations:
+              summary: 'gateway (policy-gateway:9464) has not answered for 2 minutes'
+
+  - name: a container that stopped, and one that runs
+    interval: 30s
+    input_series:
+      - series: 'katip_container_info{container_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name="katip-policy-gateway-1", service="policy-gateway", project="katip"}'
+        values: '1x20'
+      - series: 'katip_container_info{container_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", name="katip-valkey-1", service="valkey", project="katip"}'
+        values: '1x20'
+      - series: 'container_last_seen{id="/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope"}'
+        values: '1 1 stale'
+      - series: 'container_last_seen{id="/system.slice/docker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.scope"}'
+        values: '1x20'
+      - series: 'up{job="cadvisor", instance="cadvisor:8080"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ContainerDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ContainerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              area: availability
+              container_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              name: katip-policy-gateway-1
+              service: policy-gateway
+              project: katip
+            exp_annotations:
+              summary: 'Container katip-policy-gateway-1 is not running'
+
+  - name: no container alarm while cAdvisor itself is down
+    interval: 30s
+    input_series:
+      - series: 'katip_container_info{container_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name="katip-policy-gateway-1", service="policy-gateway", project="katip"}'
+        values: '1x20'
+      - series: 'up{job="cadvisor", instance="cadvisor:8080"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ContainerDown
+        exp_alerts: []
+
+  - name: the names come from the inventory
+    interval: 30s
+    input_series:
+      - series: 'katip_container_info{container_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name="katip-policy-gateway-1", service="policy-gateway", project="katip"}'
+        values: '1x10'
+      - series: 'container_memory_working_set_bytes{id="/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope"}'
+        values: '1048576x10'
+      - series: 'container_memory_working_set_bytes{id="/system.slice/docker-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.scope"}'
+        values: '5x10'
+    promql_expr_test:
+      - expr: katip:container_memory_working_set_bytes
+        eval_time: 1m
+        exp_samples:
+          - labels: 'katip:container_memory_working_set_bytes{container_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", id="/system.slice/docker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.scope", name="katip-policy-gateway-1", service="policy-gateway", project="katip"}'
+            value: 1048576
+
+  - name: a database exporter that can't reach its database
+    interval: 30s
+    input_series:
+      - series: 'pg_up{job="postgres", instance="postgres-exporter:9187"}'
+        values: '1 0x20'
+      - series: 'redis_up{job="valkey", instance="valkey-exporter:9121"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DatabaseDown
+        exp_alerts:
+          - exp_labels:
+              {
+                severity: critical,
+                area: availability,
+                job: postgres,
+                instance: 'postgres-exporter:9187',
+              }
+            exp_annotations:
+              summary: 'postgres reports its database unreachable'
+
+  - name: disk over 80%, and at 50%
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node", mountpoint="/", device="overlay", fstype="overlay"}'
+        values: '15x20'
+      - series: 'node_filesystem_size_bytes{job="node", mountpoint="/", device="overlay", fstype="overlay"}'
+        values: '100x20'
+      - series: 'node_filesystem_avail_bytes{job="node", mountpoint="/data", device="sdb", fstype="ext4"}'
+        values: '50x20'
+      - series: 'node_filesystem_size_bytes{job="node", mountpoint="/data", device="sdb", fstype="ext4"}'
+        values: '100x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DiskAlmostFull
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DiskAlmostFull
+        exp_alerts:
+          - exp_labels:
+              {
+                severity: warning,
+                area: host,
+                job: node,
+                mountpoint: /,
+                device: overlay,
+                fstype: overlay,
+              }
+            exp_annotations:
+              summary: 'Filesystem / is 85% full'
+
+  - name: a certificate with 10 days left, and one with 60
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls", instance="traefik:443"}'
+        values: '864000x30'
+      - series: 'probe_ssl_earliest_cert_expiry{job="tls", instance="other:443"}'
+        values: '5184000x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TlsCertificateExpiresSoon
+        exp_alerts:
+          - exp_labels: { severity: warning, area: edge, job: tls, instance: 'traefik:443' }
+            exp_annotations:
+              summary: 'The certificate on traefik:443 expires in 9d 23h 45m 0s'
+
+  - name: no TLS handshake
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="tls", instance="traefik:443"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: TlsProbeFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, area: edge, job: tls, instance: 'traefik:443' }
+            exp_annotations:
+              summary: 'No TLS handshake with traefik:443'
+
+  # ---- gateway ------------------------------------------------------------------------------
+  - name: gateway 5xx at about 5%
+    interval: 30s
+    input_series:
+      - series: 'gw_requests_total{tenant="demo", alias="fast", model="std-a", status="200"}'
+        values: '0+95x40'
+      - series: 'gw_requests_total{tenant="demo", alias="fast", model="std-a", status="502"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: GatewayErrorRateHigh
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: GatewayErrorRateHigh
+        exp_alerts:
+          - exp_labels: { severity: critical, area: gateway }
+            exp_annotations:
+              summary: 'Gateway 5xx at 5% for 5 minutes'
+
+  - name: gateway 5xx at 1% stays quiet
+    interval: 30s
+    input_series:
+      - series: 'gw_requests_total{tenant="demo", alias="fast", model="std-a", status="200"}'
+        values: '0+99x40'
+      - series: 'gw_requests_total{tenant="demo", alias="fast", model="std-a", status="500"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: GatewayErrorRateHigh
+        exp_alerts: []
+
+  - name: provider errors, including a model that never succeeds
+    interval: 30s
+    input_series:
+      - series: 'gw_upstream_errors_total{model="std-a"}'
+        values: '0+2x40'
+      - series: 'gw_upstream_latency_seconds_count{tenant="demo", model="std-a"}'
+        values: '0+8x40'
+      - series: 'gw_upstream_errors_total{model="std-b"}'
+        values: '0+1x40'
+      - series: 'gw_upstream_errors_total{model="std-c"}'
+        values: '0+1x40'
+      - series: 'gw_upstream_latency_seconds_count{tenant="demo", model="std-c"}'
+        values: '0+99x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: UpstreamErrorRateHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, area: gateway, model: std-a }
+            exp_annotations:
+              summary: 'Provider errors for std-a at 20%'
+          - exp_labels: { severity: warning, area: gateway, model: std-b }
+            exp_annotations:
+              summary: 'Provider errors for std-b at 100%'
+
+  - name: gateway overhead p95 over 120 ms
+    interval: 30s
+    input_series:
+      - series: 'gw_overhead_seconds_bucket{tenant="demo", le="0.12"}'
+        values: '0+10x60'
+      - series: 'gw_overhead_seconds_bucket{tenant="demo", le="0.25"}'
+        values: '0+100x60'
+      - series: 'gw_overhead_seconds_bucket{tenant="demo", le="+Inf"}'
+        values: '0+100x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: GatewayOverheadP95High
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: GatewayOverheadP95High
+        exp_alerts:
+          - exp_labels: { severity: warning, area: gateway }
+            exp_annotations:
+              summary: 'Gateway overhead p95 is 242.8ms (budget 120 ms)'
+
+  - name: a slow model
+    interval: 30s
+    input_series:
+      - series: 'gw_upstream_latency_seconds_bucket{tenant="demo", model="std-a", le="10"}'
+        values: '0+1x60'
+      - series: 'gw_upstream_latency_seconds_bucket{tenant="demo", model="std-a", le="30"}'
+        values: '0+10x60'
+      - series: 'gw_upstream_latency_seconds_bucket{tenant="demo", model="std-a", le="+Inf"}'
+        values: '0+10x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UpstreamLatencyP95High
+        exp_alerts:
+          - exp_labels: { severity: warning, area: gateway, model: std-a }
+            exp_annotations:
+              summary: 'std-a takes 28.89s to answer (p95)'
+
+  - name: a company's first name-check failure, and later ones
+    interval: 30s
+    input_series:
+      # demo's first failure comes at 5m. acme's counter is old, and goes up at 15m30s.
+      - series: 'gw_pii_detector_failures_total{tenant="demo", action="blocked"}'
+        values: '_x10 1x50'
+      - series: 'gw_pii_detector_failures_total{tenant="acme", action="allowed"}'
+        values: '1x30 2x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PiiDetectorFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, area: pii, tenant: demo, action: blocked }
+            exp_annotations:
+              summary: 'Names could not be checked for demo (blocked)'
+      - eval_time: 13m
+        alertname: PiiDetectorFailed
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: PiiDetectorFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, area: pii, tenant: acme, action: allowed }
+            exp_annotations:
+              summary: 'Names could not be checked for acme (allowed)'
+      - eval_time: 25m
+        alertname: PiiDetectorFailed
+        exp_alerts: []
+
+  - name: names sent unchecked under allow, and not under block
+    interval: 30s
+    input_series:
+      - series: 'gw_pii_detector_failures_total{tenant="demo", action="blocked"}'
+        values: '_x10 1x30'
+      - series: 'gw_pii_detector_failures_total{tenant="acme", action="allowed"}'
+        values: '_x10 1x30'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PiiNamesSentUnchecked
+        exp_alerts:
+          - exp_labels: { severity: critical, area: pii, tenant: acme }
+            exp_annotations:
+              summary: 'acme: requests went to a provider without name masking'
+
+  # ---- valkey -------------------------------------------------------------------------------
+  - name: valkey over 1 GiB with no limit
+    interval: 1m
+    input_series:
+      - series: 'redis_memory_used_bytes{job="valkey", instance="valkey-exporter:9121"}'
+        values: '2147483648x20'
+      - series: 'redis_memory_max_bytes{job="valkey", instance="valkey-exporter:9121"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ValkeyMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              { severity: warning, area: valkey, job: valkey, instance: 'valkey-exporter:9121' }
+            exp_annotations:
+              summary: 'Valkey uses 2GiB (or that share of its limit)'
+
+  - name: valkey at 90% of its limit, and at 50%
+    interval: 1m
+    input_series:
+      - series: 'redis_memory_used_bytes{job="valkey", instance="a"}'
+        values: '900x20'
+      - series: 'redis_memory_max_bytes{job="valkey", instance="a"}'
+        values: '1000x20'
+      - series: 'redis_memory_used_bytes{job="valkey", instance="b"}'
+        values: '500x20'
+      - series: 'redis_memory_max_bytes{job="valkey", instance="b"}'
+        values: '1000x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: ValkeyMemoryHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, area: valkey, job: valkey, instance: a }
+            exp_annotations:
+              summary: 'Valkey uses 0.9B (or that share of its limit)'
+
+  # ---- identity -----------------------------------------------------------------------------
+  - name: failed logins on one company's client
+    interval: 30s
+    input_series:
+      - series: 'keycloak_user_events_total{realm="katip", client_id="lc-demo", event="login", error="invalid_user_credentials"}'
+        values: '0+3x40'
+      - series: 'keycloak_user_events_total{realm="katip", client_id="lc-demo", event="login", error=""}'
+        values: '0+50x40'
+      - series: 'keycloak_user_events_total{realm="katip", client_id="lc-acme", event="login", error="invalid_user_credentials"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: FailedLoginSpike
+        exp_alerts:
+          - exp_labels: { severity: warning, area: identity, realm: katip, client_id: lc-demo }
+            exp_annotations:
+              summary: '60 failed logins in 10 minutes on lc-demo'
+
+  # ---- spend --------------------------------------------------------------------------------
+  - name: a company spending 5x its daily average
+    interval: 1h
+    input_series:
+      # About $1 a day for 8 days, then about $5 in a day.
+      - series: 'gw_cost_usd_micro_total{tenant="demo", class="standard"}'
+        values: '0+41667x192 8208397+208333x30'
+      - series: 'gw_cost_usd_micro_total{tenant="acme", class="standard"}'
+        values: '0+41667x222'
+    alert_rule_test:
+      - eval_time: 192h
+        alertname: BudgetAnomaly
+        exp_alerts: []
+      - eval_time: 217h
+        alertname: BudgetAnomaly
+        exp_alerts:
+          - exp_labels: { severity: warning, area: spend, tenant: demo }
+            exp_annotations:
+              summary: 'demo spent over 3x its daily average today'
+
+  # ---- jobs ---------------------------------------------------------------------------------
+  - name: a failed provisioner job
+    interval: 30s
+    input_series:
+      - series: 'katip_jobs_failed_24h{job="console-api", instance="console-api:9464", type="tenant.purge"}'
+        values: '0 0 2x10'
+      - series: 'katip_jobs_failed_24h{job="console-api", instance="console-api:9464", type="tenant.create"}'
+        values: '0x12'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: ProvisionerJobFailed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ProvisionerJobFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, area: jobs, type: tenant.purge }
+            exp_annotations:
+              summary: '2 tenant.purge job(s) failed in the last 24 hours'
+
+  - name: a daily job with failures
+    interval: 30s
+    input_series:
+      - series: 'katip_daily_job_last_run_failed{job="console-api", instance="console-api:9464"}'
+        values: '0 1x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DailyJobFailed
+        exp_alerts:
+          - exp_labels:
+              { severity: critical, area: jobs, job: console-api, instance: 'console-api:9464' }
+            exp_annotations:
+              summary: 'The last daily job had 1 failure(s): see pnpm tenant:daily'
+
+  - name: a daily job that stopped running, while scheduled
+    interval: 5m
+    input_series:
+      - series: 'katip_daily_job_last_run_timestamp_seconds{job="console-api", instance="console-api:9464"}'
+        values: '0x400'
+      - series: 'katip_daily_job_never_run{job="console-api", instance="console-api:9464"}'
+        values: '0x400'
+      - series: 'katip_daily_job_scheduled{job="node", instance="node-exporter:9100"}'
+        values: '1x400'
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: DailyJobLate
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: DailyJobLate
+        exp_alerts:
+          - exp_labels:
+              { severity: critical, area: jobs, job: console-api, instance: 'console-api:9464' }
+            exp_annotations:
+              summary: The daily job has not run for over 26 hours
+
+  - name: a daily job that never ran
+    interval: 5m
+    input_series:
+      - series: 'katip_daily_job_never_run{job="console-api", instance="console-api:9464"}'
+        values: '1x40'
+      - series: 'katip_daily_job_scheduled{job="node", instance="node-exporter:9100"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: DailyJobLate
+        exp_alerts:
+          - exp_labels:
+              { severity: critical, area: jobs, job: console-api, instance: 'console-api:9464' }
+            exp_annotations:
+              summary: The daily job has not run for over 26 hours
+
+  - name: no daily job alert in dev, where none is scheduled
+    interval: 5m
+    input_series:
+      - series: 'katip_daily_job_never_run{job="console-api", instance="console-api:9464"}'
+        values: '1x400'
+      - series: 'katip_daily_job_scheduled{job="node", instance="node-exporter:9100"}'
+        values: '0x400'
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: DailyJobLate
+        exp_alerts: []
+
+  # ---- backups (inactive until P1-42) -------------------------------------------------------
+  - name: no backup ever written
+    interval: 5m
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels: { severity: critical, area: backups }
+            exp_annotations:
+              summary: 'No successful  backup for over 26 hours'
+
+  - name: a backup that stopped, and one that runs
+    interval: 5m
+    input_series:
+      - series: 'katip_backup_last_success_timestamp_seconds{target="mongodb"}'
+        values: '0x400'
+      - series: 'katip_backup_last_success_timestamp_seconds{target="postgres"}'
+        values: '0+300x400'
+    alert_rule_test:
+      - eval_time: 28h
+        alertname: BackupMissing
+        exp_alerts:
+          - exp_labels: { severity: critical, area: backups, target: mongodb }
+            exp_annotations:
+              summary: 'No successful mongodb backup for over 26 hours'
+
+  - name: a failed restore test, and a missing one
+    interval: 10m
+    input_series:
+      - series: 'katip_restore_test_last_success'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RestoreTestFailed
+        exp_alerts:
+          - exp_labels: { severity: critical, area: backups }
+            exp_annotations:
+              summary: The last restore test failed
+      - eval_time: 2h
+        alertname: RestoreTestMissing
+        exp_alerts:
+          - exp_labels: { severity: critical, area: backups }
+            exp_annotations:
+              summary: No restore test has run this month

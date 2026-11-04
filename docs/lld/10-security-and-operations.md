@@ -67,21 +67,124 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
 
 ## 5. Monitoring and alerting
 
-- Prometheus + node-exporter + cAdvisor + Postgres/Mongo/Valkey exporters; Loki + Promtail for logs (JSON, no PII); Grafana dashboards per service and a per-tenant overview.
-- **Alerts** go to Telegram/phone and email:
-  - host down;
-  - disk over 80%;
-  - certificate expiry within 14 days;
-  - gateway 5xx over 2% for 5 min;
-  - upstream provider error rate;
-  - p95 latency;
-  - Valkey memory;
-  - backup missing;
-  - restore test failed;
-  - failed-login spike (Keycloak events);
-  - budget anomaly (tenant spend over 3× its 7-day average);
-  - provisioner job failed.
-- **External uptime check** of `status.<domain>` and 2 tenants (Better Stack free tier or Uptime Kuma on a separate small VM).
+**Built for the dev stack (P1-43).** Production waits for its host (P0-09). `monitoring.enabled` in `katip.config.yaml` (on by default) makes `pnpm dev:up` add `infra/compose/monitoring.yml` and run its `monitoring` step: Mongo's monitoring user, the containers, then a wait until every Prometheus target is up. Off, the step removes the containers and keeps their volumes until `pnpm dev:rollback`. Config is in `infra/monitoring/`.
+
+### What runs
+
+Idle memory was measured on 4 Nov 2026 on a throwaway copy of `monitoring.yml` with stand-ins for our services (about ten minutes after start, `docker stats`), not on the real stack. Prometheus and cAdvisor grow with the number of containers and series.
+
+| Component | Image | Licence | Does | Idle |
+| --- | --- | --- | --- | --- |
+| Prometheus | `prom/prometheus:v3.5.0` | Apache-2.0 | Scrapes, evaluates the alert rules, keeps numbers 15 days (`metrics_retention_days`, at least 8 for the budget rule) | 62 MiB |
+| Alertmanager | `prom/alertmanager:v0.28.1` | Apache-2.0 | Sends alerts: to Mailpit only | 19 MiB |
+| Grafana | `grafana/grafana:12.1.1` | **AGPL-3.0** | Three dashboards | 105 MiB |
+| Loki | `grafana/loki:3.5.3` | **AGPL-3.0** | Our services' logs, 7 days (`logs_retention_days`) | 86 MiB |
+| Fluent Bit | `fluent/fluent-bit:4.0.3` | Apache-2.0 | Takes logs from Docker's fluentd driver, masks, sends to Loki | 5 MiB |
+| node-exporter | `prom/node-exporter:v1.9.1` | Apache-2.0 | Host CPU, memory, load, and the disk Docker's data is on | 8 MiB |
+| cAdvisor | `gcr.io/cadvisor/cadvisor:v0.52.1` | Apache-2.0 | Memory and CPU per container, from cgroups | 24 MiB |
+| blackbox exporter | `prom/blackbox-exporter:v0.27.0` | Apache-2.0 | The certificate Traefik serves | 13 MiB |
+| Postgres exporter | `quay.io/prometheuscommunity/postgres-exporter:v0.17.1` | Apache-2.0 | The governance Postgres | 8 MiB |
+| Mongo exporter | `percona/mongodb_exporter:0.44.0` | Apache-2.0 | Mongo's server status | 14 MiB |
+| Valkey exporter | `oliver006/redis_exporter:v1.74.0` | MIT | Valkey's INFO | 10 MiB |
+| **Together** | | | | **about 354 MiB** |
+
+Licences: Prometheus's and Grafana's are read from the licence files in their images, Fluent Bit's and redis_exporter's from the images' labels. The others are their projects' licences (Loki is AGPL-3.0 since 2.x), not read from the images.
+
+**AGPL.** Grafana and Loki run unmodified, in their own containers, as Lago does (LLD-06 §2.1). Our code talks to them over HTTP and links nothing of theirs; the dashboards and config files are our own data. So the dual licence (ADR-006) is unaffected. Modifying them and letting others use them over a network would require offering the modified source (AGPL §13). Running them unmodified for the provider only asks for keeping their notices.
+
+**Left out:**
+
+- **Promtail**, which LLD-10 named first: deprecated by Grafana. Fluent Bit replaces it at 5 MiB, and Grafana Alloy would be heavier.
+- **Lago's own Postgres**: an exporter would have to join Lago's internal network (LLD-06 §2.1). Lago's health shows through `billing-bridge`'s.
+- Per-database and per-collection Mongo statistics (`--collect-all`): not needed now, and they list every company's collections.
+- Traces (OpenTelemetry): the gateway can send them (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), but nothing collects them yet.
+- Health probes of each company's LibreChat through Traefik: cAdvisor's container check covers a stopped one; one that runs but fails isn't seen.
+
+### Who can reach it
+
+These hold every company's usage and our services' logs, so nothing of them is reachable from a company's network or the internet.
+
+- **Grafana** on `http://127.0.0.1:3000`, user `katip-admin`, password `GRAFANA_ADMIN_PASSWORD`, generated into `katip.env`. No sign-up, no anonymous access, no outbound calls (usage reports, update checks, news, plugin downloads, public snapshots are off). **Prometheus** on `http://127.0.0.1:9090`, with no login. Fluent Bit's log input on `127.0.0.1:24224`, where Docker's daemon sends to it. Nothing else publishes a port. On a server, reach them over Tailscale or an SSH tunnel (LLD-01), never Traefik.
+- No Traefik route, and no monitoring container on a company's network. Only Prometheus, Alertmanager and the database exporters are on `backend`, only the blackbox exporter on `edge`; the rest are on their own `monitoring` network. That network isn't internal, since Docker publishes no port from an internal network.
+- No container gets the Docker socket, `/var/lib/docker` or the host's root filesystem: each would show every container's environment, so every company's secrets. That is why cAdvisor reads only `/sys` and knows containers by id: the bootstrap writes their names to `katip_container_info` (node-exporter's textfile directory) after `dev:up`, every `tenant:*` command and a rotation. A container recreated any other way has no name on the dashboards until then. node-exporter has no host mount: it reads the disk from its own root, which is on the filesystem Docker keeps its data on.
+- Scrapes use the gateway's `KATIP_METRICS_TOKEN`, which Prometheus keeps in a file in memory only its user can read. `console-api` now has the same `/metrics` on port 9464, with the same token.
+- `isolation.mjs` checks, on every install with monitoring on: every monitoring service and Keycloak's management port closed from each company's LibreChat; the host's ports 3000, 9090 and 24224 closed from there, while 443 answers; Traefik routes none of them, and can't reach Grafana; each container is on its allowed networks only, publishes on `127.0.0.1` only, and has no Docker socket or host root.
+
+What each exporter exposes, on its own port on `monitoring` (and `backend` for the database exporters), with no login:
+
+| Exporter | Reads as | Exposes |
+| --- | --- | --- |
+| Postgres | `katip_monitor`: `pg_monitor`, no table's rows (tested) | Database names, sizes, connections by state, table names and their row statistics. Not query text, though `pg_monitor` could read it |
+| Mongo | `katip_monitor`: `clusterMonitor`, no documents | Server status: connections, operations, memory |
+| Valkey | Valkey user `katip-monitor`: `INFO`, `PING` and a few read-only commands. No key, no `CONFIG GET` (which would show the main password) | Memory, clients, keyspace counts |
+| node-exporter | – | Host CPU, memory, load, the Docker data disk |
+| cAdvisor | – | cgroup ids, memory and CPU per container. Its web page shows the same |
+| blackbox | – | The certificate's expiry and whether the handshake works |
+| Keycloak (port 9000, no route) | – | Logins and other user events by realm, client (`lc-<slug>`) and error. Never a user |
+
+### Logs
+
+Only our own services' logs go to Loki: `policy-gateway`, `console-api`, `identity` and `billing-bridge`, through Docker's fluentd driver. They log ids, not text, through `packages/shared/src/logger.ts`. Docker keeps its own copy, so `docker logs` works as before. Fluent Bit drops any other tag, and masks what looks like an email or IPv4 address.
+
+**Not collected,** because they hold personal data and don't promise otherwise: LibreChat (conversation titles, file names), the RAG API (file names), Keycloak (its `LOGIN_ERROR` lines carry the username and IP address: seen on 26.8.1), Traefik (addresses, hosts), LiteLLM, Presidio, Lago, Postgres and Mongo (statements and their values).
+
+**What personal data could still reach Loki:**
+
+- **People's ids:** `user_id`, `tenant_id`, conversation and department ids. They are pseudonymous: the governance database ties a `user_id` to a person.
+- **Request lines:** method, path (ids) and status. The caller's address is masked; it is a container's anyway.
+- **Error messages:** a library's or a provider's words. A provider gets masked text, but under `onDetectorFailure: allow` a name may be unmasked (LLD-03 §5), and an error could quote it.
+- **Anything our code logs by mistake.** pino redacts `email`, `content`, `messages` and others by key; Fluent Bit catches email-shaped text anywhere. Neither can recognise a name.
+
+Loki is a new store that a person's deletion (LLD-07) doesn't reach. So it keeps 7 days, and its compactor deletes older lines. Loki has a delete API, but nothing calls it on a deletion request. LLD-10 §8 lists the period. Prometheus holds no person: its labels are company slugs, model ids, Keycloak client ids, container names and fixed words.
+
+### Alerts
+
+Every rule has a promtool unit test, passing (`pnpm test:alert-rules`, which runs the pinned Prometheus image with no network): `infra/monitoring/prometheus/rules/katip.yml` and `tests/katip.test.yml`.
+
+| Alert | Fires when | For | Severity |
+| --- | --- | --- | --- |
+| `ScrapeTargetDown` | A target doesn't answer: a service of ours, an exporter, Keycloak, Prometheus's own parts | 2 min | critical |
+| `ContainerDown` | A container that ran at the last inventory has no cgroup, while cAdvisor is up | 2 min | critical |
+| `DatabaseDown` | An exporter can't reach Postgres, Mongo or Valkey | 2 min | critical |
+| `DiskAlmostFull` | A filesystem over 80% | 10 min | warning |
+| `TlsCertificateExpiresSoon`, `TlsProbeFailed` | Traefik's certificate within 14 days of expiry; no handshake | 10 / 5 min | warning |
+| `GatewayErrorRateHigh` | `gw_requests_total` 5xx over 2% | 5 min | critical |
+| `UpstreamErrorRateHigh` | A model's `gw_upstream_errors_total` over 10% of its calls (with no success, 100%) | 10 min | warning |
+| `GatewayOverheadP95High` | `gw_overhead_seconds` p95 over 120 ms (LLD-03 §2) | 15 min | warning |
+| `UpstreamLatencyP95High` | A model's `gw_upstream_latency_seconds` p95 over 10 s | 15 min | warning |
+| `ValkeyMemoryHigh` | Over 80% of `maxmemory`; with none set, as today, over 1 GiB | 10 min | warning |
+| `FailedLoginSpike` | Over 20 failed logins in 10 min on one Keycloak client | – | warning |
+| `BudgetAnomaly` | A company's spend in a day over 3× its daily average of the 7 days before, and over $1 | 30 min | warning |
+| `ProvisionerJobFailed` | A job failed in the last 24 h (`jobs.status = 'failed'`) | – | warning |
+| `DailyJobFailed`, `DailyJobLate` | The last daily run had failures; or none for 26 h (or never), once `jobs.daily_at` schedules it | – / 10 min | critical |
+| `PiiDetectorFailed` | Any `gw_pii_detector_failures_total`: the `pii_detector_failed` event | – | warning |
+| `PiiNamesSentUnchecked` | The same with `action="allowed"`: a request went on without name masking | – | critical |
+| `Watchdog` | Always: proves the path. Routed to an empty dead man's switch | – | none |
+| `BackupMissing`, `RestoreTestFailed`, `RestoreTestMissing` | **Inactive**, see below | | critical |
+
+How some of them work:
+
+- **Host down.** Prometheus runs on the host it watches, so it can't report the host down. That needs LLD-10's external uptime check below, and a dead man's switch fed by `Watchdog`. Neither is chosen; the receiver is there, empty.
+- **Certificates.** In dev, Traefik's certificate is self-signed, so the probe skips verification and reads only its expiry. In production, the origin certificate (Cloudflare, 15 years) or Let's Encrypt's (Traefik renews it) is probed with verification by the same module, and Cloudflare's edge certificate by the external uptime check.
+- **Failed logins.** Keycloak 26.8.1 counts user events itself (`--metrics-enabled`, `--event-metrics-user-enabled`, tags `realm,clientId`), on its management port 9000, which has no route. Checked on a throwaway Keycloak: `keycloak_user_events_total{client_id, error, event, realm}`, no user.
+- **Budget anomaly.** Spend is our cost, which companies don't see. The gateway now counts it at list price, `gw_cost_usd_micro_total{tenant,class}`, on its token-protected port. Prometheus and Grafana are provider-only, so that is acceptable. It needs 8 days of data to fire.
+- **Daily job and provisioner jobs.** The provider console already knows the daily job's state (`dailyJobState`); `console-api`'s `/metrics` gives the same, plus failed jobs by type through `failed_jobs_since()`, a function that returns counts only, and companies by status.
+- **Name checks.** A company's first failure starts its series at 1, which `increase()` can't see, so the rules also catch a series that is new in the last 5 minutes. Tested.
+- **Backups.** No backups exist (P1-42), so these rules are in `infra/monitoring/prometheus/inactive/backups.yml`, which Prometheus doesn't load, and are tested like the others. They read `katip_backup_last_success_timestamp_seconds{target}`, `katip_restore_test_last_run_timestamp_seconds` and `katip_restore_test_last_success`, which P1-42 has to write to the textfile directory. Then move the file into `rules/`.
+
+**Where alerts go.** By email to `monitoring.alert_email`, through Mailpit only: Alertmanager's mail server is fixed to `mailpit:1025`, so nothing leaves the machine whatever the address. LLD-10 asks for Telegram or phone as well. Which, and who gets woken, are the owner's choice: the `owner-channel` receiver in `infra/monitoring/alertmanager/alertmanager.tmpl.yml` is marked and empty, and critical alerts are already routed to it.
+
+### Dashboards
+
+`infra/monitoring/grafana/dashboards/`: the gateway (P1-15), the platform (targets up, firing alerts, memory and CPU per container, host memory and disk, companies by status, requests, tokens and spend by company, failed logins, Valkey, the daily job, our services' error logs), and one company (requests, tokens, latency, quota denials, name check failures, failed logins). **Spend appears only on the platform dashboard.** Grafana is provider-only, so that is acceptable; no dashboard is shown to a company.
+
+### Tests
+
+- `pnpm test:setup` (`scripts/setup/test/monitoring.test.mjs`): config, ports, networks, mounts, which logs, rule coverage, dashboards.
+- `pnpm test:alert-rules`: promtool's rule check and unit tests, amtool's config check.
+- `pnpm test:monitoring` (`scripts/setup/monitoring-check.mjs`), on the running stack: every target up and every job scraped; every rule loaded and evaluating without error; `Watchdog` in Alertmanager; a test alert through Alertmanager's API arriving in Mailpit, then resolved; Grafana refusing no password, its three dashboards, every panel's query through its data source, with data where there should be; three chats, then the gateway's lines in Loki with no email or IP address, and no other container's; from a company's LibreChat, every monitoring service and the host's monitoring ports closed. Run on 4 Nov 2026 against a throwaway copy with stand-ins for our services (47 checks passed), without the chats and the company checks. **Not yet run on the real stack.**
+
+- **External uptime check** of `status.<domain>` and 2 tenants (Better Stack free tier or Uptime Kuma on a separate small VM). Not built.
 
 ## 6. Vulnerability management
 
@@ -115,6 +218,7 @@ Step by step, with the commands that exist today: [docs/runbooks/incident.md](..
   - usage events: 24 months;
   - audit log: 5 years;
   - backups: 30 days;
+  - monitoring: our services' logs in Loki 7 days (they hold people's ids, and a person's deletion doesn't reach them); metrics in Prometheus 15 days (no person) (§5);
   - a deleted tenant: purged after 30 days, when its chats and logins are destroyed and what must stay is anonymised (LLD-07 §2a).
 
 ## 9. Acceptance criteria
@@ -141,5 +245,6 @@ Step by step, with the commands that exist today: [docs/runbooks/incident.md](..
 | Secrets | Comparing the tenants' keys | None shared |
 | Routes | A company's LibreChat tries `console-api`, by name and address, and Traefik's own port. `/internal/traefik` through the public address | None answers with routes |
 | Docker | From Traefik: the socket, a proxy, the Docker API on its host. Also its mounts, and where its routes came from | None there, and no route from Docker |
+| Monitoring (when on) | From a tenant's LibreChat: Prometheus, Grafana, Loki, Alertmanager, Fluent Bit, every exporter, Keycloak's port 9000, and the host's 3000, 9090 and 24224. Traefik's routes, and Traefik to Grafana. Each monitoring container's networks, ports and mounts | Closed (the host's 443 answers, to show the address is right); no route; own networks only, `127.0.0.1` only, no Docker socket or host root |
 
 **What this doesn't cover:** a compromise of a platform service both tenants use (Traefik, the gateway, Mongo), and Docker itself.

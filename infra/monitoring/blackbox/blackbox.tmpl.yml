@@ -1,0 +1,12 @@
+# Blackbox exporter modules (P1-43). Rendered into infra/monitoring/rendered/blackbox.yml.
+# insecure_skip_verify is rendered true on localhost only: dev certificates are self-signed, so
+# they can't be verified, but their expiry is still read. Anywhere else the chain is verified too.
+modules:
+  tls:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      tls: true
+      tls_config:
+        server_name: '%%SERVER_NAME%%'
+        insecure_skip_verify: '%%TLS_INSECURE%%'

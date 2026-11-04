@@ -5,7 +5,7 @@
 
 ## Read this first
 
-- **There is no monitoring and no alerting** (P1-43 is `todo`). Nothing will wake you. You will hear of an incident from a person, from the provider console's daily job notice, or by looking.
+- **Alerts go to Mailpit only** (P1-43, LLD-10 §5). Nothing pages a person or reaches a phone: that channel is the owner's choice and isn't set up. Look at `https://mailpit.localhost` and Grafana. You may still hear of an incident first from a person, or the provider console's daily job notice.
 - **There are no backups** (P1-42). Recovery is limited. See [restore.md](restore.md).
 - This page is not legal advice. For anything that may involve personal data, call counsel (see step 3).
 
@@ -17,7 +17,15 @@
 
 ## 1. Look
 
-Save logs before you change anything. Logs rotate at 10 MB times 3 files per container, so old lines vanish fast.
+Save logs before you change anything. Logs rotate at 10 MB times 3 files per container, so old lines vanish fast. Loki keeps the gateway's, `console-api`'s, `identity`'s and `billing-bridge`'s for 7 days, and nobody else's.
+
+If monitoring is on (`monitoring.enabled`):
+
+- **Alerts:** the emails in Mailpit, or `http://127.0.0.1:9090/alerts`. Each alert's meaning is in LLD-10 §5.
+- **Grafana:** `http://127.0.0.1:3000`, user `katip-admin`, password `GRAFANA_ADMIN_PASSWORD` in `infra/env/katip.env` (read it, don't paste it). Dashboards: *Kâtip platform* (what's up, memory, disk, per company), *Kâtip company*, *Kâtip gateway*. In *Explore*, Loki: `{service="policy-gateway"} |= "pii_detector_failed"`.
+- **On a server:** these are on `127.0.0.1` there too. Use an SSH tunnel over Tailscale, e.g. `ssh -L 3000:127.0.0.1:3000 <host>`.
+- **Grafana's password lost or leaked:** `docker exec katip-grafana-1 grafana cli admin reset-admin-password <new>`, then put the same in `katip.env`. `pnpm secrets:rotate` can't do it: Grafana keeps its own copy after its first start.
+- **Monitoring itself broken:** `pnpm test:monitoring` says what. `pnpm dev:up --redo=monitoring` starts it again. Turning it off (`monitoring.enabled: false`, then `pnpm dev:up`) changes nothing else.
 
 ```
 pnpm dev:status
@@ -59,7 +67,7 @@ docker exec katip-policy-gateway-1 sh -c 'wget -qO- --header "Authorization: Bea
 | `gw_quota_denials_total` (labels tenant, class) | A company hitting its limit |
 | `gw_tokens_total`, `gw_upstream_latency_seconds`, `gw_overhead_seconds`, `gw_pii_entities_total` | Unusual volume or slowness |
 
-No dashboard runs yet. A Grafana dashboard definition exists in `infra/monitoring/` but Grafana does not run (P1-43).
+With monitoring on, Prometheus keeps these for 15 days, across restarts: see Grafana above.
 
 If a service is down: `pnpm dev:up` retries what failed. If you do not know why it is down, find out before restarting it.
 
@@ -117,7 +125,7 @@ Notify affected companies: the owner decides what to say and when. No template e
 
 ## What will change for production
 
-- Alerts will go to phone and email (P1-43), including on `pii_detector_failed` and a failed provisioner job. Today they do not.
+- Alerts, including `pii_detector_failed` and a failed provisioner job, go to Mailpit today. A real channel (phone, Telegram, email) is the owner's choice: the empty `owner-channel` in `infra/monitoring/alertmanager/alertmanager.tmpl.yml`. A dead man's switch and an external uptime check are also not chosen, so a dead host raises no alarm.
 - Cloudflare will allow blocking addresses and enforcing country rules (P1-44).
 - Backups (P1-42) make step 4 possible.
 - The `incidents/` folder and its template will need to exist.
