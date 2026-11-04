@@ -25,7 +25,17 @@ import {
 } from '../tenants.mjs';
 import { tenantPairs } from '../isolation.mjs';
 import { totp } from '../kc-lib.mjs';
-import { renderTenantFiles } from '../steps.mjs';
+import {
+  AUTO_KEYS,
+  devBillingTenants,
+  platformComposeArgs,
+  renderTenantFiles,
+  SERVICE_STEPS,
+  steps,
+} from '../steps.mjs';
+import { platformSecretNames } from '../secret-rotation.mjs';
+import { DEPLOY_UP_FLAGS, selfBuiltImages } from '../deploy-lib.mjs';
+import { createPrivateKey } from 'node:crypto';
 import { FORGET_VECTORS_SQL } from '../tenant-lifecycle.mjs';
 import { INFRA, generatorFor, parseEnvFile, parseYaml, redact, run } from '../util.mjs';
 
@@ -35,6 +45,7 @@ const read = (...p) => readFileSync(join(INFRA, ...p), 'utf8');
 const COMPOSE_FILES = [
   ['compose', 'platform.yml'],
   ['compose', 'dev.yml'],
+  ['compose', 'billing.yml'],
 ];
 
 describe('validateConfig', () => {
@@ -356,7 +367,9 @@ describe('tenants', () => {
   });
 
   describe('Traefik and Docker', () => {
-    const composeFiles = ['platform.yml', 'dev.yml', 'tenant.tmpl.yml'].map((f) => [f]);
+    const composeFiles = ['platform.yml', 'dev.yml', 'tenant.tmpl.yml', 'billing.yml'].map((f) => [
+      f,
+    ]);
     const traefikService = () => parseYaml(read('compose', 'platform.yml')).services.traefik;
 
     it.each(composeFiles)('%s gives no service the socket, a proxy or a label', (file) => {
@@ -570,6 +583,132 @@ describe('console-api', () => {
   it('connects as the role row-level security binds, not the admin one', () => {
     const dev = read('compose', 'dev.yml');
     expect(dev).toContain('postgres://katip_console:${KATIP_CONSOLE_DB_PASSWORD');
+  });
+});
+
+describe('billing (Lago, P1-36/P1-37)', () => {
+  const billing = () => parseYaml(read('compose', 'billing.yml'));
+  const LAGO = ['lago-db', 'lago-redis', 'lago-api', 'lago-worker', 'lago-clock'];
+
+  it('is installed with the platform, by the one script', () => {
+    expect(platformComposeArgs()).toContain('infra/compose/billing.yml');
+    const ids = steps.map((s) => s.id);
+    expect(ids.indexOf('billing')).toBe(ids.indexOf('aiplane') + 1);
+    expect(SERVICE_STEPS).toContain('billing');
+    expect(DEPLOY_UP_FLAGS[0]).toContain(',billing,');
+    expect(selfBuiltImages(config)).toContain('ghcr.io/krugis/billing-bridge:dev');
+  });
+
+  it('runs Lago from pinned images in the config, with Valkey as its Redis', () => {
+    expect(config.images.lago_api).toMatch(/^getlago\/api:v\d+\.\d+\.\d+$/);
+    expect(config.images.lago_postgres).toMatch(
+      /^getlago\/postgres-partman:[\w.-]+@sha256:[0-9a-f]{64}$/,
+    );
+    const env = composeEnv(config);
+    expect(env.KATIP_IMAGE_LAGO_API).toBe(config.images.lago_api);
+    expect(env.KATIP_IMAGE_LAGO_POSTGRES).toBe(config.images.lago_postgres);
+    const s = billing().services;
+    expect(s['lago-api'].image).toContain('KATIP_IMAGE_LAGO_API');
+    expect(s['lago-worker'].image).toContain('KATIP_IMAGE_LAGO_API');
+    expect(s['lago-clock'].image).toContain('KATIP_IMAGE_LAGO_API');
+    expect(s['lago-db'].image).toContain('KATIP_IMAGE_LAGO_POSTGRES');
+    expect(s['lago-redis'].image).toContain('KATIP_IMAGE_VALKEY');
+    // No UI and no PDF service: nothing needs them yet.
+    expect(Object.keys(s).sort()).toEqual([...LAGO, 'billing-bridge'].sort());
+  });
+
+  it('keeps Lago to its own internal network, with no port and no route', () => {
+    const b = billing();
+    expect(b.networks.billing.internal).toBe(true);
+    for (const name of LAGO) {
+      expect(b.services[name].networks, name).toEqual(['billing']);
+      expect(b.services[name].ports, name).toBeUndefined();
+    }
+    expect(b.services['billing-bridge'].networks).toEqual(['backend', 'billing']);
+    expect(b.services['billing-bridge'].ports).toBeUndefined();
+    const text = read('compose', 'billing.yml');
+    expect(text).toContain("LAGO_DISABLE_SEGMENT: 'true'");
+    expect(text).toContain("LAGO_DISABLE_SIGNUP: 'true'");
+    expect(text).toContain("LAGO_SIDEKIQ_WEB: 'false'");
+    expect(text).toContain('--requirepass');
+    expect(read('traefik', 'dynamic/routes.yml')).not.toMatch(/lago|billing/);
+  });
+
+  it('gives billing-bridge its own role, bound by row-level security', () => {
+    const env = billing().services['billing-bridge'].environment;
+    expect(env.DATABASE_URL).toContain('postgres://katip_billing:${KATIP_BILLING_DB_PASSWORD');
+    expect(env.LAGO_API_URL).toBe('http://lago-api:3000');
+    expect(env.BILLING_OVERAGE_STANDARD_USD_MICRO_PER_M).toContain(
+      'KATIP_BILLING_OVERAGE_STANDARD',
+    );
+  });
+
+  it('generates every Lago secret once, and knows how each one is rotated', () => {
+    const example = parseEnvFile(read('env', 'katip.example.env'));
+    for (const k of [
+      'KATIP_BILLING_DB_PASSWORD',
+      'LAGO_API_KEY',
+      'LAGO_DB_PASSWORD',
+      'LAGO_REDIS_PASSWORD',
+      'LAGO_ADMIN_PASSWORD',
+      'LAGO_SECRET_KEY_BASE',
+      'LAGO_RSA_PRIVATE_KEY',
+      'LAGO_ENCRYPTION_PRIMARY_KEY',
+      'LAGO_ENCRYPTION_DETERMINISTIC_KEY',
+      'LAGO_ENCRYPTION_KEY_DERIVATION_SALT',
+    ]) {
+      expect(AUTO_KEYS.has(k), k).toBe(true);
+      expect(example[k], k).toBe('AUTO');
+    }
+    for (const k of AUTO_KEYS) expect(platformSecretNames(), k).toContain(k);
+    const pem = Buffer.from(generatorFor('LAGO_RSA_PRIVATE_KEY')(), 'base64').toString();
+    expect(createPrivateKey(pem).asymmetricKeyDetails?.modulusLength).toBe(2048);
+    expect(generatorFor('LAGO_SECRET_KEY_BASE')()).toMatch(/^[0-9a-f]{128}$/);
+    expect(generatorFor('LAGO_API_KEY')().length).toBeGreaterThanOrEqual(32);
+  });
+
+  it('passes the billing settings to billing-bridge', () => {
+    expect(composeEnv(config)).toMatchObject({
+      KATIP_BILLING_OVERAGE_STANDARD: '1000000',
+      KATIP_BILLING_OVERAGE_PREMIUM: '6000000',
+      KATIP_BILLING_SEATS_IN_ADVANCE: 'true',
+      KATIP_BILLING_GRACE_MINUTES: '10',
+      KATIP_BILLING_LOOKBACK_DAYS: '35',
+    });
+  });
+
+  it('takes its prices from LLD-06 §2, as integer micro-USD', () => {
+    expect(config.billing.overage).toEqual({ standard: 1_000_000, premium: 6_000_000 });
+  });
+
+  it('rejects a billing section that is missing, unknown or not in micro-USD', () => {
+    const none = clone();
+    delete none.billing;
+    expect(validateConfig(none)).toContain('billing: required, for Lago (LLD-06)');
+    const bad = clone();
+    bad.billing.overage.standard = 1.5;
+    bad.billing.overage.research = 5;
+    bad.billing.dedicated = 149;
+    bad.billing.seats_in_advance = 'yes';
+    bad.billing.grace_minutes = 60;
+    bad.billing.lookback_days = 0;
+    expect(validateConfig(bad)).toEqual(
+      expect.arrayContaining([
+        'billing.overage.standard: must be integer micro-USD per 1M tokens',
+        'billing.overage.research: unknown setting',
+        'billing.dedicated: unknown setting',
+        'billing.seats_in_advance: must be true or false',
+        'billing.grace_minutes: must be a whole number of minutes, 0 to 59',
+        'billing.lookback_days: must be a whole number of days, 1 to 400',
+      ]),
+    );
+  });
+
+  it('makes test customers in dev only', () => {
+    expect(devBillingTenants(config).map((t) => t.slug)).toEqual(config.tenants.map((t) => t.slug));
+    const real = clone();
+    real.project.base_domain = 'katip.example.com';
+    expect(devBillingTenants(real)).toEqual([]);
   });
 });
 

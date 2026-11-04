@@ -69,6 +69,12 @@ images:
   rag_api: ghcr.io/danny-avila/librechat-rag-api-dev-lite:v0.9.0
   # Used by the bootstrap's own network checks.
   curl: curlimages/curl:8.8.0
+  # Billing (P1-36): Lago, unmodified, AGPL-3.0. Its API, worker and clock run from this image.
+  lago_api: getlago/api:v1.55.0
+  # Lago's own Postgres 15, with the pg_partman extension its migrations need (image MIT;
+  # PostgreSQL and pg_partman under the PostgreSQL licence). Pinned by digest too, because Lago
+  # rebuilt this tag in January 2026. Its Redis is our Valkey image, as a separate container.
+  lago_postgres: getlago/postgres-partman:15.0-alpine@sha256:27a1e3a1138a69b5a0911ce125dfa613b9ced07604a2d781b9d31141f7f96036
   # Presidio analyzer (P1-11): upstream moved to GHCR (LLD-01 still says MCR).
   # Self-built from infra/presidio/Dockerfile on top of this base, plus the spaCy
   # model wheel; sha256 = wheel checksum from the spacy-models GitHub release.
@@ -187,6 +193,27 @@ models:
     litellm_params:
       model: deepinfra/BAAI/bge-m3 # (verify)
       api_key: os.environ/DEEPINFRA_API_KEY
+
+# ------------------------------------------------------------------------------
+# Billing (LLD-06, P1-36/P1-37). Lago runs on every install, for the provider only. Seat prices
+# come from the governance plans table (DESIGN §5, seeded by packages/db): the monthly plan's
+# price, which is the annual one + 20%. Only the monthly plan is set up in Lago: how an annual
+# plan is invoiced, and the other open questions, are in docs/lld/06-usage-billing.md §8.
+# Setup creates Lago's catalog once and then only checks it: changing a price here doesn't
+# change Lago, it stops the install with the difference (docs/runbooks/billing.md).
+# ------------------------------------------------------------------------------
+billing:
+  # micro-USD per 1M overage tokens (LLD-06 §2), billed pro rata per token.
+  overage:
+    standard: 1000000
+    premium: 6000000
+  # Seats are invoiced at the start of the month (true) or at its end. A seat added mid-month
+  # is charged for the rest of it; one removed isn't refunded, and goes from the next month.
+  seats_in_advance: true
+  # An hour's usage goes to Lago this many minutes after the hour ends. Usage arriving later
+  # still goes, as a further event for that hour, as long as it's within lookback_days.
+  grace_minutes: 10
+  lookback_days: 35
 
 # ------------------------------------------------------------------------------
 # Tenants (rendered by the bootstrap; the provisioner CLI lands in P1-21). Each one

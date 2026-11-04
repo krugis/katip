@@ -364,30 +364,28 @@ describe('what leaves for the provider', () => {
     expect(sentInput()).toBe('izin ⟦PERSON_3fa9c1d2⟧');
   });
 
-  it('masks for an outside model with masking off too', async () => {
+  it('sends real text when the company turned masking off, as its chat does', async () => {
     build(acme({ pii: { mode: 'off' } }), { piiDetector: NAME_DETECTOR });
     await embed({ model: 'auto', input: `Ahmet Yılmaz ${TCKN}` });
-    expect(sentInput()).toBe('⟦PERSON_1⟧ ⟦TR_TCKN_1⟧');
-    expect(usage.events[0]!.piiEntities).toEqual({ PERSON: 1, TR_TCKN: 1 });
+    expect(sentInput()).toBe(`Ahmet Yılmaz ${TCKN}`);
   });
 
-  it('masks a kind set to off, for an outside model', async () => {
+  it('sends a kind set to off as it is, and masks the rest', async () => {
     build(acme({ pii: { mode: 'mask', entities: { TR_TCKN: 'off' } } }));
     await embed({ model: 'auto', input: `${TCKN} ${IBAN}` });
-    expect(sentInput()).toBe('⟦TR_TCKN_1⟧ ⟦TR_IBAN_1⟧');
+    expect(sentInput()).toBe(`${TCKN} ⟦TR_IBAN_1⟧`);
   });
 
-  it('never shows an outside model a real TCKN, whatever the policy', async () => {
+  it('never shows an outside model a real TCKN when the company masks or blocks it', async () => {
     const down = async (): Promise<Span[]> => {
       throw new Error('analyzer down');
     };
     const policies: Tenant['pii'][] = [
-      { mode: 'off' },
       { mode: 'mask' },
       { mode: 'block' },
-      { mode: 'off', entities: { TR_TCKN: 'off' } },
-      { mode: 'mask', entities: { TR_TCKN: 'off', PERSON: 'off' } },
-      { mode: 'block', entities: { TR_TCKN: 'off' } },
+      { mode: 'off', entities: { TR_TCKN: 'mask' } },
+      { mode: 'mask', entities: { PERSON: 'off' } },
+      { mode: 'block', entities: { PERSON: 'off' } },
       { mode: 'mask', entities: { TR_TCKN: 'block' } },
     ];
     for (const pii of policies) {

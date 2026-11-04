@@ -18,6 +18,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import type { MarginData } from './margin.js';
 import type { OverrideDocument, PolicyDocument } from './policy.js';
 import { FILE_SEARCH_KEY, FILE_SEARCH_LABEL } from './usage.js';
 
@@ -225,6 +226,8 @@ export interface ConsoleStore {
     query: AuditQuery,
   ): Promise<{ entries: AuditEntry[]; next: string | null }>;
   latestDailyRun(): Promise<{ ts: Date; details: Record<string, unknown> | null } | null>;
+  /** Every company's revenue and provider cost for one UTC month, `yyyy-mm`. Provider routes only. */
+  providerMargin(month: string): Promise<MarginData>;
   auditAcrossTenants(
     query: AuditQuery & { tenant?: string | undefined },
   ): Promise<{ entries: (AuditEntry & { tenantSlug: string })[]; next: string | null }>;
@@ -1534,6 +1537,49 @@ export class DbConsoleStore implements ConsoleStore {
     const row = rows[0] as
       { ts: Date | string; details: Record<string, unknown> | null } | undefined;
     return row ? { ts: new Date(row.ts), details: row.details } : null;
+  }
+
+  async providerMargin(month: string): Promise<MarginData> {
+    const first = `${month}-01`;
+    // Outside any company's transaction on purpose: the functions refuse to run inside one.
+    // One snapshot, so the companies and the models add up to the same cost.
+    return this.db.transaction(
+      async (tx) => {
+        const tenants = (await tx.execute(
+          sql`select * from provider_margin(${first}::date)`,
+        )) as unknown as Record<string, string | null>[];
+        const models = (await tx.execute(
+          sql`select * from provider_model_cost(${first}::date)`,
+        )) as unknown as Record<string, string | null>[];
+        const n = (v: string | null | undefined) => Number(v ?? 0);
+        return {
+          basis: 'list_price' as const,
+          tenants: tenants.map((r) => ({
+            tenantId: String(r['tenant_id']),
+            slug: String(r['slug']),
+            name: String(r['name'] ?? ''),
+            status: String(r['status']),
+            billingCycle: r['billing_cycle'] ?? null,
+            seats: n(r['seats']),
+            seatRevenue: n(r['seat_revenue_usd_micro']),
+            addonRevenue: n(r['addon_revenue_usd_micro']),
+            overageRevenue: n(r['overage_revenue_usd_micro']),
+            cost: n(r['cost_usd_micro']),
+            requests: n(r['requests']),
+          })),
+          models: models.map((r) => ({
+            modelId: String(r['model_id']),
+            label: String(r['display_name']),
+            class: String(r['class']),
+            requests: n(r['requests']),
+            inputTokens: n(r['input_tokens']),
+            outputTokens: n(r['output_tokens']),
+            cost: n(r['cost_usd_micro']),
+          })),
+        };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
   }
 
   async auditAcrossTenants(query: AuditQuery & { tenant?: string | undefined }) {

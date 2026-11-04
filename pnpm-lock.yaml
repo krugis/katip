@@ -45,6 +45,25 @@ importers:
         specifier: 3.2.7
         version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
 
+  apps/billing-bridge:
+    dependencies:
+      '@katip/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@katip/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      postgres:
+        specifier: 3.4.7
+        version: 3.4.7
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: 11.5.1
+        version: 11.5.1
+
   apps/console:
     dependencies:
       '@refinedev/core':

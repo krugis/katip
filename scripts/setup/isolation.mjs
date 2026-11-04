@@ -17,7 +17,14 @@ const NOT_FOR_TENANTS = [
   'keycloak:8080',
   'mailpit:8025',
   'console-api:8081',
+  'lago-api:3000',
+  'lago-db:5432',
+  'lago-redis:6379',
+  'billing-bridge:8095',
 ];
+
+/** On Lago's network, and nothing else: it is the provider's alone (LLD-06, P1-36). */
+const BILLING_SERVICES = ['lago-db', 'lago-redis', 'lago-api', 'lago-worker', 'lago-clock'];
 
 /**
  * @param helpers.secret (t, name) => a tenant secret
@@ -120,6 +127,53 @@ export async function checkIsolation(ctx, helpers) {
       `Traefik has no route to ${t.slug} from console-api`,
     );
   }
+
+  // Lago: no route, no published port, and a network of its own with no way out. Only
+  // billing-bridge joins it, and Lago's API wants its key.
+  expect(!/lago|billing/i.test(routers), 'Traefik has a route to Lago or billing-bridge');
+  expect((await exec('traefik', 'nc -z -w2 lago-api 3000')).code !== 0, 'Traefik can reach Lago');
+  const billingNet = `${project}_billing`;
+  const netInternal = await run('docker', [
+    'network',
+    'inspect',
+    '-f',
+    '{{.Internal}}',
+    billingNet,
+  ]);
+  expect(netInternal.out.trim() === 'true', "Lago's network is not internal, so it has a way out");
+  const members = (
+    await run('docker', [
+      'network',
+      'inspect',
+      '-f',
+      '{{range .Containers}}{{.Name}} {{end}}',
+      billingNet,
+    ])
+  ).out
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort();
+  const allowed = [...BILLING_SERVICES, 'billing-bridge'].map((s) => `${project}-${s}-1`).sort();
+  expect(
+    JSON.stringify(members) === JSON.stringify(allowed),
+    `Lago's network holds ${members.join(', ') || 'nothing'}, not just Lago and billing-bridge`,
+  );
+  for (const service of [...BILLING_SERVICES, 'billing-bridge']) {
+    const ports = await inspect(service, '{{json .HostConfig.PortBindings}}');
+    expect(['{}', 'null', ''].includes(ports), `${service} publishes a port: ${ports}`);
+    if (service.startsWith('lago-')) {
+      const nets = await inspect(
+        service,
+        '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}',
+      );
+      expect(nets.trim() === billingNet, `${service} is on more than Lago's network: ${nets}`);
+    }
+  }
+  expect(
+    (await exec('billing-bridge', 'wget -q -O /dev/null http://lago-api:3000/api/v1/plans'))
+      .code !== 0,
+    "Lago's API answers without its key",
+  );
 
   // Every company's host and allowlist, from console-api: not by its public address.
   const internal = await exec(

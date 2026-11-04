@@ -52,18 +52,18 @@ function effectiveMode(policy: PiiPolicy, type: EntityType): PiiMode {
 }
 
 /**
- * The policy for text sent to embed. A kind set to `block` is refused wherever the text goes,
- * as that's the company's rule. Otherwise the destination decides, not the setting: an outside
- * model gets every kind masked, even one set to `off`, and a self-hosted one gets the real
- * text, with no detector run for it. Only embeddings use this; chat follows the policy as set.
+ * The policy for text sent to embed. An outside model gets the company's policy as set, as its
+ * chat does: a company that turned masking off chose to send names (the owner's decision of
+ * 4 Nov 2026). A self-hosted model gets the real text, with no detector run for it, except
+ * that a kind set to `block` is still refused, as that's the company's rule.
  */
 export function embeddingPiiPolicy(policy: PiiPolicy, selfHosted: boolean): PiiPolicy {
-  const rest: PiiMode = selfHosted ? 'off' : 'mask';
+  if (!selfHosted) return policy;
   const entities: Partial<Record<EntityType, PiiMode>> = {};
   for (const type of ALL_TYPES) {
-    entities[type] = effectiveMode(policy, type) === 'block' ? 'block' : rest;
+    entities[type] = effectiveMode(policy, type) === 'block' ? 'block' : 'off';
   }
-  return { ...policy, mode: rest, entities };
+  return { ...policy, mode: 'off', entities };
 }
 
 export interface Masker {
