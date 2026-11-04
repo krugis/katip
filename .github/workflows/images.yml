@@ -1,0 +1,123 @@
+name: images
+
+# Trivy on our images and the third-party pins (P1-46, LLD-10 §6). Building ours takes time,
+# so this runs when what goes into an image changes, when asked for, and weekly.
+#
+# Blocks: a CRITICAL with a fix in one of our images, and in a third-party pin the PR adds or
+# changes. Reports only: third-party pins nobody touched, or every PR would wait on upstream.
+# Accepted findings are in .trivyignore.yaml, each with a reason and an expiry date.
+on:
+  pull_request:
+    paths: &paths
+      - '**/Dockerfile'
+      - 'pnpm-lock.yaml'
+      - 'katip.config.yaml'
+      - 'infra/presidio/**'
+      - 'infra/litellm/**'
+      - 'apps/console/nginx.conf.template'
+      - '.trivyignore.yaml'
+      - 'scripts/security/**'
+      - '.github/workflows/images.yml'
+  push:
+    branches: [main]
+    paths: *paths
+  schedule:
+    # Mondays 05:23 UTC, after Renovate's window.
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+
+jobs:
+  list:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ours: ${{ steps.list.outputs.ours }}
+      third: ${{ steps.list.outputs.third }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - id: list
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=''
+          if [ -n "$BASE_REF" ] && git show "origin/$BASE_REF:katip.config.yaml" > "$RUNNER_TEMP/base.yaml"; then
+            base="$RUNNER_TEMP/base.yaml"
+          fi
+          echo "ours=$(node scripts/security/images.mjs ours)" >> "$GITHUB_OUTPUT"
+          echo "third=$(node scripts/security/images.mjs third-party ${base:+"$base"})" >> "$GITHUB_OUTPUT"
+
+  ours:
+    needs: list
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.list.outputs.ours) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Build
+        run: node scripts/security/images.mjs build "${{ matrix.image }}" "katip-scan/${{ matrix.image }}:ci"
+      - name: Report, HIGH and CRITICAL
+        run: |
+          {
+            echo "### ${{ matrix.image }}: HIGH and CRITICAL"
+            echo '```'
+            docker run --rm -v trivy-cache:/root/.cache -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src:ro" "$TRIVY_IMAGE" \
+              image -q --image-src docker --scanners vuln --severity HIGH,CRITICAL \
+              --ignorefile /src/.trivyignore.yaml --format table "katip-scan/${{ matrix.image }}:ci"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Blocks on a CRITICAL with a fix
+        run: >-
+          docker run --rm -v trivy-cache:/root/.cache -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src:ro" "$TRIVY_IMAGE"
+          image -q --image-src docker --skip-db-update --scanners vuln --severity CRITICAL
+          --ignore-unfixed --exit-code 1 --ignorefile /src/.trivyignore.yaml
+          "katip-scan/${{ matrix.image }}:ci"
+
+  third-party:
+    needs: list
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.list.outputs.third) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Trivy reads the image from its registry, by the pin in katip.config.yaml. Nothing runs it.
+      - name: Scan ${{ matrix.name }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          CHANGED: ${{ matrix.changed }}
+        run: |
+          {
+            echo "### $IMAGE: HIGH and CRITICAL$([ "$CHANGED" = true ] && echo ', changed by this PR')"
+            echo '```'
+            docker run --rm -v trivy-cache:/root/.cache -v "$PWD:/src:ro" "$TRIVY_IMAGE" \
+              image -q --image-src remote --scanners vuln --severity HIGH,CRITICAL \
+              --ignorefile /src/.trivyignore.yaml --format table "$IMAGE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Blocks a new or changed pin with a CRITICAL that has a fix
+        if: matrix.changed
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: >-
+          docker run --rm -v trivy-cache:/root/.cache -v "$PWD:/src:ro" "$TRIVY_IMAGE"
+          image -q --image-src remote --skip-db-update --scanners vuln --severity CRITICAL
+          --ignore-unfixed --exit-code 1 --ignorefile /src/.trivyignore.yaml "$IMAGE"

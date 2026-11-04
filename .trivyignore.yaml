@@ -1,0 +1,38 @@
+# Accepted Trivy findings (P1-46, LLD-10 §6). Each entry needs a statement saying why, and an
+# expired_at date at most 180 days ahead: after it, Trivy stops ignoring the finding and the gate
+# fails again, so an accepted risk can't sit here for good. `pnpm test:setup` checks this file
+# (scripts/security/check-trivyignore.mjs). Scope an entry by `paths` where Trivy reports one.
+# Entries marked "Provisional" were added with the gates, for the owner to accept or fix.
+
+vulnerabilities:
+  - id: CVE-2026-59873
+    paths:
+      - usr/local/lib/node_modules/npm/node_modules/tar/package.json
+    statement: 'Provisional. node-tar inside the npm that ships with the node:22 base image. Our runtime images run node only, never npm, so nothing unpacks a tarball. Fix: drop npm and corepack from the runtime stage, or a node base with a fixed npm.'
+    expired_at: 2026-12-04
+  - id: CVE-2026-35030
+    paths:
+      - usr/local/lib/python3.12/site-packages/litellm-1.79.3.dist-info/METADATA
+    statement: 'Provisional, not accepted by the owner. LiteLLM 1.79.3 OIDC cache auth bypass. We use no LiteLLM OIDC; only the gateway reaches it, on the backend network (isolation.mjs). Fix: upgrade to 1.84.0 or later, reviewed as CLAUDE.md §7 asks.'
+    expired_at: 2026-11-18
+  - id: CVE-2026-37004
+    paths:
+      - usr/local/lib/python3.12/site-packages/litellm-1.79.3.dist-info/METADATA
+    statement: 'Provisional, not accepted by the owner. LiteLLM 1.79.3 template injection in /prompts/test. No tenant or internet route reaches LiteLLM; only the gateway does. Fix: upgrade to 1.84.0 or later, reviewed as CLAUDE.md §7 asks.'
+    expired_at: 2026-11-18
+  - id: CVE-2026-49468
+    paths:
+      - usr/local/lib/python3.12/site-packages/litellm-1.79.3.dist-info/METADATA
+    statement: 'Provisional, not accepted by the owner. LiteLLM 1.79.3 auth bypass by Host header. Only the gateway reaches LiteLLM, and it sets the Host itself. Fix: upgrade to 1.84.0 or later, reviewed as CLAUDE.md §7 asks.'
+    expired_at: 2026-11-18
+  - id: CVE-2026-31789
+    statement: 'OpenSSL heap overflow on 32-bit systems only. Every host we run is 64-bit (amd64 or arm64). Found in the console image (nginx-unprivileged 1.29.3-alpine); a newer base clears it with many HIGH findings.'
+    expired_at: 2027-02-01
+
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - apps/console/Dockerfile
+      - infra/presidio/Dockerfile
+    statement: 'False positive: no USER line, but the base image sets a non-root user (nginx-unprivileged 101, presidio-analyzer 1001), checked with docker image inspect on 2026-11-04. Recheck when a base changes.'
+    expired_at: 2027-05-01

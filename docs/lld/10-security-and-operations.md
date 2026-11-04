@@ -93,6 +93,25 @@ Target: one DevOps engineer at 0.25–0.5 of full time can run the platform. To 
   - checksum verified;
   - upgrade only after reading release notes and security advisories.
 
+**Built (P1-46).** Threat model: [docs/security/threat-model.md](../security/threat-model.md). Pentest scope and rules for the owner to send: [docs/security/pentest-scope.md](../security/pentest-scope.md). The tools run as images pinned by digest (gitleaks v8.30.1, Trivy 0.76.1), not through third-party actions, and the new workflows pin actions by commit. Trivy on the lockfile stands in for `pnpm audit`.
+
+| Gate | Where, when | Blocks | Reports only |
+| --- | --- | --- | --- |
+| gitleaks, whole git history, every branch | `security.yml`: every PR, push to `main` | Any finding not allowlisted in `.gitleaks.toml` | – |
+| Trivy on `pnpm-lock.yaml` | `security.yml`: same | A CRITICAL with a fix, in production dependencies | HIGH and CRITICAL including dev dependencies, in the job summary |
+| Trivy on Dockerfiles | `security.yml`: same | HIGH or CRITICAL misconfiguration | – |
+| Compose settings (Trivy reads no compose files) | `ci.yml`, `pnpm test:setup` (`scripts/setup/test/security.test.mjs`) | `privileged`, host namespaces, `cap_add`, `docker.sock`, `:latest`, a published port other than Traefik's or dev's `127.0.0.1` | – |
+| Trivy on our 8 images, built in the job | `images.yml`: PRs and pushes touching a Dockerfile, the lockfile, `katip.config.yaml`, `infra/presidio` or `infra/litellm`; on request; Mondays | A CRITICAL with a fix | HIGH and CRITICAL |
+| Trivy on the third-party pins in `katip.config.yaml` | `images.yml`: same | A CRITICAL with a fix in a pin the PR adds or changes | Pins nobody touched: failing on them would block every PR until upstream ships a fix |
+| `secretlint` | `ci.yml` | A secret in the working tree | – |
+
+- **gitleaks adds to secretlint, and doesn't replace it.** secretlint runs as `pnpm secrets:check` on a developer's machine without Docker, before a commit. gitleaks reads every commit, so a secret added and then deleted is still found, and its rules differ.
+- **Accepted findings** live in `.trivyignore.yaml`. Each needs a `statement` saying why and an `expired_at` at most 180 days ahead; past that date Trivy stops ignoring it, and `pnpm test:setup` fails until it is renewed or removed. Entries marked "Provisional" were added with the gates, for the owner to accept or fix.
+- **Run locally:** `docker run --rm -v "$PWD:/repo:ro" --user "$(id -u):$(id -g)" <gitleaks image from security.yml> git /repo --config /repo/.gitleaks.toml --log-opts=--all --redact`. In a git worktree, scan a `git clone --mirror` of it instead, as the worktree's `.git` points outside the mount. For Trivy, the commands in the two workflows.
+- **gitleaks findings in history, 4 Nov 2026:** four, all false positives, allowlisted with reasons: Traefik's `http://console-api:8081/internal/traefik` URL (three times) and the made-up demo key `sk-katip-demo-local` in the first README.
+- **Branch protection:** a failing check blocks a merge only once it is required on `main`, a repository setting for the owner. The `security` jobs can be required as they are. `images` runs only on some paths, and GitHub waits forever for a required check that never starts, so requiring it means dropping its path filter first, at the cost of building eight images on every PR.
+- **Not built:** the weekly Nuclei / ZAP baseline against `test`, which needs a `test` host (P0-09).
+
 ## 7. Incident response (short runbook)
 
 1. Detect (alert or report), then open an incident note in the `incidents/` repo folder (template).
