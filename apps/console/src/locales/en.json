@@ -372,5 +372,34 @@
       "tenant_restore": "Company restored",
       "tenant_purge": "Company data purged"
     }
+  },
+  "margin": {
+    "month": "Month (UTC)",
+    "listPriceNote": "Revenue here is our list price: seats × plan price, the KVKK add-on, and overage at the price recorded with each request. It isn't what was invoiced, until billing is connected. Each month counts the seats a company has today.",
+    "revenue": "Revenue",
+    "cost": "Provider cost",
+    "margin": "Margin",
+    "marginPct": "Margin %",
+    "byCompany": "By company",
+    "seatCount": "Seats",
+    "seatRevenue": "Seat revenue",
+    "addons": "Add-ons",
+    "overage": "Overage",
+    "platform": "Platform total",
+    "belowTarget": "under {{pct}}%",
+    "notIncluded": "Not included: hosting (each company's own instance and its share of the shared servers), and fixed platform costs, which aren't defined anywhere yet.",
+    "byModel": "Provider cost by model",
+    "class": "Class",
+    "requests": "Requests",
+    "tokens": "Tokens",
+    "share": "Share of cost",
+    "empty": "No company had seats or usage in this month.",
+    "noModels": "No model was used in this month.",
+    "modelClass": {
+      "standard": "Standard",
+      "premium": "Premium",
+      "tr": "Turkey",
+      "embedding": "Embedding (file search)"
+    }
   }
 }
