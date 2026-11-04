@@ -426,16 +426,10 @@ describe('tenants', () => {
       const host = (name) => `Host(\`${name}.{{ env "KATIP_BASE_DOMAIN" }}\`)`;
       expect(routers).toEqual({
         keycloak: {
-          rule: host('auth'),
+          rule: `${host('auth')} && (PathPrefix(\`/realms/{{ env "KATIP_REALM" }}/\`) || PathPrefix(\`/resources/\`))`,
           entryPoints: ['websecure'],
           tls: expect.anything(),
           service: 'keycloak',
-        },
-        mailpit: {
-          rule: host('mailpit'),
-          entryPoints: ['websecure'],
-          tls: expect.anything(),
-          service: 'mailpit',
         },
         console: {
           rule: host('console'),
@@ -457,7 +451,6 @@ describe('tenants', () => {
         'http://console-api:8081',
         'http://console:8080',
         'http://keycloak:8080',
-        'http://mailpit:8025',
       ]);
     });
 

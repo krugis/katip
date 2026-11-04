@@ -5,7 +5,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import {
   composeEnv,
   embeddingModel,
@@ -978,8 +978,10 @@ export const steps = [
 
       const devRoutes = join(ctx.infra, 'traefik', 'dynamic', 'dev-only.yml');
       const devOnly = devOnlyRoutes(ctx.config.project.base_domain);
-      if (devOnly) writeFileSync(devRoutes, devOnly);
-      else rmSync(devRoutes, { force: true });
+      if (devOnly) {
+        mkdirSync(dirname(devRoutes), { recursive: true });
+        writeFileSync(devRoutes, devOnly);
+      } else rmSync(devRoutes, { force: true });
 
       // dev TLS cert; regenerated when its hostnames change. Node rejects a wildcard
       // on a two-label name (*.localhost), so the names containers use are listed too.
