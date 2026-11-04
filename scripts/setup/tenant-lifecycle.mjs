@@ -142,7 +142,7 @@ async function removeChatFiles(ctx, slug, files) {
 
 /** The Docker and provisioner sides of expireChats. The period is the provisioner's to decide. */
 export const chatRetentionSteps = (ctx) => ({
-  due: async () => (await runTenantAction(ctx, 'chat-retention-due', 'none')).slugs,
+  due: () => runTenantAction(ctx, 'chat-retention-due', 'none'),
   select: (slug) => runTenantAction(ctx, 'chat-retention-select', slug),
   removeFromSearch: (slug, batch) => removeChatsFromSearch(ctx, slug, batch),
   removeFiles: (slug, files) => removeChatFiles(ctx, slug, files),
@@ -258,6 +258,8 @@ export async function daily(ctx) {
     filesKept: 0,
     backlog: [],
     failed: [],
+    waiting: 0,
+    notified: 0,
   });
   const fxDate = await part(
     'exchange rate',
@@ -281,6 +283,8 @@ export async function daily(ctx) {
     expiredChatFiles: chats.files,
     chatFilesKept: chats.filesKept,
     chatBacklog: chats.backlog.length,
+    chatNoticeWaiting: chats.waiting,
+    chatNoticeNotified: chats.notified,
     fxDate,
   });
   return { deleted: forget.done, purged: purge.purged, expired, chats, fxDate, failed };

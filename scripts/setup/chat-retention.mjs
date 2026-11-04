@@ -43,14 +43,16 @@ export function filePatterns(files) {
 }
 
 /**
- * Takes old chats from every running company. One failing doesn't stop the rest, and a re-run
- * finishes it, as nothing is left in Mongo until the search index and files have gone.
+ * Takes old chats from the running companies whose notice period is over. One failing doesn't
+ * stop the rest, and a re-run finishes it, as nothing is left in Mongo until the search index and
+ * files have gone. A notice that hasn't gone out is a failure, so nobody waits without knowing.
  */
 export async function expireChats(io) {
   const total = { conversations: 0, messages: 0, files: 0, filesKept: 0 };
   const backlog = [];
-  const failed = [];
-  for (const slug of await io.due()) {
+  const plan = await io.due();
+  const failed = plan.unsent.map((slug) => `${slug} chats: its notice has not gone out`);
+  for (const slug of plan.slugs) {
     try {
       let more = false;
       for (let i = 0; i < CHAT_BATCHES_PER_RUN; i += 1) {
@@ -72,5 +74,5 @@ export async function expireChats(io) {
       failed.push(`${slug} chats: ${e.message.trim().split('\n').at(-1)}`);
     }
   }
-  return { ...total, backlog, failed };
+  return { ...total, backlog, failed, waiting: plan.waiting, notified: plan.notified };
 }

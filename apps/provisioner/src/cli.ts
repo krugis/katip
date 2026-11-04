@@ -169,7 +169,7 @@ try {
     'deletion-lookup': () => deletionLookup(forgetDeps, slug, requestOf()),
     'deletion-finish': () => finishDeletion(forgetDeps, slug, requestOf()),
     'daily-retention': () => store.enforceRetention(),
-    'chat-retention-due': async () => ({ slugs: await chatRetentionDue(chatDeps) }),
+    'chat-retention-due': () => chatRetentionDue(chatDeps),
     'chat-retention-select': () => selectExpiredChats(chatDeps, slug),
     'chat-retention-finish': () =>
       finishExpiredChats(
@@ -209,6 +209,8 @@ try {
             expiredChatFiles: z.number(),
             chatFilesKept: z.number(),
             chatBacklog: z.number(),
+            chatNoticeWaiting: z.number(),
+            chatNoticeNotified: z.number(),
             fxDate: z.string().nullable(),
           })
           .parse(input),

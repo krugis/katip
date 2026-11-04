@@ -11,6 +11,20 @@ export {
   type GeneratedKey,
 } from './gateway-key.js';
 export {
+  CHAT_NOTICE_DAYS,
+  advanceRetention,
+  changeRetention,
+  deletionStartsAt,
+  noticeEndsAt,
+  noticeLate,
+  retentionDay,
+  retentionRowOf,
+  retentionStateOf,
+  type RetentionNotice,
+  type RetentionRow,
+  type RetentionState,
+} from './chat-retention.js';
+export {
   POLICY_CHANGED_CHANNEL,
   publishPolicyChanged,
   type PolicyPublisher,

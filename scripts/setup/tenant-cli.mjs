@@ -132,7 +132,7 @@ const COMMANDS = {
   async daily(ctx) {
     const { deleted, purged, expired, chats, fxDate, failed } = await daily(ctx);
     console.log(
-      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}. Old chats: ${chats.conversations}, with ${chats.messages} messages and ${chats.files} files (${chats.filesKept} files kept). Companies with more chats waiting: ${chats.backlog.length}. Exchange rate date: ${fxDate ?? 'none'}.`,
+      `${new Date().toISOString()} People deleted: ${deleted}. Purged: ${purged.join(', ') || 'none'}. Expired usage rows: ${expired.usage}, audit entries: ${expired.audit}. Old chats: ${chats.conversations}, with ${chats.messages} messages and ${chats.files} files (${chats.filesKept} files kept). Companies with more chats waiting: ${chats.backlog.length}. Companies waiting on a chat notice: ${chats.waiting}, already told: ${chats.notified}. Exchange rate date: ${fxDate ?? 'none'}.`,
     );
     if (failed.length > 0) throw new Error(`Failed:\n  ${failed.join('\n  ')}`);
   },

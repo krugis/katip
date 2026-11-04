@@ -3,6 +3,7 @@ import { createLogger } from '@katip/shared';
 import { Redis } from 'ioredis';
 import { checkAlerts, smtpMailer } from './alerts.js';
 import { buildApi } from './app.js';
+import { sendChatNotices } from './chat-notice.js';
 import { createVerifier, remoteKeys } from './auth.js';
 import { loadConfig } from './config.js';
 import { HttpIdentityClient } from './identity.js';
@@ -43,10 +44,13 @@ await app.listen({ host: config.HOST, port: config.PORT });
 
 if (config.SMTP_HOST) {
   const mailer = smtpMailer(config.SMTP_HOST, config.SMTP_PORT, config.MAIL_FROM);
-  // One at a time, and several replicas are safe: each alert's row is unique.
+  // One at a time, and several replicas are safe: each alert's or person's row is unique.
   const tick = async () => {
     await checkAlerts(store, mailer, log).catch((e: Error) =>
       log.warn({ err: { name: e.name } }, 'usage alert check failed'),
+    );
+    await sendChatNotices(store, mailer, log).catch((e: Error) =>
+      log.warn({ err: { name: e.name } }, 'chat retention notice check failed'),
     );
     setTimeout(() => void tick(), config.ALERT_CHECK_SECONDS * 1000).unref();
   };

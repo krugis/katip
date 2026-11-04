@@ -12,6 +12,8 @@ export const TENANT_OWNED_TABLES = [
   'users',
   'gateway_keys',
   'tenant_policies',
+  'chat_retention_state',
+  'chat_retention_notice_recipients',
   'policy_history',
   'access_rules',
   'tenant_model_allow',
@@ -59,6 +61,9 @@ GRANT SELECT (tenant_id, user_id), UPDATE (payload) ON requests TO katip_provide
 GRANT SELECT, INSERT ON fx_rates TO katip_provider;
 -- The daily job needs each company's chat period, and nothing else about its policy.
 GRANT SELECT (tenant_id, chat_retention_months) ON tenant_policies TO katip_provider;
+-- It moves a company on when a notice's time is up, and asks for its first notice.
+GRANT SELECT, INSERT ON chat_retention_state TO katip_provider;
+GRANT UPDATE (in_force_months, notice_id, notice_months, notice_requested_at, notified_at, updated_at) ON chat_retention_state TO katip_provider;
 GRANT SELECT (id, tenant_id, user_id, type, status), UPDATE (file_url, status, completed_at) ON privacy_requests TO katip_provider;
 GRANT SELECT, INSERT, UPDATE ON jobs TO katip_provider;
 -- audit_log is append-only for app roles (LLD-05 §2): revoke UPDATE/DELETE from PUBLIC.
@@ -171,6 +176,9 @@ GRANT SELECT (tenant_id, day, user_id, department_id, class, model_id, input_tok
 GRANT EXECUTE ON FUNCTION refresh_usage_daily(uuid, date, date) TO katip_console;
 GRANT EXECUTE ON FUNCTION latest_daily_run() TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
+GRANT SELECT, INSERT ON chat_retention_state TO katip_console;
+GRANT UPDATE (in_force_months, notice_id, notice_months, notice_requested_at, notified_at, updated_at) ON chat_retention_state TO katip_console;
+GRANT SELECT, INSERT ON chat_retention_notice_recipients TO katip_console;
 GRANT SELECT, INSERT ON access_rules TO katip_console;
 GRANT UPDATE (ip_allowlist, countries, session_idle_min, session_max_h, updated_at) ON access_rules TO katip_console;
 GRANT SELECT, INSERT ON policy_history TO katip_console;

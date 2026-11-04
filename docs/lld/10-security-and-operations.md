@@ -111,7 +111,7 @@ Step by step, with the commands that exist today: [docs/runbooks/incident.md](..
 - A data processing agreement (DPA) template for customers, plus a sub-processor list (each LLM provider, Hetzner, Cloudflare, Lago host, e-Fatura provider).
 - Cross-border transfer: EU-region tenants get a disclosure plus the appropriate KVKK transfer mechanism (counsel to confirm). The TR region keeps all data and models in Turkey.
 - Retention defaults:
-  - chats: tenant-defined (default 12 months, 1 to 120), enforced by the daily job (LLD-07 §2c);
+  - chats: set by the company's own admins, never provider staff (default 12 months, 1 to 120), enforced by the daily job, only 30 days after everyone in the company has been emailed, for a first run and for any shortening (LLD-07 §2c);
   - usage events: 24 months;
   - audit log: 5 years;
   - backups: 30 days;
