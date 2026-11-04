@@ -19,6 +19,8 @@ const PINNED_IMAGES = [
   'librechat',
   'rag_api',
   'curl',
+  'lago_api',
+  'lago_postgres',
 ];
 const MODEL_CLASSES = ['standard', 'premium', 'tr', 'embedding'];
 const MODEL_FIELDS = [
@@ -69,7 +71,11 @@ export function validateConfig(c) {
     }
   };
 
-  unknown(c, ['project', 'identity', 'jobs', 'deploy', 'images', 'models', 'tenants'], 'config');
+  unknown(
+    c,
+    ['project', 'identity', 'jobs', 'deploy', 'images', 'billing', 'models', 'tenants'],
+    'config',
+  );
 
   unknown(
     c.project,
@@ -109,6 +115,8 @@ export function validateConfig(c) {
       errors.push('deploy.keep_backups: must be a positive integer');
     }
   }
+
+  for (const e of billingErrors(c.billing)) errors.push(e);
 
   const images = c.images ?? {};
   unknown(images, [...PINNED_IMAGES, 'presidio_analyzer', 'litellm'], 'images');
@@ -213,6 +221,37 @@ export function validateConfig(c) {
   return errors;
 }
 
+/** The billing section (LLD-06, P1-36). Prices are integer micro-USD, as everywhere else. */
+function billingErrors(b) {
+  const errors = [];
+  if (b === undefined || b === null || typeof b !== 'object') {
+    return ['billing: required, for Lago (LLD-06)'];
+  }
+  const allowed = ['overage', 'seats_in_advance', 'grace_minutes', 'lookback_days'];
+  for (const k of Object.keys(b)) {
+    if (!allowed.includes(k)) errors.push(`billing.${k}: unknown setting`);
+  }
+  for (const k of Object.keys(b.overage ?? {})) {
+    if (!['standard', 'premium'].includes(k)) errors.push(`billing.overage.${k}: unknown setting`);
+  }
+  for (const k of ['standard', 'premium']) {
+    const v = b.overage?.[k];
+    if (!Number.isSafeInteger(v) || v < 0) {
+      errors.push(`billing.overage.${k}: must be integer micro-USD per 1M tokens`);
+    }
+  }
+  if (typeof b.seats_in_advance !== 'boolean') {
+    errors.push('billing.seats_in_advance: must be true or false');
+  }
+  if (!Number.isInteger(b.grace_minutes) || b.grace_minutes < 0 || b.grace_minutes > 59) {
+    errors.push('billing.grace_minutes: must be a whole number of minutes, 0 to 59');
+  }
+  if (!Number.isInteger(b.lookback_days) || b.lookback_days < 1 || b.lookback_days > 400) {
+    errors.push('billing.lookback_days: must be a whole number of days, 1 to 400');
+  }
+  return errors;
+}
+
 export function loadConfig(path = CONFIG_PATH) {
   const config = parseYaml(readFileSync(path, 'utf8'));
   const errors = validateConfig(config);
@@ -237,6 +276,11 @@ export function composeEnv(config) {
     KATIP_SPACY_MODEL_SHA256: presidio.spacy_model_sha256,
     KATIP_NER_MODEL: presidio.ner_model,
     KATIP_NER_MODEL_REVISION: presidio.ner_model_revision,
+    KATIP_BILLING_OVERAGE_STANDARD: String(config.billing.overage.standard),
+    KATIP_BILLING_OVERAGE_PREMIUM: String(config.billing.overage.premium),
+    KATIP_BILLING_SEATS_IN_ADVANCE: String(config.billing.seats_in_advance),
+    KATIP_BILLING_GRACE_MINUTES: String(config.billing.grace_minutes),
+    KATIP_BILLING_LOOKBACK_DAYS: String(config.billing.lookback_days),
   };
   for (const name of PINNED_IMAGES) env[`KATIP_IMAGE_${name.toUpperCase()}`] = config.images[name];
   return env;

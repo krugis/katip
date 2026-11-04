@@ -8,6 +8,7 @@ import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { isCliEntry } from './cli-entry.js';
 import {
+  BILLING_ROLE_SQL,
   CONSOLE_ROLE_SQL,
   USAGE_ROLLUP_SQL,
   GATEWAY_ROLE_SQL,
@@ -35,6 +36,7 @@ export async function migrateWithClient(client: postgres.Sql): Promise<string[]>
   await client.unsafe(GATEWAY_ROLE_SQL);
   await client.unsafe(USAGE_ROLLUP_SQL);
   await client.unsafe(CONSOLE_ROLE_SQL);
+  await client.unsafe(BILLING_ROLE_SQL);
   return [...TENANT_OWNED_TABLES];
 }
 

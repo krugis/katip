@@ -510,3 +510,63 @@ export const invoices = pgTable(
   },
   (t) => [index('invoices_tenant_idx').on(t.tenantId)],
 );
+
+// ---- What billing-bridge has sent to Lago (LLD-06 §2, P1-37) ----
+
+/**
+ * One Lago event of overage tokens: the first for an hour and class has seq 0, and usage that
+ * arrives later for the same hour goes as a further event with the next seq, for the difference.
+ * Lago refuses a transaction_id it has seen, so a replay can't bill twice, and the sum of the
+ * rows of an hour is what Lago has for it. A row is written as pending before it's sent.
+ */
+export const billingUsageSent = pgTable(
+  'billing_usage_sent',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    hour: timestamp('hour', { withTimezone: true }).notNull(),
+    class: text('class').notNull(), // standard/premium: the gateway's quota classes
+    seq: integer('seq').notNull(),
+    tokens: bigint('tokens', { mode: 'number' }).notNull(),
+    transactionId: text('transaction_id').notNull().unique(),
+    lagoSubscriptionId: text('lago_subscription_id').notNull(),
+    /** The event's time in Lago, which decides the invoice it goes on. */
+    eventTs: timestamp('event_ts', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('pending'), // pending/sent
+    createdAt: createdAt(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.hour, t.class, t.seq] }),
+    check('billing_usage_sent_class', sql`${t.class} in ('standard', 'premium')`),
+    check('billing_usage_sent_tokens', sql`${t.tokens} > 0`),
+    check('billing_usage_sent_status', sql`${t.status} in ('pending', 'sent')`),
+  ],
+);
+
+/** One change of a company's seats sent to Lago, as the difference from the last one. */
+export const billingSeatSent = pgTable(
+  'billing_seat_sent',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    metric: text('metric').notNull(), // a Lago billable metric code, such as seats_business
+    seq: integer('seq').notNull(),
+    delta: integer('delta').notNull(),
+    unitsAfter: integer('units_after').notNull(),
+    transactionId: text('transaction_id').notNull().unique(),
+    lagoSubscriptionId: text('lago_subscription_id').notNull(),
+    eventTs: timestamp('event_ts', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('pending'),
+    createdAt: createdAt(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.metric, t.seq] }),
+    check('billing_seat_sent_delta', sql`${t.delta} <> 0`),
+    check('billing_seat_sent_units', sql`${t.unitsAfter} >= 0`),
+    check('billing_seat_sent_status', sql`${t.status} in ('pending', 'sent')`),
+  ],
+);

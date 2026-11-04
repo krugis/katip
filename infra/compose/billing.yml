@@ -1,0 +1,208 @@
+# Billing (LLD-06, P1-36/P1-37): Lago, unmodified, and our billing-bridge. One set per platform.
+#
+# Lago keeps its own Postgres and its own Valkey. Its migrations need the pg_partman extension,
+# which our Postgres doesn't have and only a superuser could add, and Sidekiq on our Valkey would
+# need its password, which opens every company's quota counters. Apart, each can be upgraded and
+# backed up on its own.
+#
+# Provider-only: nothing here publishes a port or has a Traefik route, and Lago's network is
+# internal, so it has no way out either. Only billing-bridge is on both that network and the
+# backend one. To look at Lago, use its API through `docker exec` (docs/runbooks/billing.md).
+# Its UI (getlago/front) isn't deployed.
+name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
+
+x-lago-env: &lago-env
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: 'true'
+  DATABASE_URL: postgresql://lago:${LAGO_DB_PASSWORD:?from katip.env}@lago-db:5432/lago
+  REDIS_URL: redis://lago-redis:6379
+  REDIS_PASSWORD: ${LAGO_REDIS_PASSWORD:?from katip.env}
+  LAGO_REDIS_CACHE_URL: redis://lago-redis:6379
+  LAGO_REDIS_CACHE_PASSWORD: ${LAGO_REDIS_PASSWORD:?from katip.env}
+  SECRET_KEY_BASE: ${LAGO_SECRET_KEY_BASE:?from katip.env}
+  LAGO_RSA_PRIVATE_KEY: ${LAGO_RSA_PRIVATE_KEY:?from katip.env}
+  LAGO_ENCRYPTION_PRIMARY_KEY: ${LAGO_ENCRYPTION_PRIMARY_KEY:?from katip.env}
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: ${LAGO_ENCRYPTION_DETERMINISTIC_KEY:?from katip.env}
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: ${LAGO_ENCRYPTION_KEY_DERIVATION_SALT:?from katip.env}
+  LAGO_API_URL: http://lago-api:3000
+  LAGO_FRONT_URL: http://localhost
+  # Nothing leaves: no analytics, no sign-up, no Sidekiq web page, no PDFs (P1-38 makes ours).
+  LAGO_DISABLE_SEGMENT: 'true'
+  LAGO_DISABLE_SIGNUP: 'true'
+  LAGO_SIDEKIQ_WEB: 'false'
+  LAGO_DISABLE_PDF_GENERATION: 'true'
+  LAGO_WEBHOOK_ALLOW_PRIVATE_URLS: 'false'
+  LAGO_USE_AWS_S3: 'false'
+  LAGO_USE_GCS: 'false'
+  # The organization and its API key, made at start, so billing-bridge's key is ours.
+  LAGO_CREATE_ORG: 'true'
+  LAGO_ORG_NAME: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}
+  LAGO_ORG_USER_EMAIL: billing@${KATIP_BASE_DOMAIN:?from katip.config.yaml}
+  LAGO_ORG_USER_PASSWORD: ${LAGO_ADMIN_PASSWORD:?from katip.env}
+  LAGO_ORG_API_KEY: ${LAGO_API_KEY:?from katip.env}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  lago-db:
+    image: ${KATIP_IMAGE_LAGO_POSTGRES:?from katip.config.yaml}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lago
+      POSTGRES_DB: lago
+      POSTGRES_PASSWORD: ${LAGO_DB_PASSWORD:?from katip.env}
+      PGDATA: /data/postgres
+    volumes:
+      - lago-pgdata:/data/postgres
+    networks:
+      - billing
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lago -d lago -h 127.0.0.1']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    logging: *logging
+
+  lago-redis:
+    image: ${KATIP_IMAGE_VALKEY:?from katip.config.yaml}
+    restart: unless-stopped
+    command:
+      [
+        'valkey-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        '${LAGO_REDIS_PASSWORD:?from katip.env}',
+      ]
+    environment:
+      REDISCLI_AUTH: ${LAGO_REDIS_PASSWORD:?from katip.env}
+    volumes:
+      - lago-valkey:/data
+    networks:
+      - billing
+    healthcheck:
+      test: ['CMD-SHELL', 'valkey-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    logging: *logging
+
+  # Migrates first, so the worker and clock, which wait for it, find the schema ready. Lago's own
+  # compose file does this in a separate container that exits, which `up --wait` reports as failed.
+  lago-api:
+    image: ${KATIP_IMAGE_LAGO_API:?from katip.config.yaml}
+    restart: unless-stopped
+    command: ['sh', '-c', './scripts/migrate.sh && exec ./scripts/start.api.sh']
+    environment:
+      <<: *lago-env
+    volumes:
+      - lago-storage:/app/storage
+    networks:
+      - billing
+    depends_on:
+      lago-db:
+        condition: service_healthy
+      lago-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:3000/health || exit 1']
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 600s
+      start_interval: 5s
+    logging: *logging
+
+  lago-worker:
+    image: ${KATIP_IMAGE_LAGO_API:?from katip.config.yaml}
+    restart: unless-stopped
+    command: ['./scripts/start.worker.sh']
+    environment:
+      <<: *lago-env
+    volumes:
+      - lago-storage:/app/storage
+    networks:
+      - billing
+    depends_on:
+      lago-api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://127.0.0.1:8080 || exit 1']
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+      start_interval: 5s
+    logging: *logging
+
+  # Starts billing runs and other timed work in Lago.
+  lago-clock:
+    image: ${KATIP_IMAGE_LAGO_API:?from katip.config.yaml}
+    restart: unless-stopped
+    command: ['./scripts/start.clock.sh']
+    environment:
+      <<: *lago-env
+    networks:
+      - billing
+    depends_on:
+      lago-api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'pgrep -f clockwork >/dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging: *logging
+
+  # Hourly overage and seats from the governance DB to Lago (P1-37). Its setup, attach, run and
+  # reconcile commands run in this container: see apps/billing-bridge/src/cli.ts.
+  billing-bridge:
+    image: ghcr.io/krugis/billing-bridge:dev
+    build:
+      context: ../..
+      dockerfile: apps/billing-bridge/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: '8095'
+      # Not the admin role: katip_billing is bound by row-level security (LLD-05 §1).
+      DATABASE_URL: postgres://katip_billing:${KATIP_BILLING_DB_PASSWORD:?from katip.env}@postgres:5432/governance
+      LAGO_API_URL: http://lago-api:3000
+      LAGO_API_KEY: ${LAGO_API_KEY:?from katip.env}
+      BILLING_OVERAGE_STANDARD_USD_MICRO_PER_M: ${KATIP_BILLING_OVERAGE_STANDARD:?from katip.config.yaml}
+      BILLING_OVERAGE_PREMIUM_USD_MICRO_PER_M: ${KATIP_BILLING_OVERAGE_PREMIUM:?from katip.config.yaml}
+      BILLING_SEATS_IN_ADVANCE: ${KATIP_BILLING_SEATS_IN_ADVANCE:?from katip.config.yaml}
+      BILLING_GRACE_MINUTES: ${KATIP_BILLING_GRACE_MINUTES:?from katip.config.yaml}
+      BILLING_LOOKBACK_DAYS: ${KATIP_BILLING_LOOKBACK_DAYS:?from katip.config.yaml}
+      LOG_LEVEL: info
+    networks:
+      - backend
+      - billing
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lago-api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8095/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *logging
+
+networks:
+  billing:
+    name: ${KATIP_COMPOSE_PROJECT:?from katip.config.yaml}_billing
+    internal: true
+
+volumes:
+  lago-pgdata: {}
+  lago-valkey: {}
+  lago-storage: {}

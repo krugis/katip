@@ -43,6 +43,13 @@
       "when": 1793774159220,
       "tag": "0005_model_self_hosted",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793792537680,
+      "tag": "0006_billing_sent",
+      "breakpoints": true
     }
   ]
 }

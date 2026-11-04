@@ -43,6 +43,16 @@ export const AUTO_KEYS = new Set([
   'KATIP_PROVIDER_DB_PASSWORD',
   'KATIP_PROVISIONER_KC_SECRET',
   'KATIP_IDENTITY_TOKEN',
+  'KATIP_BILLING_DB_PASSWORD',
+  'LAGO_API_KEY',
+  'LAGO_DB_PASSWORD',
+  'LAGO_REDIS_PASSWORD',
+  'LAGO_ADMIN_PASSWORD',
+  'LAGO_SECRET_KEY_BASE',
+  'LAGO_RSA_PRIVATE_KEY',
+  'LAGO_ENCRYPTION_PRIMARY_KEY',
+  'LAGO_ENCRYPTION_DETERMINISTIC_KEY',
+  'LAGO_ENCRYPTION_KEY_DERIVATION_SALT',
 ]);
 
 /** Derived (non-secret) values computed from generated secrets. */
@@ -77,6 +87,8 @@ export const platformComposeArgs = () => [
   'infra/compose/platform.yml',
   '-f',
   'infra/compose/dev.yml',
+  '-f',
+  'infra/compose/billing.yml',
   '-f',
   RENDERED_COMPOSE,
 ];
@@ -852,6 +864,7 @@ function runDbSeed(ctx, stage, ...args) {
     KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
     KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
     KATIP_PROVIDER_DB_PASSWORD: ctx.env.KATIP_PROVIDER_DB_PASSWORD,
+    KATIP_BILLING_DB_PASSWORD: ctx.env.KATIP_BILLING_DB_PASSWORD,
     KATIP_SEED: JSON.stringify(seedInput(ctx.config, ctx.env)),
   };
   return dockerRun(
@@ -873,6 +886,24 @@ function runDbSeed(ctx, stage, ...args) {
     env,
   );
 }
+
+/**
+ * Runs a billing-bridge command in its container, which is on both the backend network and
+ * Lago's. Returns what it printed after `billing-result=`.
+ */
+export async function billingCli(ctx, args) {
+  const { out } = await platformCompose(
+    ['exec', '-T', 'billing-bridge', 'node', 'dist/cli.js', ...args],
+    ctx,
+  );
+  const line = out.split('\n').find((l) => l.startsWith('billing-result='));
+  if (!line) throw new Error(`billing-bridge ${args[0]} reported no result: ${out.slice(0, 300)}`);
+  return JSON.parse(line.slice('billing-result='.length));
+}
+
+/** The companies Lago gets as test customers: dev only, with made-up billing details. */
+export const devBillingTenants = (config) =>
+  config.project.base_domain === 'localhost' ? config.tenants : [];
 
 /** LibreChat rejects these when encrypting, and katip.env values are never overwritten. */
 function checkCredentialFormats(ctx) {
@@ -1023,7 +1054,7 @@ export const steps = [
   {
     id: 'build',
     title:
-      'Build images (litellm + presidio checksum-verified, gateway, console, console-api, provisioner, mock)',
+      'Build images (litellm + presidio checksum-verified, gateway, console, console-api, provisioner, mock, billing-bridge)',
     async run(ctx) {
       const { version, sha256 } = ctx.config.images.litellm;
       ctx.tui?.setDetail?.(`litellm ${version} (sha256 verified)`);
@@ -1115,6 +1146,21 @@ export const steps = [
         {},
       );
       ctx.log('built ghcr.io/krugis/mock-llm:dev');
+
+      ctx.tui?.setDetail?.('billing-bridge');
+      await tryRun(
+        'docker',
+        [
+          'build',
+          '-t',
+          'ghcr.io/krugis/billing-bridge:dev',
+          '-f',
+          'apps/billing-bridge/Dockerfile',
+          '.',
+        ],
+        {},
+      );
+      ctx.log('built ghcr.io/krugis/billing-bridge:dev');
     },
   },
   {
@@ -1181,7 +1227,7 @@ export const steps = [
   {
     id: 'aiplane',
     title:
-      'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api, console) + gateway smoke',
+      'Services (mock-llm, litellm, presidio, policy-gateway, identity, console-api, console, Lago, billing-bridge) + gateway smoke',
     async run(ctx) {
       await applyLocalLlmRelay(ctx);
       ctx.tui?.setDetail?.('docker compose up --wait');
@@ -1221,6 +1267,43 @@ export const steps = [
     async rollback(ctx) {
       await removeLocalLlmRelay(ctx);
       await platformCompose(['down', '-v', '--remove-orphans'], ctx);
+    },
+  },
+  {
+    id: 'billing',
+    title: 'Billing (Lago plans and metered charges, billing-bridge run, test customers in dev)',
+    async run(ctx) {
+      ctx.tui?.setDetail?.('Lago and billing-bridge');
+      await platformCompose(
+        ['up', '-d', '--wait', 'lago-api', 'lago-worker', 'lago-clock', 'billing-bridge'],
+        ctx,
+      );
+      const catalog = await billingCli(ctx, ['setup']);
+      ctx.log(
+        catalog.created.length > 0
+          ? `Lago: created ${catalog.created.join(', ')}`
+          : 'Lago: metrics and plan present, as configured',
+      );
+      for (const t of devBillingTenants(ctx.config)) {
+        const r = await billingCli(ctx, [
+          'attach',
+          '--slug',
+          t.slug,
+          '--email',
+          `billing@${t.slug}.${ctx.config.project.base_domain}`,
+        ]);
+        ctx.log(`${t.slug}: Lago test customer, subscription ${r.subscription}`);
+      }
+      const run = await billingCli(ctx, ['run']);
+      if (run === null) {
+        ctx.log('billing run skipped: the service is in the middle of one');
+      } else if (run.errors.length > 0) {
+        throw new Error(
+          `billing run failed: ${run.errors.map((e) => `${e.slug}: ${e.error}`).join('; ')}`,
+        );
+      } else {
+        ctx.log(`billing run ok for ${run.tenants.map((x) => x.slug).join(', ') || 'no company'}`);
+      }
     },
   },
   {
@@ -1317,7 +1400,8 @@ export const steps = [
   },
   {
     id: 'isolation',
-    title: 'Tenant isolation checks (network, Mongo, search, files, gateway, Postgres, Valkey)',
+    title:
+      'Tenant isolation checks (network, Mongo, search, files, gateway, Postgres, Valkey, Lago)',
     async run(ctx) {
       await checkIsolation(ctx, {
         secret: (t, name) => tenantSecret(ctx, t, name),
@@ -1361,7 +1445,7 @@ export const steps = [
 ];
 
 /** Steps that only hold while the containers run; `dev:down` makes them pending again. */
-export const SERVICE_STEPS = ['platform', 'aiplane', 'tenant', 'smoke', 'isolation'];
+export const SERVICE_STEPS = ['platform', 'aiplane', 'billing', 'tenant', 'smoke', 'isolation'];
 
 /** Steps a config change doesn't affect, so they stay done when re-applying. */
 export const KEEP_ON_CONFIG_CHANGE = new Set(['preflight']);

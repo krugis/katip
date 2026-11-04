@@ -26,6 +26,8 @@ export const TENANT_OWNED_TABLES = [
   'jobs',
   'privacy_requests',
   'invoices',
+  'billing_usage_sent',
+  'billing_seat_sent',
 ] as const;
 
 /**
@@ -98,6 +100,27 @@ GRANT SELECT ON ${GATEWAY_READS.join(', ')} TO katip_gateway;
 GRANT INSERT ON usage_events TO katip_gateway;
 DROP POLICY IF EXISTS gateway_key_lookup ON gateway_keys;
 CREATE POLICY gateway_key_lookup ON gateway_keys FOR SELECT TO katip_gateway USING (true);`;
+
+/**
+ * billing-bridge's role (P1-37): bound by RLS, so it works one company at a time, in that
+ * company's context. It reads seats and overage token counts, never cost or anything about a
+ * request, and it records what it sent. It can't delete, so what was billed stays on record.
+ */
+export const BILLING_ROLE_SQL = `DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'katip_billing') THEN
+    CREATE ROLE katip_billing LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO katip_billing;
+GRANT SELECT (id, slug, name, status, kvkk_addon) ON tenants TO katip_billing;
+GRANT SELECT ON plans TO katip_billing;
+GRANT SELECT (tenant_id, plan_code, quantity) ON seats TO katip_billing;
+GRANT SELECT (id, tenant_id, billing_cycle, status, lago_subscription_id) ON subscriptions TO katip_billing;
+GRANT UPDATE (lago_subscription_id, updated_at) ON subscriptions TO katip_billing;
+GRANT SELECT (tenant_id, ts, class, input_tokens, output_tokens, overage) ON usage_events TO katip_billing;
+GRANT SELECT, INSERT ON billing_usage_sent, billing_seat_sent TO katip_billing;
+GRANT UPDATE (status, sent_at) ON billing_usage_sent, billing_seat_sent TO katip_billing;`;
 
 /** Tables the console API may read so far. Each new endpoint adds only what it needs. */
 const CONSOLE_READS = [
