@@ -852,7 +852,7 @@ function runDbSeed(ctx, stage, ...args) {
     KATIP_GATEWAY_DB_PASSWORD: ctx.env.KATIP_GATEWAY_DB_PASSWORD,
     KATIP_CONSOLE_DB_PASSWORD: ctx.env.KATIP_CONSOLE_DB_PASSWORD,
     KATIP_PROVIDER_DB_PASSWORD: ctx.env.KATIP_PROVIDER_DB_PASSWORD,
-    KATIP_SEED: JSON.stringify(seedInput(ctx.config)),
+    KATIP_SEED: JSON.stringify(seedInput(ctx.config, ctx.env)),
   };
   return dockerRun(
     [

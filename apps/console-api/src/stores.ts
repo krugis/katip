@@ -3,12 +3,13 @@
 // binds, so tenant data is only reachable inside withTenant (LLD-05 §1).
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
-import { DEFAULT_POLICY } from '@katip/policy-engine';
-import { Errors } from '@katip/shared';
+import { DEFAULT_POLICY, embeddingByResidency } from '@katip/policy-engine';
+import { Errors, NO_PERSON } from '@katip/shared';
 import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { OverrideDocument, PolicyDocument } from './policy.js';
+import { FILE_SEARCH_KEY, FILE_SEARCH_LABEL } from './usage.js';
 
 export interface TenantRecord {
   id: string;
@@ -99,6 +100,8 @@ export interface PolicyView {
   version: number;
   kvkkAddon: boolean;
   catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
+  /** Whether uploads can work under each data location rule. */
+  fileSearch: Record<PolicyDocument['residency'], boolean>;
 }
 
 export interface AccessRulesInput {
@@ -857,9 +860,13 @@ export class DbConsoleStore implements ConsoleStore {
         sql`select refresh_usage_daily(${tenantId}::uuid, ${from}::date, ${to}::date)`,
       );
       const d = schema.usageDaily;
+      // Inlined, not parameters: the same expression has to match in the select and group by.
+      const fileSearch = sql.raw(`'${FILE_SEARCH_KEY}'`);
+      const noPerson = sql.raw(`'${NO_PERSON}'::uuid`);
       const key = {
-        user: sql`${d.userId}::text`,
-        dept: sql`${d.departmentId}::text`,
+        // File search has no person and no department (LLD-03 §1.3), and no row to join.
+        user: sql`case when ${d.userId} = ${noPerson} then ${fileSearch} else ${d.userId}::text end`,
+        dept: sql`case when ${d.userId} = ${noPerson} then ${fileSearch} else ${d.departmentId}::text end`,
         model: sql`${d.modelId}`,
         day: sql`to_char(${d.day}, 'YYYY-MM-DD')`,
       }[group];
@@ -881,8 +888,10 @@ export class DbConsoleStore implements ConsoleStore {
         )
         .groupBy(key)) as { key: string | null; premium: string; standard: string }[];
 
-      const ids = rows.map((r) => r.key).filter((k): k is string => k !== null);
-      const labels = new Map<string, string>();
+      const ids = rows
+        .map((r) => r.key)
+        .filter((k): k is string => k !== null && k !== FILE_SEARCH_KEY);
+      const labels = new Map<string, string>([[FILE_SEARCH_KEY, FILE_SEARCH_LABEL.en]]);
       if (group === 'user' && ids.length > 0) {
         const people = await tx
           .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
@@ -1591,6 +1600,15 @@ export class DbConsoleStore implements ConsoleStore {
       .from(schema.modelCatalog)
       .where(and(eq(schema.modelCatalog.enabled, true), ne(schema.modelCatalog.class, 'embedding')))
       .orderBy(asc(schema.modelCatalog.displayName));
+    const embedding = await tx
+      .select({
+        class: schema.modelCatalog.class,
+        enabled: schema.modelCatalog.enabled,
+        dataPolicy: schema.modelCatalog.dataPolicy,
+        region: schema.modelCatalog.region,
+      })
+      .from(schema.modelCatalog)
+      .where(eq(schema.modelCatalog.class, 'embedding'));
     return {
       policy: {
         ...DEFAULT_POLICY,
@@ -1601,6 +1619,7 @@ export class DbConsoleStore implements ConsoleStore {
       kvkkAddon: tenant.kvkkAddon,
       // The Turkish model comes with the KVKK add-on.
       catalog: tenant.kvkkAddon ? catalog : catalog.filter((m) => m.class !== 'tr'),
+      fileSearch: embeddingByResidency(embedding as Parameters<typeof embeddingByResidency>[0]),
     };
   }
 

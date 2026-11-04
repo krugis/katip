@@ -281,7 +281,9 @@ export async function seed(
   }
 
   // Idempotent upserts; versioned rows (plans) are never updated in place.
-  for (const m of models) {
+  for (const model of models) {
+    // Always written, so a marker taken out of the config doesn't stay behind in the database.
+    const m = { ...model, selfHosted: model.selfHosted === true };
     await db
       .insert(schema.modelCatalog)
       .values(m)

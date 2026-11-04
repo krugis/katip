@@ -92,6 +92,13 @@ images:
 # are. Prices are micro-USD per 1M tokens. Model ids marked (verify) must be
 # checked against the provider before pilot. Router rules live in packages/db
 # (seed); the seed fails if a rule names a model missing here.
+#
+# self_hosted: true says the model runs on the operator's own servers, so nothing sent to it
+# leaves them. An embedding model marked so gets personal data unmasked (LLD-03 §5); chat
+# masking doesn't change. Leave it out if unsure: absent means outside, so masked. It needs
+# litellm_params.api_base and the model's key, or the marker doesn't reach the catalog. No
+# model here is marked: emb-bge-m3 goes to DeepInfra, and tr-gpt-oss-120b is a chat model
+# whose host (vllm-tr) isn't described anywhere as the operator's own.
 # ------------------------------------------------------------------------------
 models:
   - alias: std-deepseek-v4-flash

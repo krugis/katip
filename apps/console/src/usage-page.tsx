@@ -22,6 +22,9 @@ interface UsageReport {
   rows: UsageRow[];
 }
 
+/** The row for tokens with no person behind them, from the console API. */
+const FILE_SEARCH_KEY = 'file-search';
+
 const today = () => new Date().toISOString().slice(0, 10);
 const FIELD = 'mt-1 block rounded-md border border-line bg-surface px-2 py-1.5 text-sm';
 
@@ -70,12 +73,17 @@ export function UsageReport({
   const number = new Intl.NumberFormat(i18n.language);
   const rows = report.data?.rows ?? [];
   const sum = (pick: (r: UsageRow) => number) => rows.reduce((total, r) => total + pick(r), 0);
-  const labelOf = (r: UsageRow) => (r.key === null ? t('usage.none') : r.label);
+  const labelOf = (r: UsageRow) =>
+    r.key === null ? t('usage.none') : r.key === FILE_SEARCH_KEY ? t('usage.fileSearch') : r.label;
 
   const download = async () => {
     setExportFailed(false);
     try {
-      saveFile(`usage-${from}-${to}.csv`, await apiFetchText(`${path}/export?${query}`, getToken));
+      const lang = i18n.language.startsWith('en') ? 'en' : 'tr';
+      saveFile(
+        `usage-${from}-${to}.csv`,
+        await apiFetchText(`${path}/export?${query}&lang=${lang}`, getToken),
+      );
     } catch {
       setExportFailed(true);
     }

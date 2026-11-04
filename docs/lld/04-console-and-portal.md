@@ -29,7 +29,7 @@ One React app (`apps/console`) serves four role-based areas. Its backend is `app
 | Overview | Seats used, quota consumption (std/premium/research) vs pooled limit, month-to-date cost, alerts |
 | Users | Invite (email), bulk CSV import, assign tier (Starter/Business/Studio seat), department, role; disable; reset MFA |
 | Departments | Create, assign managers, department budget (USD/month) and policy overrides |
-| Models and policies | Allowed aliases and models; behaviour at 100% (`block`/`downgrade`/`overage`); PII mode and per-entity overrides; data residency (KVKK add-on) |
+| Models and policies | Allowed aliases and models; behaviour at 100% (`block`/`downgrade`/`overage`); PII mode and per-entity overrides; data residency (KVKK add-on), with a warning when a rule leaves file search with no embedding model |
 | Access rules | IP allowlist, allowed countries, MFA required, session idle/max, (phase 2) trusted devices |
 | Identity | Connect Entra ID or Google Workspace (guided form → Keycloak IdP link); domain verification (DNS TXT) |
 | Usage and reports | By user, department, model, day; CSV export; monthly PDF summary |

@@ -54,6 +54,14 @@ export const Errors = {
   userDisabled: () => new AppError(403, 'user_disabled', 'This user account is disabled'),
   policyDenied: (reason: string) =>
     new AppError(403, 'policy_denied', `Blocked by company policy: ${reason}`, { reason }),
+  /** Both languages: this has no user to take a language from, and its reader may be an admin. */
+  embeddingUnavailable: (residency: string) =>
+    new AppError(
+      403,
+      'embedding_unavailable',
+      `Dosya arama bu şirkette kullanılamıyor: veri konumu kuralına (${residency}) uyan onaylı bir embedding modeli yok, bu yüzden metin hiçbir sağlayıcıya gönderilmedi. Dosyayı sohbete metin olarak ekleyebilir ya da şirket yöneticinizden konsolda Modeller ve politikalar ekranındaki kuralı değiştirmesini isteyebilirsiniz. / File search isn't available for this company: no approved embedding model fits its data location rule (${residency}), so the text went to no provider. You can attach the file to a chat as text, or ask your company admin to change the rule under Models and policies in the console.`,
+      { residency },
+    ),
   quotaExceeded: (cls: string) =>
     new AppError(
       429,

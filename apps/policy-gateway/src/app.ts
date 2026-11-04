@@ -9,6 +9,7 @@ import { ToolCallLog } from './tool-calls.js';
 import {
   PlaceholderMap,
   conversationTokens,
+  embeddingPiiPolicy,
   StreamingUnmasker,
   maskChatRequest,
   maskEmbeddingRequest,
@@ -20,11 +21,13 @@ import {
 import {
   DEFAULT_CATALOG,
   DEFAULT_RULES,
+  NoEmbeddingModelError,
   RouteDeniedError,
   chooseEmbeddingRoute,
   chooseRoute,
   costMicroUsd,
   estimateTokens,
+  reachesOnlySelfHosted,
   visibleAliases,
   type Alias,
   type ModelEntry,
@@ -527,6 +530,18 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
         try {
           return chooseEmbeddingRoute(body.model, await getCatalog(), ctx.tenant.policy);
         } catch (e) {
+          if (e instanceof NoEmbeddingModelError) {
+            // An operator's signal: LibreChat shows people a generic error (LLD-03 §1.3).
+            req.log.warn(
+              {
+                event: 'embedding_no_allowed_model',
+                tenant_id: ctx.tenant.id,
+                residency: e.residency,
+              },
+              'no embedding model this company may use',
+            );
+            throw Errors.embeddingUnavailable(e.residency);
+          }
           if (e instanceof RouteDeniedError) throw Errors.policyDenied(e.reason);
           throw e;
         }
@@ -548,11 +563,15 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       // Numbered per request, whatever the conversation: nothing comes back to unmask, and
       // the provider shouldn't be able to link one person across a company's documents.
       const map = new PlaceholderMap();
+      // Real text only where nothing leaves the operator's servers (LLD-03 §5).
+      const selfHosted = reachesOnlySelfHosted(routed);
+      const piiPolicy = embeddingPiiPolicy(ctx.tenant.pii, selfHosted);
       let outbound: Record<string, unknown>;
       let piiDegraded = false;
       try {
         const r = await withSpan(tracer, 'pii', async (span) => {
-          const masked = await maskEmbeddingRequest(body, ctx.tenant.pii, map, deps.piiDetector);
+          const masked = await maskEmbeddingRequest(body, piiPolicy, map, deps.piiDetector);
+          span.setAttribute('pii.self_hosted', selfHosted);
           span.setAttribute(
             'pii.entities_count',
             Object.values(map.counts() as Record<string, number>).reduce((a, b) => a + b, 0),
@@ -628,6 +647,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
           model: model.id,
           inputs: inputs.length,
           inputTokens,
+          selfHosted,
           pii: map.counts(),
         },
         'embeddings completed',

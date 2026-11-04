@@ -37,7 +37,7 @@ export interface MaskResult {
  */
 export type ExtraDetector = (text: string) => Promise<Span[]>;
 
-const ALL_TYPES: EntityType[] = [
+export const ALL_TYPES: EntityType[] = [
   'TR_TCKN',
   'TR_VKN',
   'TR_IBAN',
@@ -49,6 +49,21 @@ const ALL_TYPES: EntityType[] = [
 
 function effectiveMode(policy: PiiPolicy, type: EntityType): PiiMode {
   return policy.entities?.[type] ?? policy.mode;
+}
+
+/**
+ * The policy for text sent to embed. A kind set to `block` is refused wherever the text goes,
+ * as that's the company's rule. Otherwise the destination decides, not the setting: an outside
+ * model gets every kind masked, even one set to `off`, and a self-hosted one gets the real
+ * text, with no detector run for it. Only embeddings use this; chat follows the policy as set.
+ */
+export function embeddingPiiPolicy(policy: PiiPolicy, selfHosted: boolean): PiiPolicy {
+  const rest: PiiMode = selfHosted ? 'off' : 'mask';
+  const entities: Partial<Record<EntityType, PiiMode>> = {};
+  for (const type of ALL_TYPES) {
+    entities[type] = effectiveMode(policy, type) === 'block' ? 'block' : rest;
+  }
+  return { ...policy, mode: rest, entities };
 }
 
 export interface Masker {

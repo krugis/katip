@@ -23,6 +23,7 @@ interface PolicyResponse {
   version: number;
   kvkkAddon: boolean;
   catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
+  fileSearch?: Record<Policy['residency'], boolean>;
 }
 
 const SELECT =
@@ -170,7 +171,7 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
       </p>
     );
   }
-  const { kvkkAddon, catalog, version } = loaded.data;
+  const { kvkkAddon, catalog, version, fileSearch } = loaded.data;
   const change = (next: Partial<Policy>) => {
     setSaved(false);
     setDraft({ ...draft, ...next });
@@ -368,6 +369,11 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
             ))}
           </select>
           {!kvkkAddon && <p className={HELP}>{t('policy.residencyAddon')}</p>}
+          {fileSearch?.[draft.residency] === false && (
+            <p className="mt-2 text-sm text-danger" role="alert" data-testid="residency-no-search">
+              {t('policy.residencyNoFileSearch')}
+            </p>
+          )}
         </section>
 
         <div className="flex items-center gap-3">

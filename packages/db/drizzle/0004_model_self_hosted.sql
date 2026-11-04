@@ -1,0 +1,1 @@
+ALTER TABLE "model_catalog" ADD COLUMN "self_hosted" boolean DEFAULT false NOT NULL;

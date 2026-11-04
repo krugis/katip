@@ -221,6 +221,7 @@
       "TR_ONLY": "Turkey only"
     },
     "residencyAddon": "Choosing a data location comes with the KVKK add-on.",
+    "residencyNoFileSearch": "File search can't work under this rule: no approved embedding model fits it, so uploads for search will fail, and people will see only a general error. Chat isn't affected, and files can still be attached to a chat as text.",
     "save": "Save",
     "saved": "Saved. It takes effect within 30 seconds.",
     "entities": "By kind of data",
@@ -268,6 +269,7 @@
     "export": "Download CSV",
     "total": "Total",
     "none": "No department",
+    "fileSearch": "File search",
     "empty": "No usage in this range.",
     "badRange": "This date range can’t be used. Choose up to 400 days, with the start before the end."
   },

@@ -29,6 +29,13 @@
       "when": 1793721967741,
       "tag": "0003_chat_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793773393036,
+      "tag": "0004_model_self_hosted",
+      "breakpoints": true
     }
   ]
 }

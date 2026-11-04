@@ -47,6 +47,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('the data location rule', () => {
+  const showWith = async (residency: string) => {
+    vi.spyOn(api, 'apiFetch').mockImplementation((async (path: string) =>
+      path.endsWith('/chat-retention')
+        ? { months: 12 }
+        : {
+            ...policy,
+            kvkkAddon: true,
+            policy: { ...policy.policy, residency },
+            fileSearch: { ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false },
+          }) as never);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TenantPolicies me={me} getToken={async () => 'token'} />
+      </QueryClientProvider>,
+    );
+    return (await screen.findByTestId('residency')) as HTMLSelectElement;
+  };
+
+  it('says when file search cannot work under it, as it is chosen', async () => {
+    const select = await showWith('ANY_APPROVED');
+    expect(screen.queryByTestId('residency-no-search')).toBeNull();
+    fireEvent.change(select, { target: { value: 'TR_ONLY' } });
+    expect((await screen.findByTestId('residency-no-search')).textContent).toContain(
+      'dosya arama çalışmaz',
+    );
+  });
+
+  it('says so for a rule already saved', async () => {
+    await showWith('EU_ONLY');
+    await screen.findByTestId('residency-no-search');
+  });
+});
+
 describe('the chat retention setting', () => {
   it('shows the period, and says plainly that deleting is permanent', async () => {
     const input = await show();

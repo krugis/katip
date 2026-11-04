@@ -23,8 +23,8 @@ So a token only ever opens the one tenant's files. Inside a tenant, LibreChat de
 
 1. LibreChat posts it to `/embed` with a 5-minute token signed with its `JWT_SECRET`.
 2. The RAG API cuts it into chunks of 1,500 characters and sends them to the gateway, 32 at a time, as text, on a service key (LLD-03 §1.3).
-3. The gateway masks them per the company's policy, and sends them to the provider.
-4. Postgres stores the **original** chunk text with the vector of the masked text.
+3. The gateway applies the company's policy, with the strictest rule of any department on top, because it can't know who uploaded (LLD-03 §1.3). An outside model gets the text masked. A model marked self-hosted gets the real text (LLD-03 §5). Personal data under `block` refuses the upload on either.
+4. Postgres stores the **original** chunk text with the vector of what was sent.
 5. A question arrives as the model's `file_search` tool call, already masked, and is embedded the same way. The chunks found go back to the model through chat masking.
 
 **Deleting.** LibreChat deletes a file's chunks when someone deletes the file. One person's deletion removes their chunks and those of their files (LLD-07 §2b). A purge removes the containers and the volume.
@@ -35,6 +35,8 @@ So a token only ever opens the one tenant's files. Inside a tenant, LibreChat de
 - It keeps the last 128 queries' vectors in memory, so a repeated question isn't charged again.
 - `/health` answers 200 even with its database down, so the health check reads the reply.
 - Changing the embedding model means embedding every file again: old and new vectors can't be compared.
+- A refused upload shows a person only "Error processing file", whatever the reason (LLD-03 §1.3). This can't be changed without LibreChat core.
+- A `TR_ONLY` or `EU_ONLY` company has no file search today: the catalog's one embedding model is `global`, and residency isn't relaxed for it. It needs a regional model in the catalog, and the RAG API's fixed model set per tenant.
 - `images.postgres` is also the image of these databases, so a new Postgres major version needs an upgrade of each one. They hold only what can be embedded again, but nothing does that yet.
 
 ## 2. Knowledge service

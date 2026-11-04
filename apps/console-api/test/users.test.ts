@@ -803,6 +803,8 @@ describe('the policy', () => {
       policy: { atQuotaLimit: 'downgrade', residency: 'ANY_APPROVED', pii: { mode: 'mask' } },
     });
     expect(body.catalog.length).toBeGreaterThan(0);
+    // The seeded embedding model is global, so a regional rule leaves uploads with no model.
+    expect(body.fileSearch).toEqual({ ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false });
   });
 
   it('never shows prices, which are our cost', async () => {
@@ -1167,6 +1169,89 @@ describe('usage reports', () => {
     expect((await report(b, 'groupBy=user')).statusCode).toBe(404);
     expect((await send('GET', `/api/v1/tenants/${b}/usage/export`)).statusCode).toBe(404);
     expect((await report(a, 'groupBy=user')).json().rows).toEqual([]);
+  });
+
+  describe('tokens with no person behind them: file search', () => {
+    const NO_PERSON = '00000000-0000-0000-0000-000000000000';
+
+    it('have a row by person, with no users row and no raw id, sorted like anyone', async () => {
+      await add(a, ownerId, 'standard', 10, 0);
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      const res = await report(a, 'groupBy=user');
+      expect(res.statusCode).toBe(200);
+      const rows = res.json().rows;
+      expect(rows[0]).toEqual({
+        key: 'file-search',
+        label: 'File search',
+        standard: 500,
+        premium: 0,
+        total: 500,
+      });
+      expect(rows[1].key).toBe(ownerId);
+      expect(res.body).not.toContain(NO_PERSON);
+    });
+
+    it('are the only row if nobody else has used anything', async () => {
+      await add(a, NO_PERSON, 'embedding', 5, 0);
+      expect(
+        (await report(a, 'groupBy=user')).json().rows.map((r: { key: string }) => r.key),
+      ).toEqual(['file-search']);
+    });
+
+    it('have their own row by department, apart from people in no department', async () => {
+      const dept = (
+        await admin`insert into departments (tenant_id, name) values (${a}, 'Muhasebe') returning id`
+      )[0]!['id'] as string;
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(a, ownerId, 'standard', 40, 0);
+      await add(a, await addUser(a, 'muhasebe@a.test'), 'standard', 7, 0, 'now()', dept);
+      const rows = (await report(a, 'groupBy=dept')).json().rows;
+      expect(rows.map((r: { key: string | null; total: number }) => [r.key, r.total])).toEqual([
+        ['file-search', 500],
+        [null, 40],
+        [dept, 7],
+      ]);
+      expect(rows[2].label).toBe('Muhasebe');
+    });
+
+    it('count in the totals by model and by day', async () => {
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(a, ownerId, 'standard', 40, 0);
+      for (const group of ['model', 'day']) {
+        const rows = (await report(a, `groupBy=${group}`)).json().rows;
+        expect(rows.reduce((n: number, r: { total: number }) => n + r.total, 0)).toBe(540);
+        expect(JSON.stringify(rows)).not.toContain('file-search');
+      }
+    });
+
+    it('stay out of a department report, and out of another company', async () => {
+      const dept = (
+        await admin`insert into departments (tenant_id, name) values (${a}, 'Hukuk') returning id`
+      )[0]!['id'] as string;
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(b, NO_PERSON, 'embedding', 900, 0);
+      const inDept = await send(
+        'GET',
+        `/api/v1/tenants/${a}/departments/${dept}/usage?groupBy=user`,
+      );
+      expect(inDept.statusCode).toBe(200);
+      expect(inDept.json().rows).toEqual([]);
+      const totals = (await report(a, 'groupBy=user')).json().rows;
+      expect(totals).toHaveLength(1);
+      expect(totals[0].total).toBe(500);
+    });
+
+    it('are named in the CSV, in the language asked for', async () => {
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      const csv = (q: string) => send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=user${q}`);
+      expect((await csv('&lang=tr')).body).toContain('Dosya arama;500;0;500');
+      expect((await csv('&lang=en')).body).toContain('File search;500;0;500');
+      expect((await csv('')).body).toContain('File search;500;0;500');
+      expect((await csv('')).body).not.toContain(NO_PERSON);
+      const byDept = await send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=dept&lang=tr`);
+      expect(byDept.body).toContain('Dosya arama;500;0;500');
+      expect((await csv('&lang=de')).statusCode).toBe(400);
+    });
   });
 
   describe('as a CSV', () => {
