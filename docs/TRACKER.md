@@ -114,8 +114,8 @@ One script, one config file and one env file set up every building block. Each b
 | ID | Task | LLD | Prio | Status | Depends | Done when | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P1-35 | Docker socket proxy for provisioner (compose ops only) | 01, 10 | P0 | done | P1-22 | Provisioner can't run arbitrary containers | The provisioner never had the socket: its Docker work runs on the host. Traefik had it, and now has no Docker access at all, with routes from a file and `console-api`. `isolation.mjs` checks this |
-| P1-36 | Lago deploy; plans, add-ons, metered charges configured | 06 | P0 | todo | P0-03 | Test customer + subscription created | |
-| P1-37 | `billing-bridge`: hourly usage → Lago events (idempotent); seat sync | 06 | P0 | todo | P1-36, P1-14 | Replay doesn't double-bill | |
+| P1-36 | Lago deploy; plans, add-ons, metered charges configured | 06 | P0 | review | P0-03 | Test customer + subscription created | Self-hosted Lago through `pnpm dev:up`, provider-only on its own internal network, about 1.4 GiB. The catalog holds the monthly seat and token prices; the annual plan, research runs and the dedicated instance wait for the owner's prices (LLD-06 §8). No taxes, numbering or payment terms set |
+| P1-37 | `billing-bridge`: hourly usage → Lago events (idempotent); seat sync | 06 | P0 | review | P1-36, P1-14 | Replay doesn't double-bill | `apps/billing-bridge`, hourly: overage by class and hour, seat changes as differences, idempotent ids, late usage as an extra event; `reconcile` for the current month. `pnpm test:lago` passed against real Lago |
 | P1-38 | `EInvoiceProvider` interface + manual mode (+ provider adapter when decided) | 06 | P1 | blocked | e-Fatura decision | Draft PDF in TRY with FX rate | Manual mode can ship first |
 | P1-39 | Payment adapter (iyzico / PayTR) + dunning | 06 | P1 | blocked | payment decision | Recurring charge in sandbox | |
 | P1-40 | TCMB FX rate daily job (`fx_rates`) | 06 | P1 | review | P1-17 | Rate stored daily; alert if missing | In `pnpm tenant:daily`, so it depends on that being scheduled (P1-65). A failure shows on the provider console; a phone alert needs P1-43. Which rate fits which invoice date is for the accountant |
@@ -125,7 +125,7 @@ One script, one config file and one env file set up every building block. Each b
 | P1-44 | Edge hardening: Cloudflare WAF, rate limits, origin certs, security headers | 10 | P0 | todo | P0-09 | External scan: 443 only; headers A-grade | |
 | P1-45 | Pilot load test: 200 simulated users; measure RAM per tenant instance | 01, 07 | P0 | todo | P1-34 | Report updates sizing + ADR-002 cost | |
 | P1-46 | Security review: threat model, CI gates (Trivy, gitleaks), book external pentest | 10 | P0 | todo | P1-44 | Threat model doc; pentest date set | |
-| P1-47 | Provider margin dashboard | 06 | P1 | todo | P1-37 | Margin per tenant/month shown | |
+| P1-47 | Provider margin dashboard | 06 | P1 | review | P1-37 | Margin per tenant/month shown | `/provider/usage` from list prices (`usage_events`, `seats`, `plans`); cost stays hidden from companies through provider-only functions. Seat history, suspended companies and fixed costs are for the owner |
 | P1-48 | Runbooks: deploy, rollback, secret rotation, restore, incident | 10 | P0 | review | P1-42 | Tabletop exercise done | Runbooks in `docs/runbooks/`. Nothing in them has been run or rehearsed. The tabletop is for the owner: script and result template in `docs/runbooks/tabletop.md`. Restore is a plan until P1-42 gives backups; `tenant:rotate-secrets` does not exist, so rotation is manual |
 | P1-49 | KVKK docs: DPA template, sub-processor list, privacy texts (with counsel) | 10 | P0 | todo | – | Reviewed by counsel | Owner: product owner |
 | P1-50 | Pilot kit: Turkish admin guide, user quick start, short video | – | P1 | todo | P1-34 | Kit shared with pilot customers | |
