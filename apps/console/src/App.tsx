@@ -22,6 +22,7 @@ import {
   DepartmentUsage,
   DepartmentUsers,
 } from './department-page';
+import { ProviderMargin } from './margin-page';
 import { TenantPolicies } from './policy-page';
 import {
   AccountPreferences,
@@ -38,6 +39,7 @@ const SCREENS: Record<string, (me: Me, getToken: GetToken, config: AppConfig) =>
   {
     '/tenant/audit': (me, getToken) => <TenantAudit me={me} getToken={getToken} />,
     '/provider/audit': (_me, getToken) => <ProviderAudit getToken={getToken} />,
+    '/provider/usage': (_me, getToken) => <ProviderMargin getToken={getToken} />,
     '/account/usage': (_me, getToken) => <AccountUsage getToken={getToken} />,
     '/account/requests': (_me, getToken) => <AccountRequests getToken={getToken} />,
     '/account/sessions': (_me, _getToken, config) => <AccountSessions config={config} />,

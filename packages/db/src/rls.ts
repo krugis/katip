@@ -152,7 +152,113 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
   WHERE a.tenant_id IS NULL AND a.action = 'platform.daily'
   ORDER BY a.ts DESC LIMIT 1;
 $fn$;
-REVOKE ALL ON FUNCTION latest_daily_run() FROM PUBLIC;`;
+REVOKE ALL ON FUNCTION latest_daily_run() FROM PUBLIC;
+
+-- The provider's margin (LLD-06 §6, tracker P1-47): one UTC month's money per company, as sums.
+-- The console can't read cost or price itself, and still can't: this hands it totals only, and
+-- refuses inside a company's transaction, where every company route runs, so a company's route
+-- can't reach it by mistake. Usage comes from usage_events alone, the one table with the price
+-- and the overage flag; usage_daily holds cost too, so adding it would count twice.
+-- Revenue is list price until the billing bridge (P1-37) records what was invoiced.
+CREATE OR REPLACE FUNCTION provider_margin(p_month date)
+RETURNS TABLE (tenant_id uuid, slug text, name text, status text, billing_cycle text,
+  seats bigint, seat_revenue_usd_micro bigint, addon_revenue_usd_micro bigint,
+  overage_revenue_usd_micro bigint, cost_usd_micro bigint, requests bigint)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+#variable_conflict use_column
+DECLARE
+  v_start timestamptz := date_trunc('month', p_month::timestamp)::timestamp AT TIME ZONE 'UTC';
+  v_end timestamptz := (date_trunc('month', p_month::timestamp) + interval '1 month')::timestamp AT TIME ZONE 'UTC';
+BEGIN
+  IF NULLIF(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+    RAISE EXCEPTION 'provider_margin is for provider routes only' USING ERRCODE = '42501';
+  END IF;
+  RETURN QUERY
+  WITH used AS (
+    -- By the company's id, whoever the person was: file search's nil user counts too.
+    SELECT e.tenant_id AS tid,
+           coalesce(sum(e.price_usd_micro) FILTER (WHERE e.overage), 0)::bigint AS overage,
+           sum(e.cost_usd_micro)::bigint AS cost,
+           count(*)::bigint AS requests
+    FROM usage_events e
+    WHERE e.ts >= v_start AND e.ts < v_end
+    GROUP BY e.tenant_id
+  ),
+  price AS (
+    -- Each plan's version in force by the month's end; before any was, the first version.
+    SELECT DISTINCT ON (p.code) p.code, p.price_usd_micro AS annual, p.monthly_price_usd_micro AS monthly
+    FROM plans p
+    ORDER BY p.code, (p.valid_from < v_end) DESC,
+      CASE WHEN p.valid_from < v_end THEN p.valid_from END DESC NULLS LAST, p.version
+  ),
+  cycle AS (
+    SELECT DISTINCT ON (s.tenant_id) s.tenant_id AS tid, s.billing_cycle AS cycle
+    FROM subscriptions s
+    WHERE s.period_start < v_end
+    ORDER BY s.tenant_id, s.period_start DESC
+  ),
+  billed AS (
+    -- Seats are owed for a month the company existed in, and wasn't deleted before.
+    SELECT t.id AS tid, c.cycle, t.kvkk_addon
+    FROM tenants t LEFT JOIN cycle c ON c.tid = t.id
+    WHERE t.created_at < v_end
+      AND (t.status <> 'deleted'
+        OR (SELECT max(a.ts) FROM audit_log a
+            WHERE a.tenant_id = t.id AND a.action = 'tenant.delete') >= v_start)
+  ),
+  seat AS (
+    SELECT b.tid, sum(s.quantity)::bigint AS seats,
+      coalesce(sum(s.quantity * CASE WHEN b.cycle = 'monthly' THEN pr.monthly ELSE pr.annual END), 0)::bigint AS revenue,
+      CASE WHEN bool_or(b.kvkk_addon)
+        THEN sum(s.quantity) * coalesce(max(CASE WHEN b.cycle = 'monthly' THEN kv.monthly ELSE kv.annual END), 0)
+        ELSE 0 END::bigint AS addon
+    FROM billed b
+    JOIN seats s ON s.tenant_id = b.tid
+    LEFT JOIN price pr ON pr.code = s.plan_code
+    LEFT JOIN price kv ON kv.code = 'kvkk_addon'
+    GROUP BY b.tid
+  ),
+  k AS (SELECT b.tid FROM billed b UNION SELECT u.tid FROM used u)
+  -- A deleted or purged company keeps its row, and so its slug; an unknown one shows its id.
+  SELECT k.tid, coalesce(t.slug, k.tid::text), coalesce(t.name, ''), coalesce(t.status, 'unknown'),
+         b.cycle, coalesce(st.seats, 0)::bigint, coalesce(st.revenue, 0)::bigint,
+         coalesce(st.addon, 0)::bigint, coalesce(u.overage, 0)::bigint, coalesce(u.cost, 0)::bigint,
+         coalesce(u.requests, 0)::bigint
+  FROM k
+  LEFT JOIN tenants t ON t.id = k.tid
+  LEFT JOIN billed b ON b.tid = k.tid
+  LEFT JOIN seat st ON st.tid = k.tid
+  LEFT JOIN used u ON u.tid = k.tid
+  ORDER BY 2;
+END
+$fn$;
+REVOKE ALL ON FUNCTION provider_margin(date) FROM PUBLIC;
+
+-- The month's provider cost by the model that really answered: after a fallback, model_id is
+-- the one used, whatever the alias asked for.
+CREATE OR REPLACE FUNCTION provider_model_cost(p_month date)
+RETURNS TABLE (model_id text, display_name text, class text, requests bigint,
+  input_tokens bigint, output_tokens bigint, cost_usd_micro bigint)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fn$
+#variable_conflict use_column
+DECLARE
+  v_start timestamptz := date_trunc('month', p_month::timestamp)::timestamp AT TIME ZONE 'UTC';
+  v_end timestamptz := (date_trunc('month', p_month::timestamp) + interval '1 month')::timestamp AT TIME ZONE 'UTC';
+BEGIN
+  IF NULLIF(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+    RAISE EXCEPTION 'provider_model_cost is for provider routes only' USING ERRCODE = '42501';
+  END IF;
+  RETURN QUERY
+  SELECT e.model_id, coalesce(m.display_name, e.model_id), coalesce(m.class, max(e.class)),
+         count(*)::bigint, sum(e.input_tokens)::bigint, sum(e.output_tokens)::bigint,
+         sum(e.cost_usd_micro)::bigint
+  FROM usage_events e LEFT JOIN model_catalog m ON m.id = e.model_id
+  WHERE e.ts >= v_start AND e.ts < v_end
+  GROUP BY e.model_id, m.display_name, m.class
+  ORDER BY 7 DESC, 1;
+END
+$fn$;
+REVOKE ALL ON FUNCTION provider_model_cost(date) FROM PUBLIC;`;
 
 /** The console API's own role: not a superuser and bound by RLS, with no lookup exception. */
 export const CONSOLE_ROLE_SQL = `DO $$
@@ -175,6 +281,9 @@ GRANT UPDATE (status, decided_by, decided_at) ON requests TO katip_console;
 GRANT SELECT (tenant_id, day, user_id, department_id, class, model_id, input_tokens, output_tokens) ON usage_daily TO katip_console;
 GRANT EXECUTE ON FUNCTION refresh_usage_daily(uuid, date, date) TO katip_console;
 GRANT EXECUTE ON FUNCTION latest_daily_run() TO katip_console;
+-- Sums for the provider's margin screen only; console-api calls them from provider routes.
+GRANT EXECUTE ON FUNCTION provider_margin(date) TO katip_console;
+GRANT EXECUTE ON FUNCTION provider_model_cost(date) TO katip_console;
 GRANT SELECT, INSERT, UPDATE ON tenant_policies TO katip_console;
 GRANT SELECT, INSERT ON chat_retention_state TO katip_console;
 GRANT UPDATE (in_force_months, notice_id, notice_months, notice_requested_at, notified_at, updated_at) ON chat_retention_state TO katip_console;

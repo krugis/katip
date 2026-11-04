@@ -316,7 +316,7 @@ try {
   await admin.getByTestId('nav-tenant-users').click();
   await admin.getByTestId('users-table').waitFor();
   check(new URL(admin.url()).pathname === '/tenant/users', 'can move between screens');
-  for (const path of ['/provider/tenants', '/nowhere']) {
+  for (const path of ['/provider/tenants', '/provider/usage', '/nowhere']) {
     await admin.goto(`${consoleUrl}${path}`);
     await admin.getByTestId('no-access').waitFor();
     check(true, `going straight to ${path} says no access`);
@@ -1359,6 +1359,21 @@ try {
     (await provider.getByTestId('audit-table').textContent()).includes(slug),
     'sees the audit log across companies',
   );
+  await provider.getByTestId('nav-provider-usage').click();
+  await provider.getByTestId('margin-table').waitFor();
+  check(
+    (await provider.locator(`[data-testid=margin-table] tr[data-slug="${slug}"]`).count()) === 1,
+    'sees the margin per company, this month',
+  );
+  check(
+    (await provider.getByTestId('margin-basis').textContent()).length > 0,
+    'with the note that it is list price, not invoiced',
+  );
+  const marginRefused = await fetch(`${consoleUrl}/api/v1/admin/margin`, {
+    headers: { authorization: `Bearer ${await tokenOf(admin)}` },
+  });
+  check(marginRefused.status === 403, "a company's own admin is refused the margin");
+  await shot(provider, 'provider-margin');
   cli('daily');
   await provider.goto(`${consoleUrl}/provider/tenants`);
   await provider.locator('[data-testid=daily-job][data-state=ok]').waitFor();

@@ -372,5 +372,34 @@
       "tenant_restore": "Şirket geri yüklendi",
       "tenant_purge": "Şirket verileri temizlendi"
     }
+  },
+  "margin": {
+    "month": "Ay (UTC)",
+    "listPriceNote": "Buradaki gelir liste fiyatımızdır: koltuk × plan fiyatı, KVKK eklentisi ve her istekle kaydedilen fiyattan aşım. Faturalama bağlanana kadar bu, faturalanan tutar değildir. Her ay, şirketin bugünkü koltuk sayısıyla hesaplanır.",
+    "revenue": "Gelir",
+    "cost": "Sağlayıcı maliyeti",
+    "margin": "Kâr",
+    "marginPct": "Kâr marjı %",
+    "byCompany": "Şirketlere göre",
+    "seatCount": "Koltuk",
+    "seatRevenue": "Koltuk geliri",
+    "addons": "Eklentiler",
+    "overage": "Aşım",
+    "platform": "Platform toplamı",
+    "belowTarget": "%{{pct}} altında",
+    "notIncluded": "Dahil değil: barındırma (her şirketin kendi kopyası ve ortak sunuculardaki payı) ile henüz hiçbir yerde tanımlanmamış sabit platform maliyetleri.",
+    "byModel": "Modele göre sağlayıcı maliyeti",
+    "class": "Sınıf",
+    "requests": "İstek",
+    "tokens": "Jeton",
+    "share": "Maliyetteki payı",
+    "empty": "Bu ay hiçbir şirketin koltuğu veya kullanımı yok.",
+    "noModels": "Bu ay hiçbir model kullanılmadı.",
+    "modelClass": {
+      "standard": "Standart",
+      "premium": "Premium sınıf",
+      "tr": "Türkiye",
+      "embedding": "Gömme (dosya arama)"
+    }
   }
 }

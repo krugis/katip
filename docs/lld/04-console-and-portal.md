@@ -2,7 +2,7 @@
 
 One React app (`apps/console`) serves four role-based areas. Its backend is `apps/console-api` (Fastify, REST `/api/v1`, OpenAPI from Zod).
 
-**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), the department manager's area (P1-31), each person's account (P1-32), and the audit log (P1-33). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
+**Built so far (P1-25):** the shell. Sign-in with Keycloak (PKCE), Turkish first and English, navigation by role, and a no-access page. Real so far: the provider's company list, and the tenant admin's overview, users, departments (P1-26) models and policies (P1-27), access rules (P1-28), usage and reports (P1-30), the department manager's area (P1-31), each person's account (P1-32), the audit log (P1-33), and the provider's usage and margin (P1-47, LLD-06 §6). Every other screen says it's on its way, until its own task arrives. The app only reflects access: `console-api` enforces it. `pnpm test:console` checks each role in a real browser.
 
 **How it's served.** Static files from an unprivileged nginx at `console.<domain>`, with `/api` going to `console-api` by a longer Traefik rule, so both share an origin. nginx fills `/config.json` from the environment, so one image serves any domain. It sends a strict content security policy: no inline scripts or styles, and only Keycloak as another origin to call.
 
@@ -18,7 +18,7 @@ One React app (`apps/console`) serves four role-based areas. Its backend is `app
 | Plans and prices | Edit plan quotas and prices (versioned; applies at the next billing period) |
 | Model catalog | Enable/disable models, class (standard/premium/tr), prices, region, data policy, provider |
 | Router rules | Edit global routing rules (§4 of LLD-03); dry-run a sample request |
-| Platform usage and margin | Cost (provider) vs revenue per tenant and model; top tenants; anomalies |
+| Platform usage and margin | Cost (provider) vs revenue per tenant and model; top tenants; anomalies. Built (P1-47): per company and UTC month, revenue at list price (seats, add-ons, overage), provider cost, margin and margin %, flagged under 30%; the platform total; the month's cost by model; CSV. Anomalies aren't built |
 | Audit | Global audit search |
 | Operations | Links to Grafana and Lago (Tailscale only); release version per tenant |
 
@@ -89,6 +89,7 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | PATCH | `/api/v1/tenants/:tid/departments/:did/requests/:rid` | tenant_admin, dept_manager of that department | Approve or decline, once. Nobody decides their own. It records the decision, and doesn't change access yet |
 | GET | `/api/v1/tenants/:tid/audit?action&before&limit` | tenant_admin | Newest first, a page at a time. Names a person only if they're in this company |
 | GET | `/api/v1/admin/audit?tenant&action&before&limit` | provider_admin | Every company's log, one company at a time under row-level security |
+| GET | `/api/v1/admin/margin?month=yyyy-mm`, `/admin/margin/export?month&lang` | provider_admin. Every company role gets 403, its own admin included | Revenue at list price, provider cost and margin per company for one UTC month, the platform total, and cost by model (LLD-06 §6). Sums from two `SECURITY DEFINER` functions: the console's role still reads no cost or price. The CSV has whole micro-USD, so it reads the same in any locale |
 | POST | `/api/v1/admin/tenants` | provider_admin | Calls the provisioner |
 | PUT | `/api/v1/admin/models/:id`, `/api/v1/admin/router-rules` | provider_admin | Publishes `policy.changed` |
 

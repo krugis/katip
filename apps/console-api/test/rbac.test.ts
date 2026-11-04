@@ -102,6 +102,7 @@ const store: ConsoleStore = {
   auditPage: async () => ({ entries: [], next: null }),
   auditAcrossTenants: async () => ({ entries: [], next: null }),
   latestDailyRun: async () => null,
+  providerMargin: async () => ({ basis: 'list_price', tenants: [], models: [] }),
   ownRequests: async () => [],
   createRequest: async () => ownRequest,
   allRequests: async () => [],
@@ -474,6 +475,17 @@ const MATRIX: {
   {
     route: '/api/v1/admin/daily-job',
     url: () => '/api/v1/admin/daily-job',
+    own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
+  },
+  // Cost and margin are ours: no company role may see them, its own admin included.
+  {
+    route: '/api/v1/admin/margin',
+    url: () => '/api/v1/admin/margin',
+    own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
+  },
+  {
+    route: '/api/v1/admin/margin/export',
+    url: () => '/api/v1/admin/margin/export',
     own: { provider_admin: 200, tenant_admin: 403, dept_manager: 403, user: 403, none: 403 },
   },
   {
