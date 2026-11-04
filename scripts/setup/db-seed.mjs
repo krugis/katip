@@ -32,6 +32,7 @@ if (stage === 'platform') {
   await setRolePassword('katip_gateway', process.env.KATIP_GATEWAY_DB_PASSWORD);
   await setRolePassword('katip_console', process.env.KATIP_CONSOLE_DB_PASSWORD);
   await setRolePassword('katip_provider', process.env.KATIP_PROVIDER_DB_PASSWORD);
+  await setRolePassword('katip_billing', process.env.KATIP_BILLING_DB_PASSWORD);
   await seed(d, { models, tenant: null });
   console.log('governance db ready: migrated, roles set, catalog seeded');
 } else if (stage === 'tenants') {

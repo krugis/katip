@@ -47,6 +47,7 @@
     "test:load": "node scripts/setup/load-check.mjs",
     "test:local-llm": "node scripts/setup/local-llm-check.mjs",
     "test:backup": "node scripts/setup/backup-check.mjs",
+    "test:lago": "node scripts/setup/lago-check.mjs",
     "test:console": "NODE_EXTRA_CA_CERTS=infra/traefik/dev-certs/localhost.crt node apps/console/e2e/run.mjs"
   },
   "devDependencies": {

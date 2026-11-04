@@ -37,6 +37,11 @@ const issued = (restart, extra = {}) => ({
   ...extra,
 });
 
+const LAGO_REFUSAL = (why) =>
+  `${why}, so changing the env file alone would not rotate it. See docs/runbooks/billing.md.`;
+const LAGO_ENCRYPTED =
+  'Lago encrypts columns of its database with it, and a new value would make them unreadable. See docs/runbooks/billing.md.';
+
 /** `role: null` means whoever POSTGRES_USER names. */
 const PLATFORM = {
   LITELLM_MASTER_KEY: generated(['litellm', 'policy-gateway']),
@@ -87,6 +92,21 @@ const PLATFORM = {
   LITELLM_DATABASE_URL: {
     refuse: 'it is made from LITELLM_DB_PASSWORD. Rotate that, and this changes with it.',
   },
+  KATIP_BILLING_DB_PASSWORD: pgRole('katip_billing', 'governance', ['billing-bridge']),
+  LAGO_REDIS_PASSWORD: generated(['lago-redis', 'lago-api', 'lago-worker', 'lago-clock'], {
+    warning:
+      'Lago stops for about a minute. Usage waits in the governance DB, and nothing is lost.',
+  }),
+  LAGO_API_KEY: {
+    refuse: LAGO_REFUSAL('Lago adds the new key at its start and keeps the old one'),
+  },
+  LAGO_ADMIN_PASSWORD: { refuse: LAGO_REFUSAL('Lago sets it only when it makes the user') },
+  LAGO_DB_PASSWORD: { refuse: LAGO_REFUSAL("this tool doesn't change Lago's own Postgres yet") },
+  LAGO_SECRET_KEY_BASE: { refuse: LAGO_REFUSAL('Lago derives its sessions from it') },
+  LAGO_RSA_PRIVATE_KEY: { refuse: LAGO_REFUSAL('Lago signs its login tokens with it') },
+  LAGO_ENCRYPTION_PRIMARY_KEY: { refuse: LAGO_ENCRYPTED },
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: { refuse: LAGO_ENCRYPTED },
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: { refuse: LAGO_ENCRYPTED },
 };
 
 const LOGOUT =

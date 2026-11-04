@@ -21,6 +21,7 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
   | `katip_gateway` | Policy gateway | **Applies** | `SELECT` on what it reads, `INSERT` on `usage_events`. Runs each tenant query in a transaction with `set_config('app.tenant_id', …, true)`. `gateway_keys` alone is readable with no tenant context, because a key lookup is how the tenant is found |
   | `katip_console` | Console API | **Applies** | `SELECT` on `tenants` and `users` so far; each new endpoint adds only what it needs. No exception for lookups: `tenants` has no RLS, and the tenant comes from the verified token |
   | `katip_provider` | Provisioner; later, provider endpoints and jobs | Bypassed by design (`BYPASSRLS`): a tenant being created has no context yet | Not a superuser. Can add tenants, change their status, anonymise users on a purge, and read what it needs. Can't read usage, invoices or request contents, change plans or the catalog, or delete tenants or users |
+  | `katip_billing` | billing-bridge (LLD-06 §2.2) | **Applies** | Works one company at a time in its context. `SELECT` on `plans`, some columns of `tenants`, `seats` and `subscriptions`, and only `tenant_id, ts, class, input_tokens, output_tokens, overage` of `usage_events` (never cost). `UPDATE (lago_subscription_id)` on `subscriptions`. `SELECT, INSERT` and `UPDATE (status, sent_at)` on `billing_usage_sent` and `billing_seat_sent`. No `DELETE` anywhere |
 
   Tests of tenant isolation must connect as the role the service uses, as an admin role passes them regardless.
 - Money is stored as `bigint` micro-USD; tokens as `bigint`.
@@ -54,6 +55,8 @@ The `governance` database is owned by `packages/db` (Drizzle). LibreChat data st
 | `privacy_requests` | tenant_id, user_id, type (`export/delete`), status, file_url, completed_at | KVKK |
 | `fx_rates` | rate_date, currency, buying, selling, created_at | The central bank's rates. Not tenant data. The provisioner's role can add one but not change one |
 | `invoices` | tenant_id, lago_invoice_id, number, total_usd_micro, total_try_kurus, fx_rate, efatura_status, efatura_uuid, issued_at | LLD-06 |
+| `billing_usage_sent` | tenant_id + hour + class + seq (PK), tokens, transaction_id (unique), lago_subscription_id, event_ts, status (`pending/sent`), created_at, sent_at | Overage events sent to Lago (LLD-06 §2.2). seq 0 is an hour's first event; late usage adds the next seq, for the difference. Σ tokens of an hour = what Lago has for it. Written before the event goes, so a run can resume |
+| `billing_seat_sent` | tenant_id + metric + seq (PK), delta, units_after, transaction_id (unique), lago_subscription_id, event_ts, status, created_at, sent_at | Seat changes sent to Lago, each as the difference from the last |
 
 ## 3. Indexes (minimum)
 

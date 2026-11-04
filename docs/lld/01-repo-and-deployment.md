@@ -46,7 +46,7 @@ librechat-sme/
 | --- | --- | --- | --- | --- |
 | traefik | traefik:v3.x | 80, 443 (only public ports) | certs, dynamic config | Cloudflare origin certs or Let's Encrypt DNS challenge. No Docker socket and no way to Docker: routes come from a file and `console-api` (§2.2) |
 | keycloak | quay.io/keycloak/keycloak:26.x | 8080 | – (DB in Postgres) | `KC_HOSTNAME=auth.<domain>`, admin console only via Tailscale |
-| postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`, `lago` |
+| postgres | pgvector/pgvector:pg16 | 5432 | pgdata | DBs: `governance`, `keycloak`, `litellm`. Not Lago's: it has its own |
 | mongodb | mongo:7 | 27017 | mongodata | One database per tenant (`lc_<slug>`), with a login limited to it. On each tenant's network |
 | valkey | valkey/valkey:8 | 6379 | valkey | AOF on; BullMQ + counters + LiteLLM cache. Password required; `backend` network only |
 | litellm | ghcr.io/<org>/litellm:<pinned> (self-built) | 4000 | – | Internal only; master key used only by the gateway and provisioner |
@@ -55,8 +55,10 @@ librechat-sme/
 | policy-gateway | ghcr.io/<org>/policy-gateway | 8080 | – | Stateless, scale with `--scale` |
 | console-api, console | ghcr.io/<org>/… | 8081 / 80 | – | |
 | provisioner | ghcr.io/<org>/provisioner | 8082 | docker.sock (read/write, see security note) | Runs `docker compose` for tenant files |
-| billing-bridge | ghcr.io/<org>/billing-bridge | – | – | BullMQ worker |
-| lago (api, worker, clock, front) | getlago/* pinned | 3000 | – | Phase 1 milestone M3 |
+| billing-bridge | ghcr.io/<org>/billing-bridge (self-built) | 8095 (health only) | – | Hourly overage and seats to Lago (LLD-06 §2.2). Its own DB role, `katip_billing`, bound by RLS. On `backend` and `billing`. About 22 MiB |
+| lago-api, lago-worker, lago-clock | getlago/api:v1.55.0 (AGPL-3.0, unmodified) | 3000 (API) | lago-storage | `infra/compose/billing.yml`. On `billing` only: no published port, no route. No UI (`getlago/front`) or PDF service. About 1.16–1.24 GiB idle for the three |
+| lago-db | getlago/postgres-partman:15.0-alpine, by digest | 5432 | lago-pgdata | Lago's own Postgres: its migrations need pg_partman. About 104–129 MiB |
+| lago-redis | valkey/valkey (same pin as `valkey`) | 6379 | lago-valkey | Lago's own, with its own password. About 4 MiB |
 | searxng | searxng/searxng pinned | 8080 | – | Unmodified (AGPL) |
 | code-interpreter | pinned (Apache-2.0 sandbox used by LibreChat) | – | – | Phase 1b; resource limits per run |
 | seaweedfs | chrislusf/seaweedfs pinned | 8333 (S3) | seaweed | Files, backups staging |
@@ -141,6 +143,7 @@ What happens when (run on the real pinned image, with stubs behind it, on 3 Nov 
 | `edge` | traefik, console, console-api, keycloak, mailpit | Public entry through Traefik |
 | `backend` | platform services, not traefik or LibreChat | DBs, gateway, LiteLLM, Presidio, Valkey; no published ports |
 | `<project>_t_<slug>` | one tenant's LibreChat, Meilisearch, RAG API and vector database, plus traefik, policy-gateway and mongodb | The only network a tenant touches. Other tenants, the platform's Postgres, Valkey, LiteLLM and Presidio aren't on it |
+| `<project>_billing` | Lago's five containers and billing-bridge | `internal`: no way out to the internet, no published port, no Traefik route. Provider-only (LLD-06 §2.1) |
 | `egress-llm` | litellm only | Outbound to LLM providers; firewall egress allowlist (optional, phase 2) |
 
 Tenant networks are not internal, because users can add MCP tools that need the internet. Subnets are `<project.tenant_network_prefix>.<n>.0/24`, starting from a hash of the slug and stepping to the next free one, and Docker keeps what was chosen. They're set explicitly because Docker's default address pools allow only about 30 networks. The bootstrap adds tenant networks to platform services through a generated compose file (`infra/compose/rendered/tenants.yml`), so they survive a recreate.

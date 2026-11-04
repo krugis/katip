@@ -2,7 +2,7 @@
 // Shared helpers for the Kâtip bootstrap: YAML subset parser, env file,
 // state file, child-process runner with SIGINT propagation.
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -159,10 +159,22 @@ export const genGatewayKey = () => `sk-sme-t-${randomBytes(24).toString('base64u
 
 const genHex = (bytes) => randomBytes(bytes).toString('hex');
 
+const genRsaKeyBase64 = () =>
+  Buffer.from(
+    generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    }).privateKey,
+  ).toString('base64');
+
 /** Secret generator for an AUTO key. LibreChat requires CREDS_KEY = 32 bytes and
  * CREDS_IV = 16 bytes, both hex. */
 export function generatorFor(key) {
   if (key.endsWith('_GATEWAY_KEY')) return genGatewayKey;
+  // Lago reads a PEM private key, base64 on one line.
+  if (key === 'LAGO_RSA_PRIVATE_KEY') return genRsaKeyBase64;
+  if (key === 'LAGO_SECRET_KEY_BASE') return () => genHex(64);
   if (key.endsWith('_CREDS_KEY')) return () => genHex(32);
   if (key.endsWith('_CREDS_IV')) return () => genHex(16);
   return () => genSecret(32);
