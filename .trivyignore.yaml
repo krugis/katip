@@ -25,6 +25,9 @@ vulnerabilities:
       - usr/local/lib/python3.12/site-packages/litellm-1.79.3.dist-info/METADATA
     statement: 'Provisional, not accepted by the owner. LiteLLM 1.79.3 auth bypass by Host header. Only the gateway reaches LiteLLM, and it sets the Host itself. Fix: upgrade to 1.84.0 or later, reviewed as CLAUDE.md §7 asks.'
     expired_at: 2026-11-18
+  - id: CVE-2025-68121
+    statement: 'Provisional. Go crypto/tls in the Go command-line tools MongoDB ships in its image (mongodump and others), not in the database server. Every Mongo release has it, 7.0.45 and 8.0.15 included, checked with this Trivy on 4 Nov 2026. Our Mongo connections use no TLS, and those tools are only run by hand or by dev:deploy backups. Recheck when MongoDB rebuilds its tools.'
+    expired_at: 2027-01-31
   - id: CVE-2026-31789
     statement: 'OpenSSL heap overflow on 32-bit systems only. Every host we run is 64-bit (amd64 or arm64). Found in the console image (nginx-unprivileged 1.29.3-alpine); a newer base clears it with many HIGH findings.'
     expired_at: 2027-02-01
