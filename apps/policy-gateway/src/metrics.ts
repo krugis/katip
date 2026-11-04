@@ -25,6 +25,17 @@ export class GatewayMetrics {
     labelNames: ['tenant', 'class', 'dir'] as const,
     registers: [this.registry],
   });
+  /**
+   * What each company's requests cost us at list price, in micro-USD (P1-43, for the budget
+   * anomaly alert). Our cost, so provider-only: it is on this token-protected port, and in
+   * Prometheus and Grafana, which only the provider can reach.
+   */
+  readonly cost = new Counter({
+    name: 'gw_cost_usd_micro_total',
+    help: 'Cost of requests at list price, in micro-USD',
+    labelNames: ['tenant', 'class'] as const,
+    registers: [this.registry],
+  });
   readonly upstreamLatency = new Histogram({
     name: 'gw_upstream_latency_seconds',
     help: 'From calling a model to its first response headers',

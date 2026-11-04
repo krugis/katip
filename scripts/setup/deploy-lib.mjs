@@ -19,12 +19,12 @@ import { psqlArgs } from './rollback-guard.mjs';
 
 /** Through the --redo machinery of dev:up. `config` too, so changed templates get rendered. */
 export const DEPLOY_UP_FLAGS = [
-  '--redo=config,build,governance-db,aiplane,billing,tenant,smoke,isolation',
+  '--redo=config,build,governance-db,aiplane,billing,tenant,smoke,monitoring,isolation',
 ];
 
 /** Going back doesn't build or pull: the point is to run the images that were kept. */
 export const BACK_UP_FLAGS = [
-  '--redo=config,governance-db,aiplane,billing,tenant,smoke,isolation',
+  '--redo=config,governance-db,aiplane,billing,tenant,smoke,monitoring,isolation',
   '--skip=build,images',
 ];
 

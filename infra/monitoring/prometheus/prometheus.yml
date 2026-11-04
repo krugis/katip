@@ -1,0 +1,94 @@
+# Prometheus (P1-43, LLD-10 §5). Scrapes over the backend and monitoring networks only.
+# Labels hold company slugs, model ids, container names and fixed words: no person.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['alertmanager:9093']
+
+  # The gateway's numbers show every company's usage, so they need the token (LLD-03 §7).
+  - job_name: gateway
+    authorization:
+      credentials_file: /run/katip/metrics-token
+    static_configs:
+      - targets: ['policy-gateway:9464']
+
+  # The daily job, failed provisioner jobs and companies by status. Same token.
+  - job_name: console-api
+    authorization:
+      credentials_file: /run/katip/metrics-token
+    static_configs:
+      - targets: ['console-api:9464']
+
+  # Keycloak's management port: user events counted by realm, client and error, never by user.
+  - job_name: keycloak
+    static_configs:
+      - targets: ['keycloak:9000']
+
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: mongodb
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+
+  - job_name: valkey
+    static_configs:
+      - targets: ['valkey-exporter:9121']
+
+  - job_name: loki
+    static_configs:
+      - targets: ['loki:3100']
+
+  - job_name: grafana
+    static_configs:
+      - targets: ['grafana:3000']
+
+  - job_name: fluent-bit
+    metrics_path: /api/v2/metrics/prometheus
+    static_configs:
+      - targets: ['fluent-bit:2020']
+
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ['blackbox-exporter:9115']
+
+  # The certificate Traefik serves, for the expiry alert.
+  - job_name: tls
+    metrics_path: /probe
+    params:
+      module: [tls]
+    static_configs:
+      - targets: ['traefik:443']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

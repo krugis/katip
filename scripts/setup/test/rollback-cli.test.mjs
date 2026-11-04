@@ -108,6 +108,8 @@ beforeEach(() => {
     'litellm/config.dev.tmpl.yaml',
     'librechat/librechat.tmpl.yaml',
     'compose/tenant.tmpl.yml',
+    'monitoring/alertmanager/alertmanager.tmpl.yml',
+    'monitoring/blackbox/blackbox.tmpl.yml',
   ]) {
     cpSync(join(REPO, 'infra', file), join(root, 'infra', file), { recursive: true });
   }

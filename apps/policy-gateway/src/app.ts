@@ -286,6 +286,8 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
     const tokenLabels = { tenant: ctx.tenant.slug, class: model.class };
     metrics.tokens.inc({ ...tokenLabels, dir: 'input' }, inputTokens);
     metrics.tokens.inc({ ...tokenLabels, dir: 'output' }, outputTokens);
+    const cost = costMicroUsd(model, inputTokens, outputTokens);
+    metrics.cost.inc(tokenLabels, cost);
     for (const [type, n] of Object.entries(map.counts() as Record<string, number>)) {
       metrics.piiEntities.inc({ type }, n);
     }
@@ -300,7 +302,7 @@ export function buildGateway(deps: GatewayDeps): FastifyInstance {
       ruleId,
       inputTokens,
       outputTokens,
-      costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
+      costMicroUsd: cost,
       overage: reservation.overage,
       piiEntities: map.counts() as Record<string, number>,
     });

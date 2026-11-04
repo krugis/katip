@@ -54,7 +54,9 @@ While a rotation is unfinished, another one and `secrets:backup` refuse. **`rota
 | ------ | ------------------------ | ------------- | ------------------ |
 | `LITELLM_MASTER_KEY` | Nowhere else | `litellm`, `policy-gateway` | Short outage of chats |
 | `KATIP_PII_TOKEN_KEY` | Nowhere else | `policy-gateway` | **Asks first. Placeholders change in ongoing conversations.** The same name gets a different placeholder than before. Where an old tool call or tool result holds an old placeholder, the gateway cannot restore it, and a user may see `⟦PERSON_…⟧` in an answer. New conversations are fine. Nothing is exposed and nothing is lost. Do it out of hours, and tell companies. From LLD-03 §5, not tested |
-| `KATIP_METRICS_TOKEN` | Nowhere else | `policy-gateway` | Nothing. Update any scraper when one exists (P1-43) |
+| `KATIP_METRICS_TOKEN` | Nowhere else | `policy-gateway`, `console-api` | Prometheus shows both as down until `pnpm dev:up --redo=monitoring` gives it the new token |
+| `KATIP_MONITOR_DB_PASSWORD` | `ALTER ROLE katip_monitor` | `postgres-exporter` | Nothing. Fails if monitoring is off: the exporter isn't there |
+| `KATIP_MONITOR_VALKEY_PASSWORD` | Nowhere else: it is a start option | `valkey`, `valkey-exporter` | Short outage. Fails if monitoring is off |
 | `VALKEY_PASSWORD` | Nowhere else: it is a start option | `valkey`, `policy-gateway`, `console-api` | Short outage |
 | `KATIP_GATEWAY_DB_PASSWORD` | `ALTER ROLE katip_gateway` | `policy-gateway` | Short outage |
 | `KATIP_CONSOLE_DB_PASSWORD` | `ALTER ROLE katip_console` | `console-api` | Short outage of the console |
@@ -72,6 +74,8 @@ While a rotation is unfinished, another one and `secrets:backup` refuse. **`rota
 **Refused, and why:**
 
 - `LITELLM_DATABASE_URL`: made from `LITELLM_DB_PASSWORD`. Rotate that.
+- `GRAFANA_ADMIN_PASSWORD`: Grafana reads it only at its first start. Change it in Grafana, then in `katip.env`: see [incident.md](incident.md), step 1.
+- `KATIP_MONITOR_MONGO_PASSWORD`: `pnpm dev:up` sets it on Mongo's `katip_monitor` user every time. Change it in `katip.env` and run `pnpm dev:up --redo=monitoring`.
 - **A provider key that is empty.** Empty means that model silently routes to the mock (it echoes), so the tool never clears a key. Setting one for the first time changes which model answers: put it in `katip.env` and run `pnpm dev:up`.
 - A value with a space or any of `` # $ ' " \ ` ``, which an env file would change.
 

@@ -102,4 +102,40 @@ describe('DbConsoleStore on that role', () => {
   it('is ready once migrated', async () => {
     expect(await store.ready()).toBe(true);
   });
+
+  it("counts every company's failed jobs for monitoring, and nothing else of them", async () => {
+    await admin`insert into jobs (type, tenant_id, status, payload, updated_at) values
+      ('tenant.purge', ${a}, 'failed', '{"slug":"tenant-a"}', now()),
+      ('tenant.purge', ${b}, 'failed', '{"slug":"tenant-b"}', now()),
+      ('tenant.purge', ${b}, 'failed', '{"slug":"tenant-b"}', now() - interval '2 days'),
+      ('tenant.create', ${a}, 'done', '{"slug":"tenant-a"}', now())`;
+    const h = await store.platformHealth();
+    expect(h.failedJobs).toEqual([{ type: 'tenant.purge', failed: 2 }]);
+    expect(h.tenants).toEqual([{ status: 'active', count: 2 }]);
+    expect(h.dailyRun).toBeNull();
+    // Still no rows of its own: only the counts.
+    expect(await console_`select id from jobs`).toHaveLength(0);
+  });
+});
+
+describe('the monitoring role (P1-43)', () => {
+  it('reads statistics, and no rows', async () => {
+    const [r] =
+      await admin`select rolsuper, rolbypassrls from pg_roles where rolname = 'katip_monitor'`;
+    expect(r).toEqual({ rolsuper: false, rolbypassrls: false });
+    await admin.unsafe(`ALTER ROLE katip_monitor PASSWORD 'monitor-test-password'`);
+    const url = new URL(container.getConnectionUri());
+    url.username = 'katip_monitor';
+    url.password = 'monitor-test-password';
+    const monitor = postgres(url.toString(), { max: 1 });
+    try {
+      const [s] = await monitor`select count(*)::int as n from pg_stat_database`;
+      expect(s!['n']).toBeGreaterThan(0);
+      for (const table of ['users', 'usage_events', 'audit_log', 'jobs']) {
+        await expect(monitor.unsafe(`select * from ${table}`)).rejects.toThrow(/permission denied/);
+      }
+    } finally {
+      await monitor.end();
+    }
+  });
 });

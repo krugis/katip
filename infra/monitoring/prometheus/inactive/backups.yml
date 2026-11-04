@@ -1,0 +1,42 @@
+# INACTIVE: backups and restore tests (LLD-10 §4 and §5). Prometheus doesn't load this file: it is
+# outside rules/. There are no backups yet (P1-42), so these would fire all the time.
+#
+# What P1-42 has to provide, through node-exporter's textfile directory
+# (infra/monitoring/rendered/textfile/backups.prom), one line per target and a fresh write after
+# each run:
+#   katip_backup_last_success_timestamp_seconds{target="postgres|mongodb|uploads|configs"}
+#   katip_restore_test_last_run_timestamp_seconds
+#   katip_restore_test_last_success  (1 or 0)
+# Then move this file into rules/ and keep its tests (`pnpm test:alert-rules` runs them already).
+groups:
+  - name: katip-backups
+    rules:
+      - alert: BackupMissing
+        expr: |
+          time() - katip_backup_last_success_timestamp_seconds > 26 * 3600
+          or absent(katip_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels:
+          severity: critical
+          area: backups
+        annotations:
+          summary: 'No successful {{ $labels.target }} backup for over 26 hours'
+
+      - alert: RestoreTestFailed
+        expr: katip_restore_test_last_success == 0
+        labels:
+          severity: critical
+          area: backups
+        annotations:
+          summary: The last restore test failed
+
+      - alert: RestoreTestMissing
+        expr: |
+          time() - katip_restore_test_last_run_timestamp_seconds > 32 * 86400
+          or absent(katip_restore_test_last_run_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: critical
+          area: backups
+        annotations:
+          summary: No restore test has run this month

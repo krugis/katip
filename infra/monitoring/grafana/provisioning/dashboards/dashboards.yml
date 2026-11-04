@@ -1,0 +1,12 @@
+# Dashboards from infra/monitoring/grafana/dashboards (P1-43). Edits in Grafana aren't kept:
+# change the JSON here instead.
+apiVersion: 1
+providers:
+  - name: katip
+    folder: Kâtip
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards

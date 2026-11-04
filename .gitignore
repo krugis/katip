@@ -24,6 +24,7 @@ infra/compose/rendered/
 infra/traefik/dynamic/*-ipallow.yml
 infra/traefik/dynamic/dev-only.yml
 infra/librechat/rendered/
+infra/monitoring/rendered/
 
 # private brand material (never public)
 brand-private/

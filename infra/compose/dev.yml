@@ -228,6 +228,8 @@ services:
       SMTP_PORT: '1025'
       MAIL_FROM: noreply@${KATIP_BASE_DOMAIN:?from katip.config.yaml}
       ALERT_CHECK_SECONDS: '10'
+      # Prometheus's token for its /metrics on 9464 (P1-43), the gateway's one.
+      METRICS_TOKEN: ${KATIP_METRICS_TOKEN:?from katip.env}
       IDENTITY_URL: http://identity:8090
       IDENTITY_TOKEN: ${KATIP_IDENTITY_TOKEN:?from katip.env}
       LOG_LEVEL: info

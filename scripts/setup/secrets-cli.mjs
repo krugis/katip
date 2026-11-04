@@ -43,6 +43,7 @@ import {
   startTenant,
   tenantProject,
   tenantStatuses,
+  writeContainerInventory,
 } from './steps.mjs';
 import { knownTenantSlugs, tenantSecretsFile } from './tenants.mjs';
 import { INFRA, ROOT, STATE_DIR, parseEnvFile, run, tryRun } from './util.mjs';
@@ -198,6 +199,8 @@ function realDeps(values, knownSecrets) {
         ),
         ctx,
       );
+      // Recreated containers have new ids: monitoring's names for them (P1-43).
+      await writeContainerInventory(ctx).catch(() => {});
     },
     async check({ slug }) {
       if (!slug) return; // compose --wait has waited for each service's health check

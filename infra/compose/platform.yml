@@ -66,7 +66,18 @@ services:
   keycloak:
     image: ${KATIP_IMAGE_KEYCLOAK:?from katip.config.yaml}
     restart: unless-stopped
-    command: ['start', '--http-enabled=true', '--http-port=8080', '--health-enabled=true']
+    # Metrics (P1-43) are on the management port, 9000, which has no route: login failures are
+    # counted by realm, client and error, never by user.
+    command:
+      [
+        'start',
+        '--http-enabled=true',
+        '--http-port=8080',
+        '--health-enabled=true',
+        '--metrics-enabled=true',
+        '--event-metrics-user-enabled=true',
+        '--event-metrics-user-tags=realm,clientId',
+      ]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USER:-katip-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?from katip.env}
@@ -125,13 +136,26 @@ services:
   valkey:
     image: ${KATIP_IMAGE_VALKEY:?from katip.config.yaml}
     restart: unless-stopped
-    command:
-      [
+    command: [
         'valkey-server',
         '--appendonly',
         'yes',
         '--requirepass',
         '${VALKEY_PASSWORD:?from katip.env}',
+        # Monitoring's user (P1-43): INFO and a few read-only commands. It can't read a key, or
+        # run CONFIG GET, which would show the password above.
+        '--user',
+        'katip-monitor',
+        'on',
+        '>${KATIP_MONITOR_VALKEY_PASSWORD:?from katip.env}',
+        '-@all',
+        '+info',
+        '+ping',
+        '+client|setname',
+        '+latency|latest',
+        '+latency|histogram',
+        '+slowlog|get',
+        '+slowlog|len',
       ]
     environment:
       # Read by valkey-cli, for the health check.

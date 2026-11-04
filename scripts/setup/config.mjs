@@ -73,7 +73,17 @@ export function validateConfig(c) {
 
   unknown(
     c,
-    ['project', 'identity', 'jobs', 'deploy', 'images', 'billing', 'models', 'tenants'],
+    [
+      'project',
+      'identity',
+      'jobs',
+      'deploy',
+      'images',
+      'billing',
+      'monitoring',
+      'models',
+      'tenants',
+    ],
     'config',
   );
 
@@ -117,6 +127,7 @@ export function validateConfig(c) {
   }
 
   for (const e of billingErrors(c.billing)) errors.push(e);
+  for (const e of monitoringErrors(c.monitoring)) errors.push(e);
 
   const images = c.images ?? {};
   unknown(images, [...PINNED_IMAGES, 'presidio_analyzer', 'litellm'], 'images');
@@ -221,6 +232,65 @@ export function validateConfig(c) {
   return errors;
 }
 
+/** Monitoring's images (P1-43). Each is pulled only when monitoring is on. */
+export const MONITORING_IMAGES = [
+  'prometheus',
+  'alertmanager',
+  'grafana',
+  'loki',
+  'fluent_bit',
+  'node_exporter',
+  'cadvisor',
+  'blackbox_exporter',
+  'postgres_exporter',
+  'mongodb_exporter',
+  'valkey_exporter',
+];
+
+/** Whether the monitoring stack is part of this install. No section means off. */
+export const monitoringEnabled = (config) => config.monitoring?.enabled === true;
+
+/** The monitoring section (P1-43). Optional; when present, all of it is checked. */
+function monitoringErrors(m) {
+  if (m === undefined) return [];
+  const errors = [];
+  if (m === null || typeof m !== 'object') return ['monitoring: must be a section'];
+  const allowed = [
+    'enabled',
+    'metrics_retention_days',
+    'logs_retention_days',
+    'alert_email',
+    'images',
+  ];
+  for (const k of Object.keys(m)) {
+    if (!allowed.includes(k)) errors.push(`monitoring.${k}: unknown setting`);
+  }
+  if (typeof m.enabled !== 'boolean') errors.push('monitoring.enabled: must be true or false');
+  const days = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+  if (!days(m.metrics_retention_days, 8, 400)) {
+    errors.push('monitoring.metrics_retention_days: must be a whole number of days, 8 to 400');
+  }
+  if (!days(m.logs_retention_days, 1, 30)) {
+    errors.push('monitoring.logs_retention_days: must be a whole number of days, 1 to 30');
+  }
+  if (!/^[^@\s'"]+@[^@\s'"]+$/.test(m.alert_email ?? '')) {
+    errors.push('monitoring.alert_email: must be an email address');
+  }
+  const images = m.images ?? {};
+  for (const k of Object.keys(images)) {
+    if (!MONITORING_IMAGES.includes(k)) errors.push(`monitoring.images.${k}: unknown setting`);
+  }
+  for (const name of MONITORING_IMAGES) {
+    const ref = images[name];
+    if (typeof ref !== 'string' || !/:[^/:]+$/.test(ref)) {
+      errors.push(`monitoring.images.${name}: must be a pinned image reference (name:tag)`);
+    } else if (ref.endsWith(':latest')) {
+      errors.push(`monitoring.images.${name}: :latest is not allowed`);
+    }
+  }
+  return errors;
+}
+
 /** The billing section (LLD-06, P1-36). Prices are integer micro-USD, as everywhere else. */
 function billingErrors(b) {
   const errors = [];
@@ -283,6 +353,13 @@ export function composeEnv(config) {
     KATIP_BILLING_LOOKBACK_DAYS: String(config.billing.lookback_days),
   };
   for (const name of PINNED_IMAGES) env[`KATIP_IMAGE_${name.toUpperCase()}`] = config.images[name];
+  if (config.monitoring) {
+    for (const name of MONITORING_IMAGES) {
+      env[`KATIP_IMAGE_${name.toUpperCase()}`] = config.monitoring.images[name];
+    }
+    env.KATIP_MONITORING_METRICS_RETENTION = `${config.monitoring.metrics_retention_days}d`;
+    env.KATIP_MONITORING_LOGS_RETENTION = `${config.monitoring.logs_retention_days * 24}h`;
+  }
   return env;
 }
 

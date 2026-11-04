@@ -2,6 +2,7 @@
 // Governance data for the console. Connects as katip_console, which row-level security
 // binds, so tenant data is only reachable inside withTenant (LLD-05 §1).
 import { randomUUID } from 'node:crypto';
+import type { PlatformHealth } from './metrics.js';
 import * as schema from '@katip/db';
 import { DEFAULT_POLICY, embeddingByResidency } from '@katip/policy-engine';
 import {
@@ -1529,6 +1530,22 @@ export class DbConsoleStore implements ConsoleStore {
         details: (r.details as Record<string, unknown> | null) ?? null,
       })),
       next: rows.length > query.limit ? page.at(-1)!.ts.toISOString() : null,
+    };
+  }
+
+  /** For Prometheus (P1-43): counts across companies, through functions that hand out counts. */
+  async platformHealth(): Promise<PlatformHealth> {
+    const since = new Date(Date.now() - 86_400_000).toISOString();
+    const jobs = (await this.db.execute(
+      sql`select type, failed from failed_jobs_since(${since}::timestamptz)`,
+    )) as unknown as { type: string; failed: string | number }[];
+    const tenants = (await this.db.execute(
+      sql`select status, count(*) as n from tenants group by status`,
+    )) as unknown as { status: string; n: string | number }[];
+    return {
+      dailyRun: await this.latestDailyRun(),
+      failedJobs: jobs.map((j) => ({ type: j.type, failed: Number(j.failed) })),
+      tenants: tenants.map((t) => ({ status: t.status, count: Number(t.n) })),
     };
   }
 
