@@ -19,7 +19,10 @@ export const ConfigSchema = z.object({
   IDENTITY_TOKEN: z.string().min(32),
   /** For telling the gateways a policy changed. */
   VALKEY_URL: z.string().url().optional(),
-  /** For usage alerts. Without a host, none are sent. */
+  /**
+   * For usage alerts and chat retention notices. Without a host, none are sent, so no company's
+   * chats start to go, and the daily job says so.
+   */
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(25),
   MAIL_FROM: z.string().default('noreply@localhost'),

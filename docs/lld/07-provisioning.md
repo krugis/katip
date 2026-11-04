@@ -98,13 +98,37 @@ The retention function holds its periods itself, so the provisioner's role can c
 
 ### Old chats (P1-70)
 
-Each running company has a period, `tenant_policies.chat_retention_months`: 12 by default, and 1 to 120 as its admin sets it on the policy page, with the database refusing anything else. There is no "never". A suspended company waits until it's resumed.
+Each running company has a period, `tenant_policies.chat_retention_months`: 12 by default, and 1 to 120 as its admin sets it on the policy page, with the database refusing anything else. There is no "never". A suspended company waits until it's resumed. Only the company's own admins can change it: a provider admin can read it and gets 403 on `PUT` (`companyOnly` in `auth.ts`), so provider staff can't cause a deletion of a customer's chats.
+
+**People are told, and 30 days pass, before anything goes.** The rules are a pure function, `packages/shared/src/chat-retention.ts`, and what they use is `chat_retention_state`, one row per company: the period in force, and one notice (its period, when it was asked for, when it went out). The rule all of it keeps: **nothing is deleted under a period sooner than 30 days after everyone was told about that period or a shorter one.**
+
+- **First run.** A company with no period in force deletes nothing. Its first daily run asks for a notice about its chosen period, and that period comes into force 30 days after the notice went. This is one rule for every company, however new. A new company gets the email on its first daily run, which costs one email and needs no exception. Changing the period before the first run sends nothing: the first run tells people the period chosen by then.
+- **Shortening.** The old period stays in force and the new one starts 30 days after its notice went. Chats between the two stay until then.
+- **Lengthening** past the period in force takes effect at once, and cancels a shortening that was waiting. During a first wait it keeps the date, as the company still has to start.
+- **Changing it during a wait.** If people have been told and the new period is at or above the period they were told about, the date stands: they were told more would go, by then. Below that, it's a new notice, to everyone, and a new 30 days. So 3 told, then 6, then 3 again keeps the date, and 3 told, then 1, starts again. A shortening after a cancel also starts again. A notice not fully sent is replaced by any different period, as a notice has one text for everyone.
+- **A period changed by hand in the database** can make a deletion later, never sooner: a shorter one just gets a notice on the next run.
+
+**Sending.** `console-api` sends the notices (`apps/console-api/src/chat-notice.ts`), as it has the mail server and checks about once a minute (`ALERT_CHECK_SECONDS`), so a failed send is retried quickly. The provisioner has no mail settings and doesn't get any: it asks for a notice by writing the row, and reads whether it went.
+
+- It goes to the company's `active` users of every role in governance `users`, one email per person, in Turkish then English like the usage alerts.
+- `chat_retention_notice_recipients` holds one row per person told. The row and the email are one transaction, as with `budget_alerts`, so a failure records nothing, and each person is told once, even with several replicas. A crash after the send and before the commit tells that person again, which is the better way to be wrong.
+- **The 30 days run from the last person told, not the first success,** so nobody has less than 30 days. The date in the email is the date at the moment of that person's send, so what actually happens is that date or later, and the email says "at the earliest".
+- A temporary failure (a 4xx or no answer) holds the clock, and is retried on the next check. No answer at all stops that check, as the rest would only wait to find out the same thing.
+- An address the server refuses for good at `RCPT TO` (a 5xx) doesn't hold up the rest, and is counted in the audit entry as `refused`. At least one person must have been told, so a mail server refusing everyone counts for nothing.
+- "Told" means our mail server accepted it. A bounce after that isn't seen.
+- People who become active once a notice has finished aren't told. New chats of theirs aren't old anyway, but see the note on someone re-enabled.
+
+**When nobody can send.** With no `SMTP_HOST`, with `console-api` down, or with no active user in the company, the notice stays unsent, so the company keeps waiting and its old period stays in force. A notice still unsent an hour after it was asked for counts as a failure in that daily run (`<slug> chats: its notice has not gone out`), so the provider console says `failed`. A first notice asked for by today's run can't be late yet, so that shows on the next run.
+
+**Audit.** With counts and periods, and no names or addresses: `chat_retention.update` (with `inForce` and `startsAt`), `chat_retention.notice_requested`, `chat_retention.notice_sent` (`told`, `refused`, `months`, `startsAt`), `chat_retention.started`. `platform.daily` has `chatNoticeWaiting`, the companies with a notice outstanding, and `chatNoticeNotified`, those of them already told.
+
+**What the setting shows.** `GET /tenants/:tid/chat-retention` returns `months` (what's chosen), `inForce`, and `notice` (`months`, `notifiedAt`, `startsAt`). The policy page says when deletion starts and what's pending, and its confirmation explains the wait.
 
 A chat goes when its conversation's `updatedAt` is older than the period, in calendar months back in UTC, and neither it nor any of its messages has a date since then. LibreChat moves `updatedAt` on each message. A conversation with no date is left alone, and so is one whose id another person's recent conversation shares. Pinned, archived and bookmarked chats go like any other, and a shared link to one stops working.
 
-For each company, in batches:
+For each company whose period is in force, in batches:
 
-1. The provisioner picks the oldest chats past the period. It reads the period itself, so the host can't ask for anything younger to go. It returns ids and counts, never a title, text or file name.
+1. The provisioner picks the oldest chats past the period in force. It reads the period itself, and refuses a company with none, so the host can't ask for anything younger to go. It returns ids and counts, never a title, text or file name.
 2. The host removes them from the search index, and waits until that's done. LibreChat's indexes can be filtered only by `user`, so this goes by id: `messageId` in `messages` and `conversationId` in `convos`.
 3. The host removes the files that can go, by id, from the LibreChat container.
 4. The provisioner checks again that nothing has come back to life, then deletes the file records, then every document with that `conversationId` in any collection, the conversation last, then writes one `chat.retention` audit entry with counts. LibreChat's bookmark and project counts are recounted.
@@ -121,7 +145,9 @@ If it stops anywhere, the next run finds the same chats and finishes. A failure 
 - Messages whose conversation no longer exists, as nothing selects them.
 - An old file no chat points at any more, such as one from a chat a person deleted themselves. LibreChat leaves those for them to delete in "My files".
 - Backups hold deleted chats until they age out after 30 days (LLD-10 §8).
-- A chat imported with old dates counts as old, and goes in the next run.
+- A chat imported with old dates counts as old, and goes in the next run, with no notice of its own.
+- Someone re-enabled after a notice finished, or disabled while it went out, isn't told. Someone who joins later is told nothing about retention by this at all, which is for the company's own privacy notice.
+- A company suspended during its 30 days: the time keeps running, though its people can't sign in to look at their chats.
 
 ## 3. librechat.tmpl.yaml (key parts)
 

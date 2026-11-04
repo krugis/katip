@@ -12,6 +12,7 @@ import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWK } from
 import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { checkAlerts, type Mail, type Mailer } from '../src/alerts.js';
+import { addressRefused, chatNoticeMail, sendChatNotices } from '../src/chat-notice.js';
 import { buildApi } from '../src/app.js';
 import { createVerifier } from '../src/auth.js';
 import { parseCsv } from '../src/csv.js';
@@ -425,6 +426,16 @@ describe('the console role', () => {
     ['read who used what', `select user_id from usage_events`],
     ['change limits', `update tenant_limits set std_tokens = 1`],
     ['forget an alert', `delete from budget_alerts`],
+    ['forget who was told of a notice', `delete from chat_retention_notice_recipients`],
+    [
+      'rewrite who was told of a notice',
+      `update chat_retention_notice_recipients set user_id = null`,
+    ],
+    ['delete the state of chat retention', `delete from chat_retention_state`],
+    [
+      'move a chat retention state to another company',
+      `update chat_retention_state set tenant_id = null`,
+    ],
     ['delete departments', `delete from departments`],
     ['read gateway keys', `select * from gateway_keys`],
     ['rewrite the audit log', `update audit_log set action = 'x'`],
@@ -708,20 +719,26 @@ describe('chat retention', () => {
 
   it('is 12 months until the company says otherwise, even with no policy yet', async () => {
     await admin`delete from tenant_policies where tenant_id = ${a}`;
+    await admin`delete from chat_retention_state where tenant_id = ${a}`;
     const res = await send('GET', path(a));
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ months: 12 });
+    expect(res.json()).toEqual({ months: 12, inForce: null, notice: null });
   });
 
   it('can be set, and is audited with both values', async () => {
     const res = await send('PUT', path(a), { months: 6 });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ months: 6 });
-    expect((await send('GET', path(a))).json()).toEqual({ months: 6 });
+    expect(res.json()).toEqual({ months: 6, inForce: null, notice: null });
+    expect((await send('GET', path(a))).json()).toMatchObject({ months: 6 });
     const [entry] = await admin`select * from audit_log
       where tenant_id = ${a} and action = 'chat_retention.update' order by ts desc limit 1`;
     expect(entry).toMatchObject({ actor_id: ownerId, target_type: 'policy' });
-    expect(entry!['details']).toEqual({ months: 6, previousMonths: 12 });
+    expect(entry!['details']).toEqual({
+      months: 6,
+      previousMonths: 12,
+      inForce: null,
+      startsAt: null,
+    });
   });
 
   it("creates a row the gateway and the policy page can still read, if there wasn't one", async () => {
@@ -751,7 +768,7 @@ describe('chat retention', () => {
       version: current.version,
     });
     expect(res.statusCode).toBe(200);
-    expect((await send('GET', path(a))).json()).toEqual({ months: 9 });
+    expect((await send('GET', path(a))).json()).toMatchObject({ months: 9 });
   });
 
   it('refuses anything out of range or not a whole number of months', async () => {
@@ -762,7 +779,7 @@ describe('chat retention', () => {
     }
     expect((await send('PUT', path(a), {})).statusCode).toBe(400);
     expect((await send('PUT', path(a), { months: 12, never: true })).statusCode).toBe(400);
-    expect((await send('GET', path(a))).json()).toEqual({ months: 12 });
+    expect((await send('GET', path(a))).json()).toMatchObject({ months: 12 });
     for (const months of [1, 120]) {
       expect((await send('PUT', path(a), { months })).statusCode).toBe(200);
     }
@@ -781,6 +798,409 @@ describe('chat retention', () => {
     const bearer = await token('owner@a.test', 'tenant-a', ['user']);
     expect((await send('GET', path(a), undefined, bearer)).statusCode).toBe(403);
     expect((await send('PUT', path(a), { months: 1 }, bearer)).statusCode).toBe(403);
+  });
+
+  it('a provider admin can see it, and cannot change it', async () => {
+    await send('PUT', path(a), { months: 12 });
+    const provider = await token('staff@katip.test', 'provider', ['provider_admin']);
+    const seen = await send('GET', path(a), undefined, provider);
+    expect(seen.statusCode).toBe(200);
+    expect(seen.json()).toMatchObject({ months: 12 });
+    const before = await admin`select count(*)::int as n from audit_log
+      where tenant_id = ${a} and action = 'chat_retention.update'`;
+    const res = await send('PUT', path(a), { months: 1 }, provider);
+    expect(res.statusCode).toBe(403);
+    expect(await stored(a)).toMatchObject({ months: 12 });
+    const after = await admin`select count(*)::int as n from audit_log
+      where tenant_id = ${a} and action = 'chat_retention.update'`;
+    expect(after[0]!['n']).toBe(before[0]!['n']);
+  });
+});
+
+describe('telling a company its chats will go', () => {
+  const silent = createLogger('test', { level: 'silent' });
+  const NOW = new Date('2026-11-04T10:00:00Z');
+  const DAY = 86_400_000;
+  let mails: Mail[] = [];
+  const mailer: Mailer = async (m) => {
+    mails.push(m);
+  };
+  const refused = () =>
+    Object.assign(new Error('all recipients were rejected: x@y.test'), {
+      code: 'EENVELOPE',
+      responseCode: 550,
+    });
+  const later = () =>
+    Object.assign(new Error('try later'), { code: 'EENVELOPE', responseCode: 451 });
+  const path = (tenant: string) => `/api/v1/tenants/${tenant}/chat-retention`;
+  let serial = 0;
+  let c: string;
+  let slug: string;
+
+  const company = async () => {
+    serial += 1;
+    slug = `notice-${serial}`;
+    c = await addTenant(slug, 10);
+    return c;
+  };
+  /** A notice as the daily job asks for one. */
+  const asked = async (tenant: string, months = 6) => {
+    const id = randomUUID();
+    await admin`insert into chat_retention_state (tenant_id, in_force_months, notice_id, notice_months, notice_requested_at)
+      values (${tenant}, null, ${id}, ${months}, now())`;
+    return id;
+  };
+  const state = async (tenant: string) => {
+    const [row] = await admin`select * from chat_retention_state where tenant_id = ${tenant}`;
+    return row!;
+  };
+  const notifiedAt = async (tenant: string) => {
+    const value = (await state(tenant))['notified_at'] as string | null;
+    return value && new Date(value);
+  };
+  const toldTo = () => mails.flatMap((m) => m.to).sort();
+
+  beforeEach(async () => {
+    mails = [];
+    await admin`delete from chat_retention_notice_recipients`;
+    await admin`delete from chat_retention_state`;
+    await company();
+  });
+
+  it('tells each active person separately, once, and only in this company', async () => {
+    await addUser(c, `boss-${serial}@n.test`, 'tenant_admin');
+    await addUser(c, `one-${serial}@n.test`);
+    await addUser(c, `off-${serial}@n.test`, 'user', 'disabled');
+    const elsewhere = await addTenant(`elsewhere-${serial}`, 1);
+    await addUser(elsewhere, `other-${serial}@n.test`);
+    await asked(c);
+
+    expect(await sendChatNotices(store, mailer, silent, () => NOW)).toBe(1);
+
+    expect(toldTo()).toEqual([`boss-${serial}@n.test`, `one-${serial}@n.test`]);
+    expect(mails.every((m) => m.to.length === 1)).toBe(true);
+    expect(await notifiedAt(c)).toEqual(NOW);
+    await sendChatNotices(store, mailer, silent, () => new Date(NOW.getTime() + DAY));
+    expect(mails).toHaveLength(2);
+    expect(await notifiedAt(c)).toEqual(NOW);
+  });
+
+  it('says in Turkish and English what goes, when, and who to ask, and names no chat', async () => {
+    await addUser(c, `one-${serial}@n.test`);
+    await asked(c, 6);
+    await sendChatNotices(store, mailer, silent, () => NOW);
+    const [mail] = mails;
+    expect(mail!.subject).toBe(
+      `${slug}: eski sohbetler 4 Aralık 2026 tarihinden itibaren silinecek`,
+    );
+    expect(mail!.text).toContain('6 aydan uzun süredir kullanılmayan sohbetler');
+    expect(mail!.text).toContain('4 Aralık 2026');
+    expect(mail!.text).toContain('yöneticisine başvurun');
+    expect(mail!.text).toContain('4 December 2026');
+    expect(mail!.text).toContain('6 months');
+  });
+
+  it('writes the date as it is in Turkey', () => {
+    const late = new Date('2026-12-04T22:00:00Z');
+    expect(chatNoticeMail('A', 1, late).subject).toContain('5 Aralık 2026');
+  });
+
+  it('audits counts, with no names or addresses', async () => {
+    await addUser(c, `secret-${serial}@n.test`);
+    await asked(c, 6);
+    await sendChatNotices(store, mailer, silent, () => NOW);
+    const [entry] = await audit(c);
+    expect(entry).toMatchObject({
+      action: 'chat_retention.notice_sent',
+      actor_type: 'system',
+      actor_id: 'console-api',
+    });
+    expect(entry!['details']).toEqual({
+      months: 6,
+      told: 1,
+      refused: 0,
+      startsAt: new Date(NOW.getTime() + 30 * DAY).toISOString(),
+    });
+  });
+
+  it('keeps nothing of a send that failed, and tries again', async () => {
+    await addUser(c, `one-${serial}@n.test`);
+    await asked(c);
+    await sendChatNotices(
+      store,
+      async () => {
+        throw new Error('smtp down');
+      },
+      silent,
+      () => NOW,
+    );
+    expect(await notifiedAt(c)).toBeNull();
+    expect(
+      await admin`select 1 from chat_retention_notice_recipients where tenant_id = ${c}`,
+    ).toHaveLength(0);
+    const after = new Date(NOW.getTime() + 60_000);
+    await sendChatNotices(store, mailer, silent, () => after);
+    expect(mails).toHaveLength(1);
+    expect(await notifiedAt(c)).toEqual(after);
+  });
+
+  it('starts the 30 days after the last send, however long the list took', async () => {
+    for (const n of [1, 2, 3]) await addUser(c, `p${n}-${serial}@n.test`);
+    await asked(c);
+    let minutes = 0;
+    const clock = () => new Date(NOW.getTime() + minutes * 60_000);
+    let lastSend = NOW;
+    await sendChatNotices(
+      store,
+      async () => {
+        minutes += 10;
+        lastSend = clock();
+      },
+      silent,
+      clock,
+    );
+    expect(lastSend.getTime()).toBe(NOW.getTime() + 30 * 60_000);
+    expect(await notifiedAt(c)).toEqual(lastSend);
+  });
+
+  it('stops trying when the server does not answer at all', async () => {
+    for (const n of [1, 2, 3]) await addUser(c, `p${n}-${serial}@n.test`);
+    await asked(c);
+    let tries = 0;
+    await sendChatNotices(
+      store,
+      async () => {
+        tries += 1;
+        throw Object.assign(new Error('refused'), { code: 'ESOCKET' });
+      },
+      silent,
+      () => NOW,
+    );
+    expect(tries).toBe(1);
+  });
+
+  it('after a partial failure, tells only who is left, and counts from the last of them', async () => {
+    const [p1, p2] = [`p1-${serial}@n.test`, `p2-${serial}@n.test`];
+    await addUser(c, p1);
+    await addUser(c, p2);
+    await asked(c);
+    const failing: Mailer = async (m) => {
+      if (m.to[0] === p2) throw later();
+      mails.push(m);
+    };
+    await sendChatNotices(store, failing, silent, () => NOW);
+    expect(toldTo()).toEqual([p1]);
+    expect(await notifiedAt(c)).toBeNull();
+
+    const after = new Date(NOW.getTime() + 2 * DAY);
+    await sendChatNotices(store, mailer, silent, () => after);
+    expect(toldTo()).toEqual([p1, p2].sort());
+    expect(await notifiedAt(c)).toEqual(after);
+  });
+
+  it("doesn't let an address the server refuses for good hold up everyone else", async () => {
+    const [good, bad] = [`good-${serial}@n.test`, `bad-${serial}@n.test`];
+    await addUser(c, good);
+    await addUser(c, bad);
+    await asked(c);
+    await sendChatNotices(
+      store,
+      async (m) => {
+        if (m.to[0] === bad) throw refused();
+        mails.push(m);
+      },
+      silent,
+      () => NOW,
+    );
+    expect(await notifiedAt(c)).toEqual(NOW);
+    const [entry] = await audit(c);
+    expect(entry!['details']).toMatchObject({ told: 1, refused: 1 });
+  });
+
+  it('does not count as told when every address is refused', async () => {
+    await addUser(c, `one-${serial}@n.test`);
+    await asked(c);
+    await sendChatNotices(
+      store,
+      async () => {
+        throw refused();
+      },
+      silent,
+      () => NOW,
+    );
+    expect(await notifiedAt(c)).toBeNull();
+  });
+
+  it('keeps waiting when there is nobody to tell', async () => {
+    await addUser(c, `off-${serial}@n.test`, 'user', 'disabled');
+    await asked(c);
+    expect(await sendChatNotices(store, mailer, silent, () => NOW)).toBe(0);
+    expect(await notifiedAt(c)).toBeNull();
+  });
+
+  it('includes someone who arrives while it is still going out', async () => {
+    const p1 = `p1-${serial}@n.test`;
+    await addUser(c, p1);
+    await asked(c);
+    const p2 = `p2-${serial}@n.test`;
+    await sendChatNotices(
+      store,
+      async () => {
+        throw later();
+      },
+      silent,
+      () => NOW,
+    );
+    await addUser(c, p2);
+    await sendChatNotices(store, mailer, silent, () => NOW);
+    expect(toldTo()).toEqual([p1, p2].sort());
+  });
+
+  it('leaves a suspended company until it is back', async () => {
+    await addUser(c, `one-${serial}@n.test`);
+    await asked(c);
+    await admin`update tenants set status = 'suspended' where id = ${c}`;
+    await sendChatNotices(store, mailer, silent, () => NOW);
+    expect(mails).toEqual([]);
+    await admin`update tenants set status = 'active' where id = ${c}`;
+  });
+
+  it('puts no address in its log', async () => {
+    await addUser(c, `private-${serial}@n.test`);
+    await asked(c);
+    const lines: unknown[] = [];
+    const log = { ...silent, warn: (...args: unknown[]) => lines.push(args) } as typeof silent;
+    await sendChatNotices(
+      store,
+      async () => {
+        throw later();
+      },
+      log,
+      () => NOW,
+    );
+    expect(lines.length).toBeGreaterThan(0);
+    expect(JSON.stringify(lines)).not.toContain('private-');
+    expect(JSON.stringify(lines)).toContain(slug);
+  });
+
+  it('knows a refused address from a passing failure', () => {
+    expect(addressRefused(refused())).toBe(true);
+    expect(addressRefused(later())).toBe(false);
+    expect(addressRefused(new Error('down'))).toBe(false);
+    // A refusal of the sender, say, is the server's setup, and not about this person.
+    expect(
+      addressRefused(Object.assign(new Error('x'), { code: 'EMESSAGE', responseCode: 554 })),
+    ).toBe(false);
+  });
+
+  describe('through the API', () => {
+    const owner = () => `owner-${serial}@n.test`;
+    const bearer = () => token(owner(), slug);
+    const get = async () => (await send('GET', path(c), undefined, await bearer())).json();
+    const put = async (months: number) =>
+      (await send('PUT', path(c), { months }, await bearer())).json();
+    const enforced = async (months: number) => {
+      await admin`insert into tenant_policies (tenant_id, policy, version, chat_retention_months)
+        values (${c}, '{}'::jsonb, 0, ${months})`;
+      await admin`insert into chat_retention_state (tenant_id, in_force_months)
+        values (${c}, ${months})`;
+    };
+
+    beforeEach(async () => {
+      await addUser(c, owner(), 'tenant_admin');
+    });
+
+    it('asks for no email before the first run', async () => {
+      expect(await put(6)).toEqual({ months: 6, inForce: null, notice: null });
+      await sendChatNotices(store, mailer, silent, () => NOW);
+      expect(mails).toEqual([]);
+    });
+
+    it('shortening keeps the old period, emails people, and then shows the date', async () => {
+      await enforced(12);
+      const saved = await put(6);
+      expect(saved).toEqual({
+        months: 6,
+        inForce: 12,
+        notice: { months: 6, notifiedAt: null, startsAt: null },
+      });
+      const now = new Date();
+      await sendChatNotices(store, mailer, silent, () => now);
+      expect(toldTo()).toEqual([owner()]);
+      expect(await get()).toEqual({
+        months: 6,
+        inForce: 12,
+        notice: {
+          months: 6,
+          notifiedAt: now.toISOString(),
+          startsAt: new Date(now.getTime() + 30 * DAY).toISOString(),
+        },
+      });
+    });
+
+    it('lengthening takes effect at once, and cancels what was pending', async () => {
+      await enforced(12);
+      await put(6);
+      expect(await put(24)).toEqual({ months: 24, inForce: 24, notice: null });
+      await sendChatNotices(store, mailer, silent, () => NOW);
+      expect(mails).toEqual([]);
+    });
+
+    it('a notice replaced while going out goes to everyone again, with the right text', async () => {
+      await enforced(12);
+      await put(6);
+      await addUser(c, `late-${serial}@n.test`);
+      const late = `late-${serial}@n.test`;
+      await sendChatNotices(
+        store,
+        async (m) => {
+          if (m.to[0] === late) throw later();
+          mails.push(m);
+        },
+        silent,
+        () => NOW,
+      );
+      expect(mails).toHaveLength(1);
+      await put(3);
+      mails = [];
+      await sendChatNotices(store, mailer, silent, () => NOW);
+      expect(toldTo()).toEqual([late, owner()].sort());
+      expect(mails.every((m) => m.text.includes('3 aydan'))).toBe(true);
+    });
+
+    it('does not finish a notice replaced while it was going out', async () => {
+      await enforced(12);
+      await put(6);
+      const pending = await store.pendingChatNotice(c);
+      await put(3);
+      expect(await store.finishChatNotice(c, pending!.id, NOW, { told: 1, refused: 0 })).toBe(
+        false,
+      );
+      expect(
+        await store.tellChatNotice(c, pending!.id, pending!.toTell[0]!.userId, async () => {
+          throw new Error('must not be called');
+        }),
+      ).toBe(false);
+      expect(await notifiedAt(c)).toBeNull();
+    });
+
+    it('shows what time has done, even before the daily job has noticed', async () => {
+      await enforced(12);
+      await put(6);
+      await sendChatNotices(store, mailer, silent, () => new Date(Date.now() - 31 * DAY));
+      expect(await get()).toEqual({ months: 6, inForce: 6, notice: null });
+    });
+
+    it("isn't reachable from another company", async () => {
+      await enforced(12);
+      await put(6);
+      expect(await store.pendingChatNotice(a)).toBeNull();
+      const wrong = await store.pendingChatNotice(c);
+      await expect(
+        store.finishChatNotice(a, wrong!.id, NOW, { told: 1, refused: 0 }),
+      ).resolves.toBe(false);
+      expect(await notifiedAt(c)).toBeNull();
+    });
   });
 });
 
@@ -803,6 +1223,8 @@ describe('the policy', () => {
       policy: { atQuotaLimit: 'downgrade', residency: 'ANY_APPROVED', pii: { mode: 'mask' } },
     });
     expect(body.catalog.length).toBeGreaterThan(0);
+    // The seeded embedding model is global, so a regional rule leaves uploads with no model.
+    expect(body.fileSearch).toEqual({ ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false });
   });
 
   it('never shows prices, which are our cost', async () => {
@@ -1167,6 +1589,89 @@ describe('usage reports', () => {
     expect((await report(b, 'groupBy=user')).statusCode).toBe(404);
     expect((await send('GET', `/api/v1/tenants/${b}/usage/export`)).statusCode).toBe(404);
     expect((await report(a, 'groupBy=user')).json().rows).toEqual([]);
+  });
+
+  describe('tokens with no person behind them: file search', () => {
+    const NO_PERSON = '00000000-0000-0000-0000-000000000000';
+
+    it('have a row by person, with no users row and no raw id, sorted like anyone', async () => {
+      await add(a, ownerId, 'standard', 10, 0);
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      const res = await report(a, 'groupBy=user');
+      expect(res.statusCode).toBe(200);
+      const rows = res.json().rows;
+      expect(rows[0]).toEqual({
+        key: 'file-search',
+        label: 'File search',
+        standard: 500,
+        premium: 0,
+        total: 500,
+      });
+      expect(rows[1].key).toBe(ownerId);
+      expect(res.body).not.toContain(NO_PERSON);
+    });
+
+    it('are the only row if nobody else has used anything', async () => {
+      await add(a, NO_PERSON, 'embedding', 5, 0);
+      expect(
+        (await report(a, 'groupBy=user')).json().rows.map((r: { key: string }) => r.key),
+      ).toEqual(['file-search']);
+    });
+
+    it('have their own row by department, apart from people in no department', async () => {
+      const dept = (
+        await admin`insert into departments (tenant_id, name) values (${a}, 'Muhasebe') returning id`
+      )[0]!['id'] as string;
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(a, ownerId, 'standard', 40, 0);
+      await add(a, await addUser(a, 'muhasebe@a.test'), 'standard', 7, 0, 'now()', dept);
+      const rows = (await report(a, 'groupBy=dept')).json().rows;
+      expect(rows.map((r: { key: string | null; total: number }) => [r.key, r.total])).toEqual([
+        ['file-search', 500],
+        [null, 40],
+        [dept, 7],
+      ]);
+      expect(rows[2].label).toBe('Muhasebe');
+    });
+
+    it('count in the totals by model and by day', async () => {
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(a, ownerId, 'standard', 40, 0);
+      for (const group of ['model', 'day']) {
+        const rows = (await report(a, `groupBy=${group}`)).json().rows;
+        expect(rows.reduce((n: number, r: { total: number }) => n + r.total, 0)).toBe(540);
+        expect(JSON.stringify(rows)).not.toContain('file-search');
+      }
+    });
+
+    it('stay out of a department report, and out of another company', async () => {
+      const dept = (
+        await admin`insert into departments (tenant_id, name) values (${a}, 'Hukuk') returning id`
+      )[0]!['id'] as string;
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      await add(b, NO_PERSON, 'embedding', 900, 0);
+      const inDept = await send(
+        'GET',
+        `/api/v1/tenants/${a}/departments/${dept}/usage?groupBy=user`,
+      );
+      expect(inDept.statusCode).toBe(200);
+      expect(inDept.json().rows).toEqual([]);
+      const totals = (await report(a, 'groupBy=user')).json().rows;
+      expect(totals).toHaveLength(1);
+      expect(totals[0].total).toBe(500);
+    });
+
+    it('are named in the CSV, in the language asked for', async () => {
+      await add(a, NO_PERSON, 'embedding', 500, 0);
+      const csv = (q: string) => send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=user${q}`);
+      expect((await csv('&lang=tr')).body).toContain('Dosya arama;500;0;500');
+      expect((await csv('&lang=en')).body).toContain('File search;500;0;500');
+      expect((await csv('')).body).toContain('File search;500;0;500');
+      expect((await csv('')).body).not.toContain(NO_PERSON);
+      const byDept = await send('GET', `/api/v1/tenants/${a}/usage/export?groupBy=dept&lang=tr`);
+      expect(byDept.body).toContain('Dosya arama;500;0;500');
+      expect((await csv('&lang=de')).statusCode).toBe(400);
+    });
   });
 
   describe('as a CSV', () => {

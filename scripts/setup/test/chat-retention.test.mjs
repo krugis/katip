@@ -26,7 +26,15 @@ const empty = {
 };
 
 /** Records the order of things, and runs out of chats after `batches`. */
-function fake({ slugs = ['acme'], batches = 1, failOn = null, more = false } = {}) {
+function fake({
+  slugs = ['acme'],
+  batches = 1,
+  failOn = null,
+  more = false,
+  waiting = 0,
+  notified = 0,
+  unsent = [],
+} = {}) {
   const steps = [];
   const left = new Map();
   const step = (name) => async (slug) => {
@@ -35,7 +43,7 @@ function fake({ slugs = ['acme'], batches = 1, failOn = null, more = false } = {
   };
   return {
     steps,
-    due: async () => slugs,
+    due: async () => ({ slugs, waiting, notified, unsent }),
     select: async (slug) => {
       steps.push(`select ${slug}`);
       const remaining = left.get(slug) ?? batches;
@@ -73,7 +81,28 @@ describe('taking old chats from each company', () => {
       filesKept: 2,
       backlog: [],
       failed: [],
+      waiting: 0,
+      notified: 0,
     });
+  });
+
+  it('touches only the companies the provisioner says may go', async () => {
+    const io = fake({ slugs: ['ready'] });
+    await expireChats(io);
+    expect(io.steps.every((s) => s.endsWith(' ready'))).toBe(true);
+  });
+
+  it('passes on the counts of companies waiting and told', async () => {
+    const result = await expireChats(fake({ slugs: [], waiting: 3, notified: 2 }));
+    expect(result).toMatchObject({ waiting: 3, notified: 2, conversations: 0 });
+  });
+
+  it("fails for a notice that hasn't gone out, and still does the others", async () => {
+    const io = fake({ slugs: ['ready'], unsent: ['nomail'] });
+    const result = await expireChats(io);
+    expect(result.failed).toEqual(['nomail chats: its notice has not gone out']);
+    expect(io.steps.some((s) => s.includes('nomail'))).toBe(false);
+    expect(io.steps).toContain('finish ready');
   });
 
   it("leaves Mongo alone if the search index couldn't be cleared", async () => {

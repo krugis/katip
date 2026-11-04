@@ -209,6 +209,31 @@ describe('seed options (values from katip.config.yaml)', () => {
     );
   });
 
+  it('marks a model self-hosted only when told, and forgets it when it stops being told', async () => {
+    const marked = async () =>
+      (
+        await db.execute<{ self_hosted: boolean }>(
+          sql`select self_hosted from model_catalog where id = 'std-gemma-4-26b'`,
+        )
+      )[0]!.self_hosted;
+    const models = ruleModels.map(only);
+    await seed(db, { models, tenant: null });
+    expect(await marked()).toBe(false);
+    await seed(db, {
+      models: models.map((m) => ({ ...m, selfHosted: m.id === 'std-gemma-4-26b' })),
+      tenant: null,
+    });
+    expect(await marked()).toBe(true);
+    await seed(db, { models, tenant: null });
+    expect(await marked()).toBe(false);
+    await seed(db, {
+      models: models.map((m) => ({ ...m, selfHosted: m.id === 'std-gemma-4-26b' })),
+      tenant: null,
+    });
+    await seed(db, { tenant: null });
+    expect(await marked()).toBe(false);
+  });
+
   it('rejects an unknown plan', async () => {
     await expect(seed(db, { tenant: { ...tenant, planCode: 'nope' } })).rejects.toThrow(
       'unknown plan nope',

@@ -32,6 +32,7 @@ const MODEL_FIELDS = [
   'price_out',
   'api_key_env',
   'litellm_params',
+  'self_hosted',
 ];
 
 /** Returns every problem found, so one run reports them all. Unknown settings are
@@ -167,6 +168,13 @@ export function validateConfig(c) {
       errors.push(`${where}: price_in and price_out must be integer micro-USD`);
     }
     if (!m?.litellm_params?.model) errors.push(`${where}.litellm_params.model: required`);
+    if (m?.self_hosted !== undefined && typeof m.self_hosted !== 'boolean') {
+      errors.push(`${where}.self_hosted: must be true or false`);
+    }
+    // Without its own address, LiteLLM would send the text to the provider's cloud.
+    if (m?.self_hosted === true && !m.litellm_params?.api_base) {
+      errors.push(`${where}.self_hosted: needs litellm_params.api_base, the server it runs on`);
+    }
   }
 
   if (!Array.isArray(c.tenants) || c.tenants.length === 0) {
@@ -259,12 +267,15 @@ export function mockModelsProblem(config, env) {
   );
 }
 
+/** Whether LiteLLM sends this model's calls where its litellm_params say. Otherwise a stand-in. */
+const usesOwnDestination = (m, env) => Boolean(env[m.api_key_env]);
+
 export function renderLiteLLMModels(config, env) {
   const lines = [];
   for (const m of config.models) {
     lines.push(`  - model_name: ${m.alias}`);
     lines.push(`    litellm_params:`);
-    if (env[m.api_key_env]) {
+    if (usesOwnDestination(m, env)) {
       for (const [k, v] of Object.entries(m.litellm_params)) lines.push(`      ${k}: ${v}`);
     } else if (env.KATIP_LOCAL_LLM_UPSTREAM && m.class !== 'embedding') {
       // A real model on this machine, reached through the relay (local-llm-relay.mjs).
@@ -335,8 +346,12 @@ export const platformIdentityInput = (config) => ({
   consoleOrigin: `https://console.${config.project.base_domain}`,
 });
 
-/** Input for scripts/setup/db-seed.mjs, which runs inside the gateway image. */
-export function seedInput(config) {
+/**
+ * Input for scripts/setup/db-seed.mjs, which runs inside the gateway image. A model marked
+ * self-hosted but with no key routes to a stand-in, so the marker isn't true of where its text
+ * goes, and it stays unmarked in the catalog. With no env given, nothing is marked.
+ */
+export function seedInput(config, env = {}) {
   return {
     tenants: config.tenants.map((t) => ({
       tenant: {
@@ -360,6 +375,7 @@ export function seedInput(config) {
       dataPolicy: m.data_policy,
       priceInUsdMicroPerM: m.price_in,
       priceOutUsdMicroPerM: m.price_out,
+      selfHosted: m.self_hosted === true && usesOwnDestination(m, env),
     })),
   };
 }

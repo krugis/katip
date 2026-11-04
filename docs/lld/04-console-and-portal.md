@@ -29,7 +29,7 @@ One React app (`apps/console`) serves four role-based areas. Its backend is `app
 | Overview | Seats used, quota consumption (std/premium/research) vs pooled limit, month-to-date cost, alerts |
 | Users | Invite (email), bulk CSV import, assign tier (Starter/Business/Studio seat), department, role; disable; reset MFA |
 | Departments | Create, assign managers, department budget (USD/month) and policy overrides |
-| Models and policies | Allowed aliases and models; behaviour at 100% (`block`/`downgrade`/`overage`); PII mode and per-entity overrides; data residency (KVKK add-on) |
+| Models and policies | Allowed aliases and models; behaviour at 100% (`block`/`downgrade`/`overage`); PII mode and per-entity overrides; data residency (KVKK add-on), with a warning when a rule leaves file search with no embedding model |
 | Access rules | IP allowlist, allowed countries, MFA required, session idle/max, (phase 2) trusted devices |
 | Identity | Connect Entra ID or Google Workspace (guided form → Keycloak IdP link); domain verification (DNS TXT) |
 | Usage and reports | By user, department, model, day; CSV export; monthly PDF summary |
@@ -79,7 +79,7 @@ Linked from LibreChat via the menu link / custom footer (verify LibreChat `inter
 | GET | `/api/v1/tenants/:tid/overview` | tenant_admin | Seats, and this month's tokens against the pooled limit. Never cost: that's our margin, and the console's role can't read it |
 | GET/PUT | `/api/v1/tenants/:tid/policy` | tenant_admin | The company's policy (zod `PolicySchema`), and the catalog without prices. PUT needs the version it read, and refuses a stale one. Residency and `tr-local` need the KVKK add-on. Publishes `policy.changed`; if that fails, the gateway's cache expires within 30 s anyway |
 | GET/PUT | `/api/v1/tenants/:tid/departments/:did/policy` | tenant_admin | A department's rules, which can only be stricter than the company's. The API refuses anything looser, and the gateway enforces it again on every request, so a company tightening later can't leave a department looser than itself |
-| GET/PUT | `/api/v1/tenants/:tid/chat-retention` | tenant_admin | How long the company keeps chats, in whole months from 1 to 120. Separate from the policy document, so it has no version and doesn't announce `policy.changed`. Audited as `chat_retention.update` with both values |
+| GET/PUT | `/api/v1/tenants/:tid/chat-retention` | tenant_admin. A provider admin can `GET`, and gets 403 on `PUT` | How long the company keeps chats, in whole months from 1 to 120, what's in force, and any notice waiting (LLD-07 §2c). Separate from the policy document, so it has no version and doesn't announce `policy.changed`. Audited as `chat_retention.update` with both values |
 | GET/PUT | `/api/v1/tenants/:tid/access-rules` | tenant_admin | Refuses a list that leaves out the caller's address unless `force` is set (LLD-02 §6) |
 | GET/POST/PATCH | `/api/v1/tenants/:tid/departments` | tenant_admin | |
 | GET | `/api/v1/tenants/:tid/usage?groupBy=user\|dept\|model\|day&from&to` | tenant_admin | Tokens from `usage_daily`, rolled up from the events on each request, so the numbers always match them. UTC days, up to 400. Never cost |

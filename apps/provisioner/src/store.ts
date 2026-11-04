@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Governance data for provisioning. Connects as katip_provider: tenants are being created
 // here, so no tenant context exists yet and it bypasses RLS by design (LLD-05 §1).
+import { retentionRowOf, retentionStateOf, type RetentionState } from '@katip/shared';
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -61,7 +62,12 @@ export interface ProvisionerStore {
   enforceRetention(): Promise<{ usage: number; usageDaily: number; audit: number }>;
   chatRetentionPeriods(
     slug?: string,
-  ): Promise<{ tenantId: string; slug: string; months: number }[]>;
+  ): Promise<{ tenantId: string; slug: string; state: RetentionState }[]>;
+  /** Moves one company on, one change to a company at a time, as the console does. */
+  stepChatRetention(
+    tenantId: string,
+    step: (state: RetentionState) => RetentionState,
+  ): Promise<{ before: RetentionState; after: RetentionState }>;
   recordDailyRun(details: Record<string, unknown>): Promise<void>;
   deletionsDue(): Promise<{ slug: string; requestId: string }[]>;
   deletionSubject(
@@ -75,6 +81,14 @@ export interface ProvisionerStore {
   finishJob(jobId: string, result: Record<string, unknown>): Promise<void>;
   failJob(jobId: string, step: string): Promise<void>;
 }
+
+const RETENTION_ROW = {
+  inForceMonths: schema.chatRetentionState.inForceMonths,
+  noticeId: schema.chatRetentionState.noticeId,
+  noticeMonths: schema.chatRetentionState.noticeMonths,
+  noticeRequestedAt: schema.chatRetentionState.noticeRequestedAt,
+  notifiedAt: schema.chatRetentionState.notifiedAt,
+};
 
 const currentMonth = (now: Date): string =>
   `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -435,22 +449,56 @@ export class DbProvisionerStore implements ProvisionerStore {
   /** Not a suspended company's: its search index is stopped, so it waits until it's resumed. */
   async chatRetentionPeriods(
     slug?: string,
-  ): Promise<{ tenantId: string; slug: string; months: number }[]> {
+  ): Promise<{ tenantId: string; slug: string; state: RetentionState }[]> {
     const rows = await this.db
       .select({
         tenantId: schema.tenants.id,
         slug: schema.tenants.slug,
         months: schema.tenantPolicies.chatRetentionMonths,
+        ...RETENTION_ROW,
       })
       .from(schema.tenants)
       .leftJoin(schema.tenantPolicies, eq(schema.tenantPolicies.tenantId, schema.tenants.id))
+      .leftJoin(
+        schema.chatRetentionState,
+        eq(schema.chatRetentionState.tenantId, schema.tenants.id),
+      )
       .where(
         and(eq(schema.tenants.status, 'active'), slug ? eq(schema.tenants.slug, slug) : undefined),
       );
     return rows.map((r) => ({
-      ...r,
-      months: r.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS,
+      tenantId: r.tenantId,
+      slug: r.slug,
+      state: retentionStateOf(r.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS, r),
     }));
+  }
+
+  async stepChatRetention(
+    tenantId: string,
+    step: (state: RetentionState) => RetentionState,
+  ): Promise<{ before: RetentionState; after: RetentionState }> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${tenantId}, 0))`);
+      const [policy] = await tx
+        .select({ months: schema.tenantPolicies.chatRetentionMonths })
+        .from(schema.tenantPolicies)
+        .where(eq(schema.tenantPolicies.tenantId, tenantId));
+      const [row] = await tx
+        .select(RETENTION_ROW)
+        .from(schema.chatRetentionState)
+        .where(eq(schema.chatRetentionState.tenantId, tenantId));
+      const before = retentionStateOf(policy?.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS, row);
+      const after = step(before);
+      const next = retentionRowOf(after);
+      if (JSON.stringify(next) !== JSON.stringify(retentionRowOf(before))) {
+        const change = { ...next, updatedAt: this.now() };
+        await tx
+          .insert(schema.chatRetentionState)
+          .values({ tenantId, ...change })
+          .onConflictDoUpdate({ target: schema.chatRetentionState.tenantId, set: change });
+      }
+      return { before, after };
+    });
   }
 
   /** False if that date already has a rate: an invoice may rely on it, so it stays. */

@@ -2,6 +2,7 @@
 import type {
   Alias,
   ModelEntry,
+  Residency,
   RouteCondition,
   RouteDecision,
   RouteRequest,
@@ -13,6 +14,14 @@ export class RouteDeniedError extends Error {
   constructor(public readonly reason: string) {
     super(reason);
     this.name = 'RouteDeniedError';
+  }
+}
+
+/** A company asked for embeddings, and no model it may use can make them. */
+export class NoEmbeddingModelError extends RouteDeniedError {
+  constructor(public readonly residency: Residency) {
+    super(`no embedding model is allowed under ${residency}`);
+    this.name = 'NoEmbeddingModelError';
   }
 }
 
@@ -33,13 +42,30 @@ function matches(cond: RouteCondition, req: RouteRequest, policy: TenantPolicy):
   return true;
 }
 
-function allowedForTenant(m: ModelEntry, policy: TenantPolicy): boolean {
+/** What holds however a model is chosen: it's on, its data policy is approved, its region fits. */
+function servableUnder(
+  m: Pick<ModelEntry, 'enabled' | 'dataPolicy' | 'region'>,
+  residency: Residency,
+): boolean {
   if (!m.enabled) return false;
   if (!ALLOWED_DATA_POLICIES.has(m.dataPolicy)) return false;
-  if (policy.allowedModels.length > 0 && !policy.allowedModels.includes(m.id)) return false;
-  if (policy.residency === 'TR_ONLY' && m.region !== 'tr') return false;
-  if (policy.residency === 'EU_ONLY' && !(m.region === 'eu' || m.region === 'tr')) return false;
+  if (residency === 'TR_ONLY' && m.region !== 'tr') return false;
+  if (residency === 'EU_ONLY' && !(m.region === 'eu' || m.region === 'tr')) return false;
   return true;
+}
+
+function allowedForTenant(m: ModelEntry, policy: TenantPolicy): boolean {
+  if (policy.allowedModels.length > 0 && !policy.allowedModels.includes(m.id)) return false;
+  return servableUnder(m, policy.residency);
+}
+
+/** Whether file search can work under each data location rule, for the console to say so. */
+export function embeddingByResidency(
+  catalog: Pick<ModelEntry, 'class' | 'enabled' | 'dataPolicy' | 'region'>[],
+): Record<Residency, boolean> {
+  const any = (residency: Residency) =>
+    catalog.some((m) => m.class === 'embedding' && servableUnder(m, residency));
+  return { ANY_APPROVED: any('ANY_APPROVED'), EU_ONLY: any('EU_ONLY'), TR_ONLY: any('TR_ONLY') };
 }
 
 /**
@@ -76,7 +102,10 @@ export function chooseRoute(
  * Picks the model for an embedding request: `auto` is the tenant's first allowed embedding
  * model, `tr-local` the first hosted in Türkiye, anything else one by its id. Always one model:
  * a vector only compares with vectors from the same model, so a fallback would quietly leave
- * a file unsearchable. Throws RouteDeniedError if it isn't allowed.
+ * a file unsearchable. `allowedModels` doesn't apply: it's the list of chat choices, and the
+ * console can't name an embedding model in it. Residency and the data policy do apply. Throws
+ * NoEmbeddingModelError if nothing the company may use can embed, and RouteDeniedError for
+ * something that isn't an embedding model.
  */
 export function chooseEmbeddingRoute(
   requested: string,
@@ -86,15 +115,33 @@ export function chooseEmbeddingRoute(
   if ((requested === 'auto' || requested === 'tr-local') && !policy.aliases[requested]) {
     throw new RouteDeniedError(`model alias "${requested}" is not enabled for this company`);
   }
-  const allowed = catalog.filter((m) => m.class === 'embedding' && allowedForTenant(m, policy));
+  const allowed = catalog.filter(
+    (m) => m.class === 'embedding' && servableUnder(m, policy.residency),
+  );
   const model =
     requested === 'auto'
       ? allowed[0]
       : requested === 'tr-local'
         ? allowed.find((m) => m.region === 'tr')
         : allowed.find((m) => m.id === requested);
-  if (!model) throw new RouteDeniedError(`no allowed embedding model for "${requested}"`);
+  if (!model) {
+    const known =
+      requested === 'auto' ||
+      requested === 'tr-local' ||
+      catalog.some((m) => m.class === 'embedding' && m.id === requested);
+    if (known) throw new NoEmbeddingModelError(policy.residency);
+    throw new RouteDeniedError(`no allowed embedding model for "${requested}"`);
+  }
   return { ruleId: 'embedding', class: model.class, candidates: [model] };
+}
+
+/**
+ * Whether everything this route could reach is marked self-hosted. Every candidate counts, so
+ * a fallback to an outside model, were one ever added, keeps the text masked. Only a real
+ * `true` counts: a marker that's absent or anything else means outside.
+ */
+export function reachesOnlySelfHosted(decision: Pick<RouteDecision, 'candidates'>): boolean {
+  return decision.candidates.length > 0 && decision.candidates.every((m) => m.selfHosted === true);
 }
 
 /** Aliases visible to a tenant in GET /v1/models. */

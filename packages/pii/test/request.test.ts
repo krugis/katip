@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PlaceholderMap,
   maskChatRequest,
+  embeddingPiiPolicy,
   maskEmbeddingRequest,
   type PiiPolicy,
 } from '../src/index.js';
@@ -30,6 +31,35 @@ const leaks = (v: unknown) => {
   return s.includes(TCKN) || s.includes('Ayşe') || s.includes('Yılmaz');
 };
 const user = { role: 'user', content: 'merhaba' };
+
+describe('embeddingPiiPolicy', () => {
+  it('masks everything for an outside model, whatever is set, but a block', () => {
+    const p = embeddingPiiPolicy({ mode: 'off', entities: { TR_IBAN: 'block' } }, false);
+    expect(p.mode).toBe('mask');
+    expect(p.entities).toMatchObject({ TR_TCKN: 'mask', PERSON: 'mask', TR_IBAN: 'block' });
+  });
+
+  it('turns off everything for a self-hosted model, but a block', () => {
+    const p = embeddingPiiPolicy({ mode: 'mask', entities: { TR_IBAN: 'block' } }, true);
+    expect(p.mode).toBe('off');
+    expect(p.entities).toMatchObject({ TR_TCKN: 'off', PERSON: 'off', TR_IBAN: 'block' });
+  });
+
+  it('keeps block mode on every kind, either way, unless a kind says otherwise', () => {
+    for (const selfHosted of [true, false]) {
+      const p = embeddingPiiPolicy({ mode: 'block' }, selfHosted);
+      expect(p.entities).toMatchObject({ TR_TCKN: 'block', PERSON: 'block' });
+    }
+    expect(
+      embeddingPiiPolicy({ mode: 'block', entities: { PERSON: 'off' } }, true).entities,
+    ).toMatchObject({ PERSON: 'off', TR_TCKN: 'block' });
+  });
+
+  it('keeps what happens when the detector fails', () => {
+    const p = embeddingPiiPolicy({ mode: 'mask', onDetectorFailure: 'block' }, true);
+    expect(p.onDetectorFailure).toBe('block');
+  });
+});
 
 describe('maskEmbeddingRequest', () => {
   const embed = (input: string | string[], policy: PiiPolicy = { mode: 'mask' }, extra = person) =>

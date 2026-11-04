@@ -15,6 +15,8 @@ export { maskChatRequest, maskEmbeddingRequest, type MaskRequestResult } from '.
 export { PresidioClient, splitForAnalysis, type PresidioClientOptions } from './presidio.js';
 export {
   createMasker,
+  ALL_TYPES,
+  embeddingPiiPolicy,
   maskMessages,
   type Masker,
   type ChatMessage,

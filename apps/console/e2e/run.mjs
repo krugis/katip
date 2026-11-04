@@ -1080,6 +1080,12 @@ try {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
+  // A company nothing has happened to, however often this suite has run on this stack.
+  sql(`delete from chat_retention_state where tenant_id = '${tid}'`);
+  const noticeMails = (email) =>
+    mailpit(`/api/v1/search?query=${encodeURIComponent(`bcc:${email} subject:silinecek`)}`)
+      .messages_count;
+  const before = noticeMails(owner);
   check((await (await retentionCall('GET')).json()).months === 12, 'the default is 12 months');
   check((await retentionCall('PUT', { months: 0 })).status === 400, 'a period of 0 is refused');
   check((await retentionCall('PUT', { months: 121 })).status === 400, 'and one over 120');
@@ -1115,13 +1121,57 @@ try {
   }
   const auditCount = () =>
     sql(`select count(*) from audit_log where tenant_id = '${tid}' and action = 'chat.retention'`);
-  cli('daily');
   const chatsLeft = () =>
     JSON.parse(
       mongoshEval(
         `JSON.stringify(db.conversations.find({ conversationId: /^ret-/ }).toArray().map((c) => c.conversationId).sort())`,
       ),
     );
+  const ALL_RET = JSON.stringify(['ret-inside', 'ret-new', 'ret-old', 'ret-revived']);
+  cli('daily');
+  check(JSON.stringify(chatsLeft()) === ALL_RET, 'the first daily run deletes nothing');
+  check(
+    sql(`select notice_months from chat_retention_state where tenant_id = '${tid}'`) === '6',
+    'it asks for a notice about the chosen period',
+  );
+  const noticeArrived = await within(90, () => noticeMails(owner) === before + 1);
+  check(noticeArrived !== null, `the admin gets the email in Mailpit (took ${noticeArrived} s)`);
+  const noticeText = mailpit(
+    `/api/v1/message/${
+      mailpit(`/api/v1/search?query=${encodeURIComponent(`bcc:${owner} subject:silinecek`)}`)
+        .messages[0].ID
+    }`,
+  ).Text;
+  check(noticeText.includes('6 aydan'), 'it says the period');
+  check(!noticeText.includes('emeklilik') && !noticeText.includes('eski'), 'and names no chat');
+  check(
+    (await within(
+      30,
+      () =>
+        sql(
+          `select notified_at is not null from chat_retention_state where tenant_id = '${tid}'`,
+        ) === 't',
+    )) !== null,
+    'the date is recorded',
+  );
+  const shown = await (await retentionCall('GET')).json();
+  check(
+    shown.inForce === null && typeof shown.notice?.startsAt === 'string',
+    `the setting says when deletion starts (${shown.notice?.startsAt})`,
+  );
+  cli('daily');
+  check(JSON.stringify(chatsLeft()) === ALL_RET, 'a run during the 30 days deletes nothing either');
+  check(noticeMails(owner) === before + 1, 'and nobody is told twice');
+  // 29 days isn't enough, and 31 is. Aged like the chats, as nobody waits a month for a test.
+  sql(
+    `update chat_retention_state set notified_at = now() - interval '29 days' where tenant_id = '${tid}'`,
+  );
+  cli('daily');
+  check(JSON.stringify(chatsLeft()) === ALL_RET, 'nor on day 29');
+  sql(
+    `update chat_retention_state set notified_at = now() - interval '31 days' where tenant_id = '${tid}'`,
+  );
+  cli('daily');
   check(
     JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']),
     `only the chat past its period goes (${chatsLeft().join(', ')})`,
@@ -1153,7 +1203,22 @@ try {
     'running it again deletes nothing more',
   );
   check(auditCount() === afterFirst, 'and records nothing new');
-  check((await retentionCall('PUT', { months: 12 })).status === 200, 'the admin sets it back');
+  const shorter = await (await retentionCall('PUT', { months: 3 })).json();
+  check(
+    shorter.months === 3 && shorter.inForce === 6 && shorter.notice?.months === 3,
+    'shortening it leaves the old period in force',
+  );
+  check(
+    (await within(90, () => noticeMails(owner) === before + 2)) !== null,
+    'and tells people by email',
+  );
+  cli('daily');
+  check(chatsLeft().includes('ret-inside'), 'a chat between the two periods stays during the wait');
+  const lengthened = await (await retentionCall('PUT', { months: 12 })).json();
+  check(
+    lengthened.inForce === 12 && lengthened.notice === null,
+    'setting it back takes effect at once, and cancels the wait',
+  );
 
   console.log("a department's stricter rules, through to the real gateway");
   await admin.goto(`${consoleUrl}/tenant/departments`);

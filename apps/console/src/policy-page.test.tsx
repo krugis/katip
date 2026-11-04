@@ -25,15 +25,17 @@ const policy = {
   catalog: [],
 };
 
-const show = async () => {
+const enforcing = { months: 12, inForce: 12, notice: null };
+
+const show = async (retention: object = enforcing, who: api.Me = me) => {
   vi
     .spyOn(api, 'apiFetch')
     .mockImplementation(async (path: string) =>
-      path.endsWith('/chat-retention') ? { months: 12 } : policy,
+      path.endsWith('/chat-retention') ? retention : policy,
     ) as never;
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <TenantPolicies me={me} getToken={async () => 'token'} />
+      <TenantPolicies me={who} getToken={async () => 'token'} />
     </QueryClientProvider>,
   );
   return (await screen.findByTestId('chat-retention-months')) as HTMLInputElement;
@@ -45,6 +47,40 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe('the data location rule', () => {
+  const showWith = async (residency: string) => {
+    vi.spyOn(api, 'apiFetch').mockImplementation((async (path: string) =>
+      path.endsWith('/chat-retention')
+        ? { months: 12 }
+        : {
+            ...policy,
+            kvkkAddon: true,
+            policy: { ...policy.policy, residency },
+            fileSearch: { ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false },
+          }) as never);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TenantPolicies me={me} getToken={async () => 'token'} />
+      </QueryClientProvider>,
+    );
+    return (await screen.findByTestId('residency')) as HTMLSelectElement;
+  };
+
+  it('says when file search cannot work under it, as it is chosen', async () => {
+    const select = await showWith('ANY_APPROVED');
+    expect(screen.queryByTestId('residency-no-search')).toBeNull();
+    fireEvent.change(select, { target: { value: 'TR_ONLY' } });
+    expect((await screen.findByTestId('residency-no-search')).textContent).toContain(
+      'dosya arama çalışmaz',
+    );
+  });
+
+  it('says so for a rule already saved', async () => {
+    await showWith('EU_ONLY');
+    await screen.findByTestId('residency-no-search');
+  });
 });
 
 describe('the chat retention setting', () => {
@@ -68,11 +104,63 @@ describe('the chat retention setting', () => {
     fireEvent.click(screen.getByTestId('chat-retention-save'));
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm.mock.calls[0]![0]).toContain('6 aydan');
+    expect(confirm.mock.calls[0]![0]).toContain('e-posta');
+    expect(confirm.mock.calls[0]![0]).toContain('30 gün');
     expect(send).not.toHaveBeenCalled();
   });
 
+  const status = () => screen.getByTestId('chat-retention-status');
+  const told = { notifiedAt: '2026-11-04T10:00:00.000Z', startsAt: '2026-12-04T10:00:00.000Z' };
+
+  it('says nothing is going yet, before the first notice', async () => {
+    await show({ months: 12, inForce: null, notice: null });
+    expect(status().textContent).toContain('Henüz hiçbir sohbet silinmiyor');
+  });
+
+  it('says what is in force when nothing is waiting', async () => {
+    await show();
+    expect(status().textContent).toContain('12 aydan');
+  });
+
+  it('says a notice is going out and no date yet', async () => {
+    await show({
+      months: 6,
+      inForce: 12,
+      notice: { months: 6, notifiedAt: null, startsAt: null },
+    });
+    expect(status().textContent).toContain('12 ay sonra');
+    expect(status().textContent).toContain('6 aylık');
+    expect(status().dataset['state']).toBe('sendingWhile');
+  });
+
+  it('says when a first deletion starts', async () => {
+    await show({ months: 12, inForce: null, notice: { months: 12, ...told } });
+    expect(status().textContent).toContain('2026');
+    expect(status().dataset['state']).toBe('starts');
+  });
+
+  it('says what changes on the date, for a shorter period', async () => {
+    await show({ months: 6, inForce: 12, notice: { months: 6, ...told } });
+    expect(status().textContent).toContain('2026');
+    expect(status().textContent).toContain('12 ay');
+    expect(status().textContent).toContain('6 ay');
+    expect(status().dataset['state']).toBe('startsWhile');
+  });
+
+  it('offers no way to change it to someone who is not the company admin', async () => {
+    const input = await show(enforcing, {
+      ...me,
+      roles: ['provider_admin'],
+    } as api.Me);
+    expect(input.disabled).toBe(true);
+    expect(screen.queryByTestId('chat-retention-save')).toBeNull();
+    expect(screen.getByTestId('chat-retention-read-only').textContent).toContain('yöneticileri');
+  });
+
   it('saves on its own, without sending the policy', async () => {
-    const send = vi.spyOn(api, 'apiSend').mockResolvedValue({ months: 6 });
+    const send = vi
+      .spyOn(api, 'apiSend')
+      .mockResolvedValue({ months: 6, inForce: 12, notice: null });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const input = await show();
     fireEvent.change(input, { target: { value: '6' } });
@@ -85,7 +173,7 @@ describe('the chat retention setting', () => {
   });
 
   it("doesn't ask when making it longer", async () => {
-    vi.spyOn(api, 'apiSend').mockResolvedValue({ months: 24 });
+    vi.spyOn(api, 'apiSend').mockResolvedValue({ months: 24, inForce: 24, notice: null });
     const confirm = vi.spyOn(window, 'confirm');
     const input = await show();
     fireEvent.change(input, { target: { value: '24' } });

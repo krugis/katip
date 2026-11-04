@@ -491,7 +491,8 @@ describe('counts LibreChat keeps', () => {
 
 describe('each company', () => {
   let serial = 0;
-  async function company(status = 'active', months?: number) {
+  /** Already past its first notice, unless it's told otherwise. */
+  async function company(status = 'active', months?: number, enforced = true) {
     serial += 1;
     const slug = `chats-${serial}`;
     const [tenant] = await admin`insert into tenants (slug, name, status)
@@ -501,11 +502,15 @@ describe('each company', () => {
       await admin`insert into tenant_policies (tenant_id, policy, chat_retention_months)
         values (${tenantId}, '{}'::jsonb, ${months})`;
     }
+    if (enforced) {
+      await admin`insert into chat_retention_state (tenant_id, in_force_months)
+        values (${tenantId}, ${months ?? 12})`;
+    }
     return { slug, tenantId };
   }
-  const deps = (): ChatRetentionDeps => ({
+  const deps = (now = NOW): ChatRetentionDeps => ({
     store,
-    now: () => NOW,
+    now: () => now,
     findExpiredChats: (database, cutoff) => findExpiredChats(mongo.db(database), cutoff),
     deleteExpiredChats: (database, ids, files, cutoff) =>
       deleteExpiredChats(mongo.db(database), ids, files, cutoff),
@@ -531,7 +536,7 @@ describe('each company', () => {
     const running = await company();
     const suspended = await company('suspended');
     const deleted = await company('deleted');
-    const due = await chatRetentionDue(deps());
+    const { slugs: due } = await chatRetentionDue(deps());
     expect(due).toContain(running.slug);
     expect(due).not.toContain(suspended.slug);
     expect(due).not.toContain(deleted.slug);
@@ -599,6 +604,165 @@ describe('each company', () => {
 
     expect(await left('conversations', 'two-months')).toBe(1);
   });
+
+  const DAY = 86_400_000;
+  const after = (days: number) => new Date(NOW.getTime() + days * DAY);
+  const row = async (tenantId: string) => {
+    const [found] = await admin`select * from chat_retention_state where tenant_id = ${tenantId}`;
+    return found;
+  };
+  /** What console-api does when everyone has been told. */
+  const told = (tenantId: string, at: Date) =>
+    admin`update chat_retention_state set notified_at = ${at.toISOString()}::timestamptz
+      where tenant_id = ${tenantId}`;
+  const actions = async (tenantId: string) =>
+    (await admin`select action from audit_log where tenant_id = ${tenantId} order by ts`).map(
+      (e) => e['action'],
+    );
+
+  describe('before its first notice has run its 30 days', () => {
+    it('asks for a notice about its own period, and deletes nothing', async () => {
+      const c = await company('active', 6, false);
+      db = mongo.db(`lc_${c.slug}`);
+      await chat('old');
+
+      const plan = await chatRetentionDue(deps());
+
+      expect(plan.slugs).not.toContain(c.slug);
+      expect(await row(c.tenantId)).toMatchObject({
+        in_force_months: null,
+        notice_months: 6,
+        notified_at: null,
+      });
+      expect(await actions(c.tenantId)).toEqual(['chat_retention.notice_requested']);
+      await expect(selectExpiredChats(deps(), c.slug)).rejects.toThrow(/notice period/);
+      await expect(
+        finishExpiredChats(deps(), c.slug, { conversationIds: ['old'], fileIds: [], filesKept: 0 }),
+      ).rejects.toThrow(/notice period/);
+      expect(await left('conversations', 'old')).toBe(1);
+    });
+
+    it('works for a company with no policy row, on the default period', async () => {
+      const c = await company('active', undefined, false);
+      await chatRetentionDue(deps());
+      expect(await row(c.tenantId)).toMatchObject({ notice_months: 12 });
+    });
+
+    it('asks once, however often it runs', async () => {
+      const c = await company('active', undefined, false);
+      await chatRetentionDue(deps());
+      const first = await row(c.tenantId);
+      await chatRetentionDue(deps(after(1)));
+      expect((await row(c.tenantId))?.['notice_id']).toBe(first?.['notice_id']);
+      expect(await actions(c.tenantId)).toEqual(['chat_retention.notice_requested']);
+    });
+
+    it('calls an unsent notice a failure only once something should have sent it', async () => {
+      const c = await company('active', undefined, false);
+      expect((await chatRetentionDue(deps())).unsent).not.toContain(c.slug);
+      expect((await chatRetentionDue(deps(new Date(NOW.getTime() + 60_000)))).unsent).not.toContain(
+        c.slug,
+      );
+      const hours = await chatRetentionDue(deps(new Date(NOW.getTime() + 3_600_000)));
+      expect(hours.unsent).toContain(c.slug);
+    });
+
+    it('with no mail ever going out, keeps waiting and keeps saying so, and deletes nothing', async () => {
+      const c = await company('active', 1, false);
+      db = mongo.db(`lc_${c.slug}`);
+      await chat('old');
+      await chatRetentionDue(deps());
+      const plan = await chatRetentionDue(deps(after(400)));
+      expect(plan.slugs).not.toContain(c.slug);
+      expect(plan.unsent).toContain(c.slug);
+      await expect(selectExpiredChats(deps(after(400)), c.slug)).rejects.toThrow(/notice period/);
+    });
+
+    it('counts 30 days from the send, and then starts, once, and audits it', async () => {
+      const c = await company('active', 12, false);
+      db = mongo.db(`lc_${c.slug}`);
+      await chat('old');
+      await chatRetentionDue(deps());
+      await told(c.tenantId, after(2));
+
+      const waiting = await chatRetentionDue(deps(after(31)));
+      expect(waiting.slugs).not.toContain(c.slug);
+      expect(waiting.unsent).not.toContain(c.slug);
+      await expect(selectExpiredChats(deps(after(31)), c.slug)).rejects.toThrow(/notice period/);
+
+      const started = await chatRetentionDue(deps(after(32)));
+      expect(started.slugs).toContain(c.slug);
+      expect(await row(c.tenantId)).toMatchObject({
+        in_force_months: 12,
+        notice_id: null,
+        notified_at: null,
+      });
+      expect((await selectExpiredChats(deps(after(32)), c.slug)).conversationIds).toEqual(['old']);
+      await chatRetentionDue(deps(after(33)));
+      const entries = await actions(c.tenantId);
+      expect(entries.filter((a) => a === 'chat_retention.started')).toHaveLength(1);
+    });
+  });
+
+  describe('with a shorter period waiting', () => {
+    const SEVEN_MONTHS = new Date('2026-04-01T00:00:00Z');
+    const shortened = async () => {
+      const c = await company('active', 12);
+      db = mongo.db(`lc_${c.slug}`);
+      await chat('two-years');
+      await chat('seven-months', { updatedAt: SEVEN_MONTHS });
+      await admin`update tenant_policies set chat_retention_months = 6 where tenant_id = ${c.tenantId}`;
+      await admin`update chat_retention_state set notice_id = ${randomUUID()}, notice_months = 6,
+        notice_requested_at = ${NOW.toISOString()}::timestamptz where tenant_id = ${c.tenantId}`;
+      return c;
+    };
+
+    it('goes on deleting under the old period, and leaves the chats between the two', async () => {
+      const c = await shortened();
+      await told(c.tenantId, NOW);
+      expect((await chatRetentionDue(deps(after(29)))).slugs).toContain(c.slug);
+      const batch = await selectExpiredChats(deps(after(29)), c.slug);
+      expect(batch.conversationIds).toEqual(['two-years']);
+    });
+
+    it('takes them when the 30 days are over', async () => {
+      const c = await shortened();
+      await told(c.tenantId, NOW);
+      await chatRetentionDue(deps(after(30)));
+      const batch = await selectExpiredChats(deps(after(30)), c.slug);
+      expect(batch.conversationIds).toEqual(['two-years', 'seven-months']);
+      expect(await row(c.tenantId)).toMatchObject({ in_force_months: 6, notice_id: null });
+    });
+
+    it('leaves them while the notice has not gone, and fails', async () => {
+      const c = await shortened();
+      const plan = await chatRetentionDue(deps(after(100)));
+      expect(plan.slugs).toContain(c.slug);
+      expect(plan.unsent).toContain(c.slug);
+      const batch = await selectExpiredChats(deps(after(100)), c.slug);
+      expect(batch.conversationIds).not.toContain('seven-months');
+    });
+
+    it('asks for a notice if someone shortened it by hand, and applies nothing yet', async () => {
+      const c = await company('active', 12);
+      await admin`update tenant_policies set chat_retention_months = 1 where tenant_id = ${c.tenantId}`;
+      await chatRetentionDue(deps());
+      expect(await row(c.tenantId)).toMatchObject({ in_force_months: 12, notice_months: 1 });
+    });
+
+    it('counts who is waiting and who has been told', async () => {
+      const [a, b] = [await shortened(), await shortened()];
+      await told(a.tenantId, NOW);
+      const plan = await chatRetentionDue(deps());
+      const companies = await admin`select count(*)::int as n from chat_retention_state
+        where notice_id is not null`;
+      const notified = await admin`select count(*)::int as n from chat_retention_state
+        where notified_at is not null`;
+      expect(plan.waiting).toBe(companies[0]!['n']);
+      expect(plan.notified).toBe(notified[0]!['n']);
+      expect(plan.unsent).not.toContain(b.slug);
+    });
+  });
 });
 
 describe('the database', () => {
@@ -609,6 +773,27 @@ describe('the database', () => {
     );
     const rows = await provider`select chat_retention_months from tenant_policies limit 1`;
     expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it("gives the daily role nothing of who was told, and no way to delete a company's state", async () => {
+    await expect(provider`select * from chat_retention_notice_recipients`).rejects.toThrow(
+      /permission denied/,
+    );
+    await expect(provider`delete from chat_retention_state`).rejects.toThrow(/permission denied/);
+    await expect(provider`update chat_retention_state set tenant_id = null`).rejects.toThrow(
+      /permission denied/,
+    );
+  });
+
+  it('refuses a notice that is half there', async () => {
+    const [tenant] = await admin`insert into tenants (slug, name)
+      values ('chat-half', 'H') returning id`;
+    await expect(admin`insert into chat_retention_state (tenant_id, notice_months)
+      values (${tenant!['id'] as string}, 6)`).rejects.toThrow(/check constraint/);
+    await expect(admin`insert into chat_retention_state (tenant_id, notified_at)
+      values (${tenant!['id'] as string}, now())`).rejects.toThrow(/check constraint/);
+    await expect(admin`insert into chat_retention_state (tenant_id, in_force_months)
+      values (${tenant!['id'] as string}, 0)`).rejects.toThrow(/check constraint/);
   });
 
   it('refuses a period out of range, whoever writes it', async () => {

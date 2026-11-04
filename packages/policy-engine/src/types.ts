@@ -17,6 +17,11 @@ export interface ModelEntry {
   priceInMicroPerM: number;
   priceOutMicroPerM: number;
   enabled: boolean;
+  /**
+   * True only if the model runs on the operator's own servers and text sent to it leaves
+   * nothing's hands but theirs. Absent means outside. Never worked out from a name or a URL.
+   */
+  selfHosted?: boolean;
 }
 
 export interface TenantPolicy {

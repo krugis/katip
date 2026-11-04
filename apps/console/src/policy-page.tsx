@@ -23,6 +23,7 @@ interface PolicyResponse {
   version: number;
   kvkkAddon: boolean;
   catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
+  fileSearch?: Record<Policy['residency'], boolean>;
 }
 
 const SELECT =
@@ -64,12 +65,51 @@ function Check({
   );
 }
 
-function ChatRetention({ path, getToken }: { path: string; getToken: GetToken }) {
+interface ChatRetentionView {
+  months: number;
+  inForce: number | null;
+  notice: { months: number; notifiedAt: string | null; startsAt: string | null } | null;
+}
+
+function ChatRetentionStatus({ months, inForce, notice }: ChatRetentionView) {
+  const { t, i18n } = useTranslation();
+  const date = notice?.startsAt
+    ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'long' }).format(
+        new Date(notice.startsAt),
+      )
+    : '';
+  const key = !notice
+    ? inForce === null
+      ? 'notStarted'
+      : 'inEffect'
+    : notice.startsAt
+      ? inForce === null
+        ? 'starts'
+        : 'startsWhile'
+      : inForce === null
+        ? 'sending'
+        : 'sendingWhile';
+  return (
+    <p className={HELP} role="status" data-testid="chat-retention-status" data-state={key}>
+      {t(`policy.retention.${key}`, { months, inForce, date, notice: notice?.months })}
+    </p>
+  );
+}
+
+function ChatRetention({
+  path,
+  getToken,
+  canChange,
+}: {
+  path: string;
+  getToken: GetToken;
+  canChange: boolean;
+}) {
   const { t } = useTranslation();
   const client = useQueryClient();
   const loaded = useQuery({
     queryKey: ['chat-retention', path],
-    queryFn: () => apiFetch<{ months: number }>(path, getToken),
+    queryFn: () => apiFetch<ChatRetentionView>(path, getToken),
   });
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +129,7 @@ function ChatRetention({ path, getToken }: { path: string; getToken: GetToken })
     setSaved(false);
     setSaving(true);
     try {
-      const result = await apiSend<{ months: number }>('PUT', path, getToken, { months });
+      const result = await apiSend<ChatRetentionView>('PUT', path, getToken, { months });
       client.setQueryData(['chat-retention', path], result);
       setDraft(null);
       setSaved(true);
@@ -105,6 +145,7 @@ function ChatRetention({ path, getToken }: { path: string; getToken: GetToken })
     <form onSubmit={(e) => void save(e)} data-testid="chat-retention-form" className={SECTION}>
       <h2 className={TITLE}>{t('policy.retention.title')}</h2>
       <p className={HELP}>{t('policy.retention.help')}</p>
+      <ChatRetentionStatus {...loaded.data} />
       <label className="mt-3 block text-sm" htmlFor="chat-retention-months">
         {t('policy.retention.months')}
       </label>
@@ -116,6 +157,7 @@ function ChatRetention({ path, getToken }: { path: string; getToken: GetToken })
         min={1}
         max={120}
         step={1}
+        disabled={!canChange}
         className={SELECT}
         value={draft ?? String(current)}
         onChange={(e) => {
@@ -124,16 +166,22 @@ function ChatRetention({ path, getToken }: { path: string; getToken: GetToken })
         }}
       />
       <p className={HELP}>{t('policy.retention.range')}</p>
-      <div className="mt-3 flex items-center gap-3">
-        <Button type="submit" data-testid="chat-retention-save" disabled={saving}>
-          {t('policy.retention.save')}
-        </Button>
-        {saved && (
-          <p className="text-sm text-muted" role="status" data-testid="chat-retention-saved">
-            {t('policy.retention.saved')}
-          </p>
-        )}
-      </div>
+      {canChange ? (
+        <div className="mt-3 flex items-center gap-3">
+          <Button type="submit" data-testid="chat-retention-save" disabled={saving}>
+            {t('policy.retention.save')}
+          </Button>
+          {saved && (
+            <p className="text-sm text-muted" role="status" data-testid="chat-retention-saved">
+              {t('policy.retention.saved')}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className={HELP} data-testid="chat-retention-read-only">
+          {t('policy.retention.readOnly')}
+        </p>
+      )}
       {error && (
         <p className="mt-2 text-sm text-danger" role="alert" data-testid="chat-retention-error">
           {error}
@@ -170,7 +218,7 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
       </p>
     );
   }
-  const { kvkkAddon, catalog, version } = loaded.data;
+  const { kvkkAddon, catalog, version, fileSearch } = loaded.data;
   const change = (next: Partial<Policy>) => {
     setSaved(false);
     setDraft({ ...draft, ...next });
@@ -368,6 +416,11 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
             ))}
           </select>
           {!kvkkAddon && <p className={HELP}>{t('policy.residencyAddon')}</p>}
+          {fileSearch?.[draft.residency] === false && (
+            <p className="mt-2 text-sm text-danger" role="alert" data-testid="residency-no-search">
+              {t('policy.residencyNoFileSearch')}
+            </p>
+          )}
         </section>
 
         <div className="flex items-center gap-3">
@@ -386,7 +439,11 @@ export function TenantPolicies({ me, getToken }: { me: Me; getToken: GetToken })
           </p>
         )}
       </form>
-      <ChatRetention path={`/tenants/${me.tenant!.id}/chat-retention`} getToken={getToken} />
+      <ChatRetention
+        path={`/tenants/${me.tenant!.id}/chat-retention`}
+        getToken={getToken}
+        canChange={me.roles.includes('tenant_admin')}
+      />
     </div>
   );
 }

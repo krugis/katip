@@ -200,6 +200,54 @@ export const tenantPolicies = pgTable(
   ],
 );
 
+/**
+ * Where a company stands on deleting old chats (LLD-07 §2c). No row means nothing has happened
+ * yet. What it has chosen is chat_retention_months above. This is what's really in force, and the
+ * notice of anything on its way. The rules are in @katip/shared's chat-retention.
+ */
+export const chatRetentionState = pgTable(
+  'chat_retention_state',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    /** Null until the company's first notice has run its 30 days: nothing is deleted till then. */
+    inForceMonths: integer('in_force_months'),
+    noticeId: uuid('notice_id'),
+    noticeMonths: integer('notice_months'),
+    noticeRequestedAt: timestamp('notice_requested_at', { withTimezone: true }),
+    /** When everyone had been told. Deletion under the notice can start 30 days after this. */
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('chat_retention_state_in_force', sql`${t.inForceMonths} between 1 and 120`),
+    check('chat_retention_state_notice_months', sql`${t.noticeMonths} between 1 and 120`),
+    check(
+      'chat_retention_state_notice',
+      sql`(${t.noticeId} is null) = (${t.noticeMonths} is null)
+        and (${t.noticeId} is null) = (${t.noticeRequestedAt} is null)
+        and (${t.notifiedAt} is null or ${t.noticeId} is not null)`,
+    ),
+  ],
+);
+
+/** Who has been told of a notice, so each person is told once, whatever fails around them. */
+export const chatRetentionNoticeRecipients = pgTable(
+  'chat_retention_notice_recipients',
+  {
+    noticeId: uuid('notice_id').notNull(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.noticeId, t.userId] })],
+);
+
 export const policyHistory = pgTable(
   'policy_history',
   {
@@ -247,6 +295,8 @@ export const modelCatalog = pgTable('model_catalog', {
   priceInUsdMicroPerM: bigint('price_in_usd_micro_per_m', { mode: 'number' }).notNull(),
   priceOutUsdMicroPerM: bigint('price_out_usd_micro_per_m', { mode: 'number' }).notNull(),
   enabled: boolean('enabled').notNull().default(true),
+  /** Text sent to it stays on the operator's own servers. False unless the config says so. */
+  selfHosted: boolean('self_hosted').notNull().default(false),
 });
 
 export const tenantModelAllow = pgTable(

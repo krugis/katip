@@ -18,6 +18,7 @@ export async function forgetUnfinishedTenant(sql: postgres.Sql, slug: string): P
     await tx`delete from gateway_keys where tenant_id = ${id}`;
     await tx`delete from tenant_limits where tenant_id = ${id}`;
     await tx`delete from access_rules where tenant_id = ${id}`;
+    await tx`delete from chat_retention_state where tenant_id = ${id}`;
     await tx`delete from tenant_policies where tenant_id = ${id}`;
     await tx`delete from seats where tenant_id = ${id}`;
     await tx`delete from subscriptions where tenant_id = ${id}`;

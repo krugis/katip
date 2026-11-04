@@ -3,12 +3,23 @@
 // binds, so tenant data is only reachable inside withTenant (LLD-05 §1).
 import { randomUUID } from 'node:crypto';
 import * as schema from '@katip/db';
-import { DEFAULT_POLICY } from '@katip/policy-engine';
-import { Errors } from '@katip/shared';
-import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { DEFAULT_POLICY, embeddingByResidency } from '@katip/policy-engine';
+import {
+  advanceRetention,
+  changeRetention,
+  deletionStartsAt,
+  Errors,
+  NO_PERSON,
+  noticeEndsAt,
+  retentionRowOf,
+  retentionStateOf,
+  type RetentionState,
+} from '@katip/shared';
+import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { OverrideDocument, PolicyDocument } from './policy.js';
+import { FILE_SEARCH_KEY, FILE_SEARCH_LABEL } from './usage.js';
 
 export interface TenantRecord {
   id: string;
@@ -32,8 +43,22 @@ export interface ManagedUser extends UserRecord {
 }
 
 export interface Actor {
-  type: 'user' | 'provider';
+  type: 'user' | 'provider' | 'system';
   id: string;
+}
+
+export interface ChatRetentionView {
+  months: number;
+  inForce: number | null;
+  notice: { months: number; notifiedAt: string | null; startsAt: string | null } | null;
+}
+
+export interface PendingChatNotice {
+  id: string;
+  months: number;
+  /** How many have been told already. */
+  told: number;
+  toTell: { userId: string; email: string }[];
 }
 
 export interface NewUserInput {
@@ -99,6 +124,8 @@ export interface PolicyView {
   version: number;
   kvkkAddon: boolean;
   catalog: { id: string; displayName: string; class: string; region: string; dataPolicy: string }[];
+  /** Whether uploads can work under each data location rule. */
+  fileSearch: Record<PolicyDocument['residency'], boolean>;
 }
 
 export interface AccessRulesInput {
@@ -268,8 +295,31 @@ export interface ConsoleStore {
   /** The companies Traefik should route to, the active ones, with their allowlists. */
   routedTenants(): Promise<{ slug: string; ipAllowlist: string[] }[]>;
   policy(tenantId: string): Promise<PolicyView | null>;
-  chatRetention(tenantId: string): Promise<number | null>;
-  saveChatRetention(tenantId: string, months: number, actor: Actor): Promise<number | null>;
+  chatRetention(tenantId: string): Promise<ChatRetentionView | null>;
+  saveChatRetention(
+    tenantId: string,
+    months: number,
+    actor: Actor,
+  ): Promise<ChatRetentionView | null>;
+  /** The notice still going out, and the active people who haven't had it. */
+  pendingChatNotice(tenantId: string): Promise<PendingChatNotice | null>;
+  /**
+   * Records one person as told, and calls `tell`. If it throws, nothing is recorded, like
+   * recordAlerts. False if they've been told already, or the notice has been replaced.
+   */
+  tellChatNotice(
+    tenantId: string,
+    noticeId: string,
+    userId: string,
+    tell: () => Promise<void>,
+  ): Promise<boolean>;
+  /** Everyone has been told, so the 30 days start at `now`. False if it has been replaced. */
+  finishChatNotice(
+    tenantId: string,
+    noticeId: string,
+    now: Date,
+    counts: { told: number; refused: number },
+  ): Promise<boolean>;
   departmentPolicy(
     tenantId: string,
     id: string,
@@ -337,6 +387,16 @@ export interface ConsoleStore {
   /** True when the database is reachable and migrated. */
   ready(): Promise<boolean>;
 }
+
+const chatRetentionView = ({ months, inForce, notice }: RetentionState): ChatRetentionView => ({
+  months,
+  inForce,
+  notice: notice && {
+    months: notice.months,
+    notifiedAt: notice.notifiedAt?.toISOString() ?? null,
+    startsAt: deletionStartsAt(notice)?.toISOString() ?? null,
+  },
+});
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -857,9 +917,13 @@ export class DbConsoleStore implements ConsoleStore {
         sql`select refresh_usage_daily(${tenantId}::uuid, ${from}::date, ${to}::date)`,
       );
       const d = schema.usageDaily;
+      // Inlined, not parameters: the same expression has to match in the select and group by.
+      const fileSearch = sql.raw(`'${FILE_SEARCH_KEY}'`);
+      const noPerson = sql.raw(`'${NO_PERSON}'::uuid`);
       const key = {
-        user: sql`${d.userId}::text`,
-        dept: sql`${d.departmentId}::text`,
+        // File search has no person and no department (LLD-03 §1.3), and no row to join.
+        user: sql`case when ${d.userId} = ${noPerson} then ${fileSearch} else ${d.userId}::text end`,
+        dept: sql`case when ${d.userId} = ${noPerson} then ${fileSearch} else ${d.departmentId}::text end`,
         model: sql`${d.modelId}`,
         day: sql`to_char(${d.day}, 'YYYY-MM-DD')`,
       }[group];
@@ -881,8 +945,10 @@ export class DbConsoleStore implements ConsoleStore {
         )
         .groupBy(key)) as { key: string | null; premium: string; standard: string }[];
 
-      const ids = rows.map((r) => r.key).filter((k): k is string => k !== null);
-      const labels = new Map<string, string>();
+      const ids = rows
+        .map((r) => r.key)
+        .filter((k): k is string => k !== null && k !== FILE_SEARCH_KEY);
+      const labels = new Map<string, string>([[FILE_SEARCH_KEY, FILE_SEARCH_LABEL.en]]);
       if (group === 'user' && ids.length > 0) {
         const people = await tx
           .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
@@ -1591,6 +1657,15 @@ export class DbConsoleStore implements ConsoleStore {
       .from(schema.modelCatalog)
       .where(and(eq(schema.modelCatalog.enabled, true), ne(schema.modelCatalog.class, 'embedding')))
       .orderBy(asc(schema.modelCatalog.displayName));
+    const embedding = await tx
+      .select({
+        class: schema.modelCatalog.class,
+        enabled: schema.modelCatalog.enabled,
+        dataPolicy: schema.modelCatalog.dataPolicy,
+        region: schema.modelCatalog.region,
+      })
+      .from(schema.modelCatalog)
+      .where(eq(schema.modelCatalog.class, 'embedding'));
     return {
       policy: {
         ...DEFAULT_POLICY,
@@ -1601,6 +1676,7 @@ export class DbConsoleStore implements ConsoleStore {
       kvkkAddon: tenant.kvkkAddon,
       // The Turkish model comes with the KVKK add-on.
       catalog: tenant.kvkkAddon ? catalog : catalog.filter((m) => m.class !== 'tr'),
+      fileSearch: embeddingByResidency(embedding as Parameters<typeof embeddingByResidency>[0]),
     };
   }
 
@@ -1699,28 +1775,51 @@ export class DbConsoleStore implements ConsoleStore {
     });
   }
 
-  private async chatRetentionOf(tx: Tx, tenantId: string): Promise<number | null> {
+  private async chatRetentionOf(tx: Tx, tenantId: string): Promise<RetentionState | null> {
     const [tenant] = await tx
       .select({ id: schema.tenants.id })
       .from(schema.tenants)
       .where(eq(schema.tenants.id, tenantId));
     if (!tenant) return null;
-    const [row] = await tx
+    const [policy] = await tx
       .select({ months: schema.tenantPolicies.chatRetentionMonths })
       .from(schema.tenantPolicies)
       .where(eq(schema.tenantPolicies.tenantId, tenantId));
-    return row?.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS;
+    const [row] = await tx
+      .select({
+        inForceMonths: schema.chatRetentionState.inForceMonths,
+        noticeId: schema.chatRetentionState.noticeId,
+        noticeMonths: schema.chatRetentionState.noticeMonths,
+        noticeRequestedAt: schema.chatRetentionState.noticeRequestedAt,
+        notifiedAt: schema.chatRetentionState.notifiedAt,
+      })
+      .from(schema.chatRetentionState)
+      .where(eq(schema.chatRetentionState.tenantId, tenantId));
+    return retentionStateOf(policy?.months ?? schema.DEFAULT_CHAT_RETENTION_MONTHS, row);
   }
 
-  async chatRetention(tenantId: string): Promise<number | null> {
-    return this.inTenant(tenantId, (tx) => this.chatRetentionOf(tx, tenantId));
+  async chatRetention(tenantId: string): Promise<ChatRetentionView | null> {
+    const state = await this.inTenant(tenantId, (tx) => this.chatRetentionOf(tx, tenantId));
+    return state && chatRetentionView(advanceRetention(state, new Date()));
   }
 
-  async saveChatRetention(tenantId: string, months: number, actor: Actor): Promise<number | null> {
+  async saveChatRetention(
+    tenantId: string,
+    months: number,
+    actor: Actor,
+  ): Promise<ChatRetentionView | null> {
     return this.inTenant(tenantId, async (tx) => {
       await this.lockTenant(tx, tenantId);
-      const previousMonths = await this.chatRetentionOf(tx, tenantId);
-      if (previousMonths === null) return null;
+      const before = await this.chatRetentionOf(tx, tenantId);
+      if (!before) return null;
+      const previousMonths = before.months;
+      const now = new Date();
+      const after = changeRetention(before, months, now, randomUUID);
+      const change = { ...retentionRowOf(after), updatedAt: now };
+      await tx
+        .insert(schema.chatRetentionState)
+        .values({ tenantId, ...change })
+        .onConflictDoUpdate({ target: schema.chatRetentionState.tenantId, set: change });
       await tx
         .insert(schema.tenantPolicies)
         // Version 0, as with no row: nobody has set a policy, and this doesn't count as one.
@@ -1735,10 +1834,103 @@ export class DbConsoleStore implements ConsoleStore {
         actor,
         'chat_retention.update',
         tenantId,
-        { months, previousMonths },
+        {
+          months,
+          previousMonths,
+          inForce: after.inForce,
+          startsAt: deletionStartsAt(after.notice)?.toISOString() ?? null,
+        },
         'policy',
       );
-      return months;
+      return chatRetentionView(after);
+    });
+  }
+
+  async pendingChatNotice(tenantId: string): Promise<PendingChatNotice | null> {
+    return this.inTenant(tenantId, async (tx) => {
+      const [state] = await tx
+        .select({
+          id: schema.chatRetentionState.noticeId,
+          months: schema.chatRetentionState.noticeMonths,
+          notifiedAt: schema.chatRetentionState.notifiedAt,
+        })
+        .from(schema.chatRetentionState)
+        .where(eq(schema.chatRetentionState.tenantId, tenantId));
+      if (!state?.id || state.months === null || state.notifiedAt) return null;
+      const told = await tx
+        .select({ userId: schema.chatRetentionNoticeRecipients.userId })
+        .from(schema.chatRetentionNoticeRecipients)
+        .where(eq(schema.chatRetentionNoticeRecipients.noticeId, state.id));
+      const already = new Set(told.map((t) => t.userId));
+      const people = await tx
+        .select({ userId: schema.users.id, email: schema.users.email })
+        .from(schema.users)
+        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.status, 'active')))
+        .orderBy(asc(schema.users.id));
+      return {
+        id: state.id,
+        months: state.months,
+        told: told.length,
+        toTell: people.filter((p) => !already.has(p.userId)),
+      };
+    });
+  }
+
+  async tellChatNotice(
+    tenantId: string,
+    noticeId: string,
+    userId: string,
+    tell: () => Promise<void>,
+  ): Promise<boolean> {
+    return this.inTenant(tenantId, async (tx) => {
+      const [current] = await tx
+        .select({ id: schema.chatRetentionState.noticeId })
+        .from(schema.chatRetentionState)
+        .where(eq(schema.chatRetentionState.tenantId, tenantId));
+      if (current?.id !== noticeId) return false;
+      // Inside the transaction: if the email fails, the row goes too, and another replica's
+      // insert waits here, so nobody is told twice.
+      const added = await tx
+        .insert(schema.chatRetentionNoticeRecipients)
+        .values({ noticeId, tenantId, userId })
+        .onConflictDoNothing()
+        .returning({ userId: schema.chatRetentionNoticeRecipients.userId });
+      if (added.length === 0) return false;
+      await tell();
+      return true;
+    });
+  }
+
+  async finishChatNotice(
+    tenantId: string,
+    noticeId: string,
+    now: Date,
+    counts: { told: number; refused: number },
+  ): Promise<boolean> {
+    return this.inTenant(tenantId, async (tx) => {
+      await this.lockTenant(tx, tenantId);
+      const finished = await tx
+        .update(schema.chatRetentionState)
+        .set({ notifiedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(schema.chatRetentionState.tenantId, tenantId),
+            eq(schema.chatRetentionState.noticeId, noticeId),
+            isNull(schema.chatRetentionState.notifiedAt),
+          ),
+        )
+        .returning({ months: schema.chatRetentionState.noticeMonths });
+      if (finished.length === 0) return false;
+      await this.audit(
+        tx,
+        tenantId,
+        { type: 'system', id: 'console-api' },
+        'chat_retention.notice_sent',
+        tenantId,
+        { months: finished[0]!.months, ...counts, startsAt: noticeEndsAt(now).toISOString() },
+        'policy',
+      );
+      return true;
     });
   }
 

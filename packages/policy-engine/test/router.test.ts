@@ -6,6 +6,9 @@ import {
   DEFAULT_RULES,
   RouteDeniedError,
   chooseEmbeddingRoute,
+  embeddingByResidency,
+  NoEmbeddingModelError,
+  reachesOnlySelfHosted,
   chooseRoute,
   costMicroUsd,
   crossedThresholds,
@@ -117,11 +120,26 @@ describe('embedding route', () => {
     }
   });
 
-  it('follows allowedModels, a disabled model and the data policy', () => {
-    expect(ids('auto', { ...DEFAULT_POLICY, allowedModels: ['emb-eu'] })).toEqual(['emb-eu']);
-    expect(() => ids('emb-bge-m3', { ...DEFAULT_POLICY, allowedModels: ['emb-eu'] })).toThrow(
-      RouteDeniedError,
+  it("isn't limited by allowedModels, a list of chat choices that can't name it", () => {
+    const chatOnly = { ...DEFAULT_POLICY, allowedModels: ['std-deepseek-v4-flash'] };
+    expect(ids('auto', chatOnly)).toEqual(['emb-bge-m3']);
+    expect(ids('emb-eu', chatOnly)).toEqual(['emb-eu']);
+    expect(() => ids('emb-bge-m3', { ...chatOnly, residency: 'TR_ONLY' })).toThrow(
+      NoEmbeddingModelError,
     );
+  });
+
+  it('says when no embedding model fits, and not for a chat model', () => {
+    const only = { ...DEFAULT_POLICY, residency: 'EU_ONLY' as const };
+    const refuse = (requested: string) => () => ids(requested, only, [emb]);
+    expect(refuse('auto')).toThrow(NoEmbeddingModelError);
+    expect(refuse('emb-bge-m3')).toThrow(NoEmbeddingModelError);
+    expect(refuse('emb-bge-m3')).toThrow(/EU_ONLY/);
+    expect(() => ids('std-deepseek-v4-flash', only)).toThrow(RouteDeniedError);
+    expect(() => ids('std-deepseek-v4-flash', only)).not.toThrow(NoEmbeddingModelError);
+  });
+
+  it('follows a disabled model and the data policy', () => {
     expect(() => ids('auto', DEFAULT_POLICY, [{ ...emb, enabled: false }])).toThrow(
       RouteDeniedError,
     );
@@ -173,5 +191,62 @@ describe('quota math', () => {
     expect(crossedThresholds(40, 85, 100)).toEqual([50, 80]);
     expect(crossedThresholds(85, 90, 100)).toEqual([]);
     expect(crossedThresholds(99, 100, 100)).toEqual([100]);
+  });
+});
+
+describe('reachesOnlySelfHosted', () => {
+  const emb = DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!;
+  const local = { ...emb, id: 'emb-local', selfHosted: true };
+  const route = (...candidates: unknown[]) => ({ candidates }) as never;
+
+  it('is true only of a real true on every candidate', () => {
+    expect(reachesOnlySelfHosted(route(local))).toBe(true);
+    expect(reachesOnlySelfHosted(route(local, { ...local, id: 'b' }))).toBe(true);
+  });
+
+  it('is false for an absent or unclear marker', () => {
+    expect(reachesOnlySelfHosted(route(emb))).toBe(false);
+    for (const selfHosted of [false, 'true', 1, null, undefined]) {
+      expect(reachesOnlySelfHosted(route({ ...emb, selfHosted }))).toBe(false);
+    }
+  });
+
+  it('is false if a fallback could reach an outside model, whichever comes first', () => {
+    expect(reachesOnlySelfHosted(route(local, emb))).toBe(false);
+    expect(reachesOnlySelfHosted(route(emb, local))).toBe(false);
+    expect(reachesOnlySelfHosted(route())).toBe(false);
+  });
+
+  it('holds on the checked-in defaults: nothing is marked', () => {
+    expect(DEFAULT_CATALOG.some((m) => m.selfHosted === true)).toBe(false);
+  });
+});
+
+describe('embeddingByResidency', () => {
+  const emb = DEFAULT_CATALOG.find((m) => m.id === 'emb-bge-m3')!;
+
+  it('says a global model only serves a company with no region rule', () => {
+    expect(embeddingByResidency([emb])).toEqual({
+      ANY_APPROVED: true,
+      EU_ONLY: false,
+      TR_ONLY: false,
+    });
+  });
+
+  it('counts a model by its region, as routing does', () => {
+    expect(embeddingByResidency([{ ...emb, region: 'eu' }])).toEqual({
+      ANY_APPROVED: true,
+      EU_ONLY: true,
+      TR_ONLY: false,
+    });
+    expect(embeddingByResidency([{ ...emb, region: 'tr' }]).TR_ONLY).toBe(true);
+  });
+
+  it('ignores chat models, disabled models and an unapproved data policy', () => {
+    const none = { ANY_APPROVED: false, EU_ONLY: false, TR_ONLY: false };
+    const chat = DEFAULT_CATALOG.filter((m) => m.class !== 'embedding');
+    expect(embeddingByResidency(chat)).toEqual(none);
+    expect(embeddingByResidency([{ ...emb, enabled: false }])).toEqual(none);
+    expect(embeddingByResidency([{ ...emb, dataPolicy: 'may_train' }])).toEqual(none);
   });
 });

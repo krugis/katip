@@ -44,6 +44,7 @@ const ResponseSchema = z.object({
       dataPolicy: z.string(),
     }),
   ),
+  fileSearch: z.object({ ANY_APPROVED: z.boolean(), EU_ONLY: z.boolean(), TR_ONLY: z.boolean() }),
 });
 
 const ProblemSchema = z.object({
@@ -99,6 +100,19 @@ export function looserThan(company: PolicyDocument, override: OverrideDocument):
 }
 
 const ChatRetentionSchema = z.object({ months: z.number().int().min(1).max(120) }).strict();
+const ChatRetentionView = z.object({
+  /** What the company has chosen. */
+  months: z.number(),
+  /** What chats go under today. Null until the first notice has run its 30 days. */
+  inForce: z.number().nullable(),
+  notice: z
+    .object({
+      months: z.number(),
+      notifiedAt: z.string().nullable(),
+      startsAt: z.string().nullable(),
+    })
+    .nullable(),
+});
 
 export function registerPolicyRoutes(
   parent: FastifyInstance,
@@ -137,13 +151,13 @@ export function registerPolicyRoutes(
         summary: 'How long the company keeps chats',
         security: secured,
         params: TenantParams,
-        response: { 200: ChatRetentionSchema, ...errors },
+        response: { 200: ChatRetentionView, ...errors },
       },
     },
     async (req) => {
-      const months = await store.chatRetention(req.params.tid);
-      if (months === null) throw Errors.notFound();
-      return { months };
+      const view = await store.chatRetention(req.params.tid);
+      if (!view) throw Errors.notFound();
+      return view;
     },
   );
 
@@ -151,23 +165,25 @@ export function registerPolicyRoutes(
   app.put(
     `${prefix}/tenants/:tid/chat-retention`,
     {
-      config: { access },
+      // The company's alone: provider staff can see this but can't cause its chats to be deleted.
+      config: { access: { ...access, companyOnly: true } },
       schema: {
-        summary: 'Change how long the company keeps chats. Older ones are deleted for good',
+        summary:
+          'Change how long the company keeps chats. Everyone is told, and older ones are deleted for good 30 days later',
         security: secured,
         params: TenantParams,
         body: ChatRetentionSchema,
-        response: { 200: ChatRetentionSchema, ...errors },
+        response: { 200: ChatRetentionView, ...errors },
       },
     },
     async (req) => {
-      const months = await store.saveChatRetention(
+      const view = await store.saveChatRetention(
         req.params.tid,
         req.body.months,
         actorOf(callerOf(req)),
       );
-      if (months === null) throw Errors.notFound();
-      return { months };
+      if (!view) throw Errors.notFound();
+      return view;
     },
   );
 

@@ -26,6 +26,11 @@ const Query = z.object({
   from: Day.optional(),
   to: Day.optional(),
 });
+const ExportQuery = Query.extend({ lang: z.enum(['tr', 'en']).default('en') });
+
+/** The row for tokens with no person behind them: a file's text being embedded. */
+export const FILE_SEARCH_KEY = 'file-search';
+export const FILE_SEARCH_LABEL = { en: 'File search', tr: 'Dosya arama' } as const;
 
 /** The range asked for, by default this UTC month so far. */
 export function usageRange(query: { from?: string; to?: string }, now: Date) {
@@ -57,9 +62,14 @@ export function csvCell(value: string | number): string {
 }
 
 /** With a byte order mark and semicolons, as Excel on a Turkish system expects. */
-export function usageCsv(group: UsageGroup, rows: UsageRow[]): string {
+export function usageCsv(
+  group: UsageGroup,
+  rows: UsageRow[],
+  lang: keyof typeof FILE_SEARCH_LABEL = 'en',
+): string {
   const header = [group, 'standard_tokens', 'premium_tokens', 'total_tokens'];
-  const lines = [header, ...rows.map((r) => [r.label, r.standard, r.premium, r.total])];
+  const label = (r: UsageRow) => (r.key === FILE_SEARCH_KEY ? FILE_SEARCH_LABEL[lang] : r.label);
+  const lines = [header, ...rows.map((r) => [label(r), r.standard, r.premium, r.total])];
   return `\uFEFF${lines.map((line) => line.map(csvCell).join(';')).join('\r\n')}\r\n`;
 }
 
@@ -114,17 +124,17 @@ export function registerUsageRoutes(
         summary: 'The same report, as a CSV file',
         security: secured,
         params: TenantParams,
-        querystring: Query,
+        querystring: ExportQuery,
       },
     },
     async (req, reply) => {
       const { from, to } = usageRange(req.query, new Date());
-      const { groupBy } = req.query;
+      const { groupBy, lang } = req.query;
       const rows = await store.usage(req.params.tid, groupBy, from, to);
       return reply
         .type('text/csv; charset=utf-8')
         .header('content-disposition', `attachment; filename="usage-${from}-${to}.csv"`)
-        .send(usageCsv(groupBy, rows));
+        .send(usageCsv(groupBy, rows, lang));
     },
   );
 }

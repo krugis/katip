@@ -100,14 +100,19 @@ export async function resolveCaller(
 /**
  * Who may use a route. Provider admins may use every route; other roles must be listed.
  * With tenantParam, another tenant's id answers 404, so a caller can't tell it exists.
+ * With companyOnly, not even a provider admin: it's the company's decision alone.
  */
 export interface Access {
   roles: readonly Role[] | 'any';
   tenantParam?: string;
+  companyOnly?: boolean;
 }
 
 export function authorize(caller: Caller, access: Access, params: Record<string, unknown>): void {
-  if (caller.kind === 'provider') return;
+  if (caller.kind === 'provider') {
+    if (access.companyOnly) throw Errors.forbidden("Only the company's own admins can change this");
+    return;
+  }
   if (access.tenantParam && params[access.tenantParam] !== caller.tenant.id) {
     throw Errors.notFound();
   }

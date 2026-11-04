@@ -67,7 +67,13 @@ const accessView = {
   sessionIdleMin: 30,
   sessionMaxH: 10,
 };
-const policyView = { policy: policyDocument, version: 1, kvkkAddon: false, catalog: [] };
+const policyView = {
+  policy: policyDocument,
+  version: 1,
+  kvkkAddon: false,
+  catalog: [],
+  fileSearch: { ANY_APPROVED: true, EU_ONLY: false, TR_ONLY: false },
+};
 const department = {
   id: USER_ID,
   name: 'Sales',
@@ -125,8 +131,11 @@ const store: ConsoleStore = {
   saveAccessRules: async () => accessView,
   routedTenants: async () => [],
   savePolicy: async () => policyView,
-  chatRetention: async () => 12,
-  saveChatRetention: async () => 6,
+  chatRetention: async () => ({ months: 12, inForce: null, notice: null }),
+  saveChatRetention: async () => ({ months: 6, inForce: null, notice: null }),
+  pendingChatNotice: async () => null,
+  tellChatNotice: async () => true,
+  finishChatNotice: async () => true,
   createDepartment: async () => department,
   updateDepartment: async () => department,
   startImport: async () => USER_ID,
@@ -325,8 +334,9 @@ const MATRIX: {
     method: 'PUT',
     body: { months: 6 },
     url: (t) => `/api/v1/tenants/${t}/chat-retention`,
-    own: { provider_admin: 200, tenant_admin: 200, ...ADMIN_ONLY },
-    other: { provider_admin: 200, ...OTHER_TENANT },
+    // The company's decision alone: provider staff can see it, and can't cause a deletion.
+    own: { provider_admin: 403, tenant_admin: 200, ...ADMIN_ONLY },
+    other: { provider_admin: 403, ...OTHER_TENANT },
   },
   {
     route: '/api/v1/tenants/:tid/access-rules',
