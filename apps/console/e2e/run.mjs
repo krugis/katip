@@ -54,6 +54,23 @@ const check = (cond, what) => {
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', cwd: ROOT });
 const cli = (...args) => sh('node', ['scripts/setup/tenant-cli.mjs', ...args]);
+/**
+ * The daily job, where only the central bank's feed may fail: it's outside us, and not always
+ * reachable from CI. Anything else failing still fails the test.
+ */
+const dailyJob = () => {
+  try {
+    return cli('daily');
+  } catch (e) {
+    const failed = String(e.stdout ?? '') + String(e.stderr ?? '');
+    const parts = [...failed.matchAll(/^ {2}([a-z ]+):/gm)].map((m) => m[1]);
+    if (parts.length > 0 && parts.every((p) => p === 'exchange rate')) {
+      console.log('  (the central bank feed was unreachable; the rest of the daily job ran)');
+      return failed;
+    }
+    throw e;
+  }
+};
 const sql = (query) =>
   sh('docker', [
     'exec',
@@ -1128,7 +1145,7 @@ try {
       ),
     );
   const ALL_RET = JSON.stringify(['ret-inside', 'ret-new', 'ret-old', 'ret-revived']);
-  cli('daily');
+  dailyJob();
   check(JSON.stringify(chatsLeft()) === ALL_RET, 'the first daily run deletes nothing');
   check(
     sql(`select notice_months from chat_retention_state where tenant_id = '${tid}'`) === '6',
@@ -1159,19 +1176,19 @@ try {
     shown.inForce === null && typeof shown.notice?.startsAt === 'string',
     `the setting says when deletion starts (${shown.notice?.startsAt})`,
   );
-  cli('daily');
+  dailyJob();
   check(JSON.stringify(chatsLeft()) === ALL_RET, 'a run during the 30 days deletes nothing either');
   check(noticeMails(owner) === before + 1, 'and nobody is told twice');
   // 29 days isn't enough, and 31 is. Aged like the chats, as nobody waits a month for a test.
   sql(
     `update chat_retention_state set notified_at = now() - interval '29 days' where tenant_id = '${tid}'`,
   );
-  cli('daily');
+  dailyJob();
   check(JSON.stringify(chatsLeft()) === ALL_RET, 'nor on day 29');
   sql(
     `update chat_retention_state set notified_at = now() - interval '31 days' where tenant_id = '${tid}'`,
   );
-  cli('daily');
+  dailyJob();
   check(
     JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']),
     `only the chat past its period goes (${chatsLeft().join(', ')})`,
@@ -1197,7 +1214,7 @@ try {
     'as counts, with no chat text',
   );
   const afterFirst = auditCount();
-  cli('daily');
+  dailyJob();
   check(
     JSON.stringify(chatsLeft()) === JSON.stringify(['ret-inside', 'ret-new', 'ret-revived']),
     'running it again deletes nothing more',
@@ -1212,7 +1229,7 @@ try {
     (await within(90, () => noticeMails(owner) === before + 2)) !== null,
     'and tells people by email',
   );
-  cli('daily');
+  dailyJob();
   check(chatsLeft().includes('ret-inside'), 'a chat between the two periods stays during the wait');
   const lengthened = await (await retentionCall('PUT', { months: 12 })).json();
   check(
@@ -1374,7 +1391,7 @@ try {
   });
   check(marginRefused.status === 403, "a company's own admin is refused the margin");
   await shot(provider, 'provider-margin');
-  cli('daily');
+  dailyJob();
   await provider.goto(`${consoleUrl}/provider/tenants`);
   await provider.locator('[data-testid=daily-job][data-state=ok]').waitFor();
   check(true, 'and that the daily job ran without problems');
